@@ -1,4 +1,6 @@
 // Original category dialogs, with only controls that TermForge can apply.
+import { COLOR_SCHEMES } from '../app/color-schemes.cjs';
+import { createSchemePreview } from './color-picker.js';
 import { installKeymapEditor, loadMappings, readMappings } from './keymap.js';
 const $ = (id) => document.getElementById(id);
 const node = (tag, className, text) => {
@@ -52,9 +54,10 @@ export function selectCategory(dialogId, category = 'connection') {
   $(`${dialogId}`).querySelector(`.category-item[data-category="${category}"]`)?.click();
 }
 
-const schemes = [['', 'Use Global Options'], ['traditional', 'Traditional (black)'], ['monochrome', 'Monochrome'], ['solarized-dark', 'Solarized dark'], ['solarized-light', 'Solarized light']];
+const schemes = [['', 'Use Global Options'], ...COLOR_SCHEMES.map(({ id, name }) => [id, name])];
+let profilePreview, settingsPreview;
 
-export function installOptionDialogs() {
+export function installOptionDialogs({ getSettings = () => ({}) } = {}) {
   const protocolSelect = field('profile-protocol-select', 'Protocol', 'select', { values: [['ssh', 'SSH2'], ['sftp', 'SFTP'], ['telnet', 'Telnet'], ['raw', 'Raw TCP'], ['serial', 'Serial'], ['local', 'Local shell']] });
   $('profile-dialog').querySelector('.protocol-picker').hidden = true;
   $('profile-dialog').querySelector('.protocol-picker').after(protocolSelect);
@@ -84,10 +87,21 @@ export function installOptionDialogs() {
   installKeymapEditor($('profile-mapped-keys'));
   categoryDialog('settings-dialog', [
     { id: 'general', label: 'General', elements: [] },
-    { id: 'appearance', label: 'Terminal', title: 'Terminal — Appearance', elements: [field('settings-font-family', 'Font family', 'text', { maxLength: 200 }), field('settings-color-scheme', 'Color scheme', 'select', { values: schemes.slice(1) }), field('settings-cursor', 'Cursor', 'select', { values: [['block', 'Block'], ['bar', 'Vertical bar'], ['underline', 'Underline']] }), field('settings-cursor-blink', 'Blink cursor', 'checkbox'), field('settings-bell', 'Bell', 'select', { values: [['none', 'None'], ['visual', 'Visual flash']] }), field('settings-word-delimiters', 'Word selection delimiters', 'text', { maxLength: 120 }), field('settings-close-exit', 'Close session tab when terminal exits', 'checkbox')] },
+    { id: 'appearance', label: 'Terminal', title: 'Terminal — Appearance', elements: [field('settings-font-family', 'Font family', 'text', { maxLength: 200 }), field('settings-color-scheme', 'Color scheme', 'select', { values: schemes.slice(1) }), field('settings-match-colors', 'Match interface to default scheme', 'checkbox'), field('settings-cursor', 'Cursor', 'select', { values: [['block', 'Block'], ['bar', 'Vertical bar'], ['underline', 'Underline']] }), field('settings-cursor-blink', 'Blink cursor', 'checkbox'), field('settings-bell', 'Bell', 'select', { values: [['none', 'None'], ['visual', 'Visual flash']] }), field('settings-word-delimiters', 'Word selection delimiters', 'text', { maxLength: 120 }), field('settings-close-exit', 'Close session tab when terminal exits', 'checkbox')] },
     { id: 'mouse', label: 'Mouse and paste', child: true, elements: [field('settings-copy-select', 'Copy selected terminal text automatically', 'checkbox'), field('settings-paste-right', 'Paste on right-click', 'checkbox'), field('settings-confirm-paste', 'Review multiline clipboard paste', 'checkbox'), field('settings-history-limit', 'Command history entries (0 disables)', 'number', { min: 0, max: 200 }), node('p', 'field-note', 'Command Window history is saved locally. Passwords entered directly into a terminal are not added to this history.')] },
     { id: 'keywords', label: 'Keyword Highlighting', child: true, elements: [field('settings-keywords-enabled', 'Enable keyword highlighting', 'checkbox'), node('p', 'field-note', 'Each rule matches literal words or substrings. Regular expressions are not yet supported.'), (() => { const editor = node('div'); editor.id = 'keyword-editor'; return editor; })(), (() => { const add = node('button', 'secondary-button', 'Add keyword'); add.type = 'button'; add.id = 'add-keyword'; return add; })()] }
   ]);
+  $('settings-dialog').querySelector('.settings-preview')?.remove();
+  profilePreview = createSchemePreview($('profile-color-scheme'), { getInheritedScheme: () => getSettings().colorScheme });
+  $('profile-color-scheme').closest('label').after(profilePreview.element);
+  settingsPreview = createSchemePreview($('settings-color-scheme'));
+  $('settings-color-scheme').closest('label').after(settingsPreview.element);
+  $('settings-match-colors').addEventListener('change', updateInterfaceChoice);
+}
+
+function updateInterfaceChoice() {
+  $('settings-theme').disabled = $('settings-match-colors').checked;
+  $('settings-theme').title = $('settings-match-colors').checked ? 'Interface colors follow the default scheme. Uncheck matching under Terminal to choose a separate interface.' : '';
 }
 
 export const sessionExtraFields = {
@@ -103,6 +117,7 @@ export function loadExtraProfile(profile = {}) {
     if (control.type === 'checkbox') control.checked = Boolean(value);
     else control.value = Array.isArray(value) ? value.join(', ') : value === null ? 'inherit' : String(value);
   }
+  profilePreview?.refresh();
 }
 
 export function readExtraProfile() {
@@ -120,6 +135,7 @@ export function readExtraProfile() {
 }
 
 export const globalExtraFields = {
+  'settings-match-colors': ['matchColorScheme', false],
   'settings-font-family': ['fontFamily', '"SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace'], 'settings-color-scheme': ['colorScheme', 'traditional'], 'settings-cursor': ['cursorStyle', 'block'], 'settings-cursor-blink': ['cursorBlink', true], 'settings-bell': ['bellStyle', 'none'], 'settings-word-delimiters': ['wordDelimiters', ' ()[]{}\'"'], 'settings-close-exit': ['closeOnExit', false], 'settings-copy-select': ['copyOnSelect', false], 'settings-paste-right': ['pasteOnRightClick', false], 'settings-confirm-paste': ['confirmPaste', true], 'settings-history-limit': ['commandHistoryLimit', 100], 'settings-keywords-enabled': ['keywordHighlightEnabled', true]
 };
 
@@ -127,6 +143,7 @@ export function loadExtraSettings(settings) {
   for (const [id, [key, fallback]] of Object.entries(globalExtraFields)) {
     if ($(id).type === 'checkbox') $(id).checked = Boolean(settings[key] ?? fallback); else $(id).value = String(settings[key] ?? fallback);
   }
+  settingsPreview?.refresh(); updateInterfaceChoice();
   $('keyword-editor').replaceChildren(); for (const rule of settings.keywords || []) addKeywordRule(rule);
 }
 

@@ -1,6 +1,12 @@
 # Security
 
-TermForge is in early development; version 0.3 is currently unreleased. It has not received an independent security audit and has no established support or security-update service. Historical Harbor v0.2 binaries have their own verification limits.
+TermForge is in early development. Version 0.3 is a published preview; version 0.4 is being prepared. It has not received an independent security audit and has no established support or security-update service. Each release has its own verification limits.
+
+## macOS preview approval
+
+The macOS preview uses an ad-hoc signature, without Apple Developer ID signing or notarization. A warning that Apple cannot verify the developer or check the app for malware is therefore expected. Windows preview packages are unsigned.
+
+For a trusted release copy, use the app-specific **Open Anyway** exception described in [the README](README.md#opening-the-macos-preview) and [Apple's official instructions](https://support.apple.com/en-us/102445). A warning that software will damage your computer is a different condition.
 
 ## Security boundary
 

@@ -91,7 +91,7 @@ function applicationMenu() {
       action('Clear Screen', 'clear-screen'), action('Reset Terminal', 'reset-terminal'), separator,
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, separator, { role: 'togglefullscreen' }
     ] },
-    { label: 'Options', submenu: [action('Session Options…', 'session-options'), action('Global Options…', 'settings'), action('Keyword Highlighting…', 'keyword-options')] },
+    { label: 'Options', submenu: [action('Session Options…', 'session-options'), action('Global Options…', 'settings'), action('Color Schemes…', 'color-schemes'), action('Keyword Highlighting…', 'keyword-options')] },
     { label: 'Transfer', submenu: [action('Open SFTP Session', 'sftp'), action('Send ASCII File…', 'send-ascii'), action('Send Break', 'send-break'), action('TFTP Server…', 'tftp-server'), separator, action('Log Session…', 'log'), action('Pause / Resume Log', 'pause-log')] },
     { label: 'Script', submenu: [action('Run Python Script…', 'script-run'), action('Cancel Running Script', 'script-cancel'), separator, action('Record Input…', 'script-record'), action('Script Output', 'script-output')] },
     { label: 'Tools', submenu: [action('Edit Button Bar…', 'snippets'), action('Import / Export…', 'import-export')] },

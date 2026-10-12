@@ -11,6 +11,9 @@ import { matchingMapping, decodeMappedText } from './keymap.js';
 import { createTransferUi } from './transfers.js';
 import './style.css';
 import './extensions.css';
+import { resolveColorScheme } from '../app/color-schemes.cjs';
+import { createColorPicker } from './color-picker.js';
+import { applyInterfaceColors, applyTerminalColors } from './appearance.js';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -35,6 +38,7 @@ let dragConnectionId = null;
 let quickKeyword = '';
 let notifiedActiveId = undefined;
 let editingSessionId = null;
+let editingConnectionId = null;
 let selectedProtocol = 'ssh';
 let isMac = true;
 let confirmResolver = null;
@@ -55,6 +59,15 @@ const workflows = createWorkflows({ api, getState: () => state, setState: (patch
 const scripts = createScriptUi({ api, getActiveId: () => activeId, toast });
 const recorder = createRecorder({ api, getConnection: () => connections.get(activeId), confirmAction, toast, changed: updateWorkspaceStatus });
 const transfers = createTransferUi({ api });
+const colorPicker = createColorPicker({
+  getSettings: () => state.settings,
+  async saveSettings(patch) {
+    const saved = await api.saveSettings({ ...state.settings, ...patch });
+    state.settings = saved;
+    applySettings();
+    toast('Color scheme saved. Open terminals updated.');
+  },
+});
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const iconPaths = {
   link: 'M9 14l6-6 M9 7l2-2a4 4 0 0 1 6 6l-2 2 M15 17l-2 2a4 4 0 0 1-6-6l2-2',
@@ -72,6 +85,7 @@ const iconPaths = {
   transfer: 'M3 5h7l2 2h9v13H3z M5 11h12 M14 8l3 3-3 3 M19 16H7 M10 13l-3 3 3 3',
   log: 'M5 3h11l3 3v15H5z M8 9h8 M8 13h8 M8 17h5 M15 3v4h4',
   tile: 'M3 3h8v8H3z M14 3h7v8h-7z M3 14h8v7H3z M14 14h7v7h-7z',
+  palette: 'M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.8h2a4 4 0 0 0 4-4c0-4.1-4-7.5-9-7.5 M7 10h.1 M10 6.5h.1 M15 7h.1 M18 10.5h.1',
   settings: 'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6',
   help: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4 M12 16v.1',
   import: 'M3 7h7l2 2h9v11H3z M3 7V5h8l2 2 M12 10v7 M9 14l3 3 3-3',
@@ -455,6 +469,7 @@ function addForwarding(forwarding = { type: 'local', listenPort: '', targetHost:
 
 function openProfileDialog(profile = null) {
   editingSessionId = profile?.id || null;
+  editingConnectionId = profile && !profile.id ? [...connections.values()].find(connection => connection.profile === profile)?.id || null : null;
   $('profile-form').reset();
   $('profile-dialog-title').textContent = profile ? `Session Options — ${profile.name}` : 'New Session';
   $('save-profile').textContent = profile ? 'Save changes' : 'Save session';
@@ -512,21 +527,24 @@ async function saveProfile(event) {
     for (const part of normalizeFolder(saved.folder).map((_, index, parts) => parts.slice(0, index + 1).join('/'))) collapsedFolders.delete(part);
     collapsedFolders.delete(''); renderSessions();
     workflows.refresh();
-    toast('Session saved. Double-click it in Session Manager to connect.');
+    let updated = false;
+    for (const connection of connections.values()) {
+      if (connection.profile.id !== saved.id && connection.id !== editingConnectionId) continue;
+      // Transport and keyboard settings belong to the running connection.
+      // Appearance can change without reopening it or clearing its output.
+      const terminal = { ...connection.profile.terminal };
+      for (const key of ['colorScheme', 'fontFamily', 'fontSize', 'cursorStyle', 'cursorBlink']) terminal[key] = saved.terminal?.[key];
+      connection.profile = { ...connection.profile, id: saved.id, terminal };
+      updated = true;
+    }
+    if (updated) { applySettings(); renderSessions(); }
+    toast(updated ? 'Session saved. Appearance updated; connection changes apply next time.' : 'Session saved. Double-click it in Session Manager to connect.');
   } catch (error) { selectCategory('profile-dialog', 'connection'); $('profile-error').textContent = errorMessage(error); $('profile-error').hidden = false; }
   finally { $('save-profile').disabled = false; }
 }
 
 function terminalTheme(profile = {}) {
-  const scheme = profile.terminal?.colorScheme || state.settings.colorScheme || 'traditional';
-  const base = {
-    background: '#000000', foreground: '#c0c0c0', cursor: '#c0c0c0', cursorAccent: '#000000', selectionBackground: '#375675',
-    black: '#000000', red: '#b94343', green: '#48a848', yellow: '#b8a841', blue: '#4477bb', magenta: '#a653a6', cyan: '#43a6a6', white: '#c0c0c0',
-    brightBlack: '#777777', brightRed: '#ef7676', brightGreen: '#75d475', brightYellow: '#e1d571', brightBlue: '#7c9fdf', brightMagenta: '#d78dd7', brightCyan: '#8bdada', brightWhite: '#ffffff',
-  };
-  if (scheme === 'monochrome') return { ...base, foreground: '#e4e4e4', cursor: '#ffffff', red: '#c0c0c0', green: '#c0c0c0', yellow: '#c0c0c0', blue: '#c0c0c0', magenta: '#c0c0c0', cyan: '#c0c0c0' };
-  if (scheme.startsWith('solarized')) return { ...base, background: scheme === 'solarized-light' ? '#fdf6e3' : '#002b36', foreground: scheme === 'solarized-light' ? '#657b83' : '#839496', cursor: '#93a1a1', cursorAccent: '#002b36', selectionBackground: '#586e7566', black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900', blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5', brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83', brightBlue: '#839496', brightMagenta: '#6c71c4', brightCyan: '#93a1a1', brightWhite: '#fdf6e3' };
-  return base;
+  return { ...resolveColorScheme(profile.terminal?.colorScheme, state.settings.colorScheme).theme };
 }
 
 function terminalOptions(profile = {}) {
@@ -544,9 +562,10 @@ function keywordSettings() {
 }
 
 function applySettings() {
-  document.documentElement.dataset.theme = state.settings.theme;
+  applyInterfaceColors(state.settings);
   for (const connection of connections.values()) {
     Object.assign(connection.term.options, terminalOptions(connection.profile));
+    applyTerminalColors(connection, state.settings.colorScheme);
     connection.highlight.refresh();
   }
   $('keyword-toggle').setAttribute('aria-pressed', String(state.settings.keywordHighlightEnabled !== false));
@@ -589,6 +608,7 @@ function createConnection(response, profile) {
   connections.set(response.id, connection);
   $('terminal-workspace').append(pane);
   term.open(mount);
+  applyTerminalColors(connection, state.settings.colorScheme);
   connection.highlight = attachKeywordHighlighting(term, keywordSettings);
   term.onData((data) => { if (connection.profile.terminal?.localEcho && !connection.exited) term.write(data.replace(/\r/g, '\r\n')); writeToConnection(connection, data); });
   term.onSelectionChange(() => { if (state.settings.copyOnSelect && term.hasSelection()) copySelection(connection); });
@@ -1100,6 +1120,7 @@ async function performAction(action) {
     case 'keyword-options': openSettings(); selectCategory('settings-dialog', 'keywords'); break;
     case 'snippets': openSnippets(); break;
     case 'settings': openSettings(); break;
+    case 'color-schemes': colorPicker.open(); break;
     case 'import-export': dialogOpen('import-dialog'); break;
     case 'copy': if (current) await copySelection(current); break;
     case 'paste': if (current) await pasteClipboard(current); break;
@@ -1131,7 +1152,7 @@ function menuDefinitions(name) {
     case 'file': return [item('Connect…', 'connect', Boolean(selected || selectedFolderPath !== null), 'Enter'), item('Quick Connect…', 'quick-connect'), item('New Session…', 'new-session'), item('Connect Bar', 'connect-bar'), item('Disconnect', 'disconnect', Boolean(current && !current.exited)), item('Reconnect', 'reconnect', Boolean(current && !current.reconnecting)), null, item('Local Shell', 'local-shell', true, `${mod}T`), item('Clone Session', 'clone-session', Boolean(current)), item('Close Tab', 'close-tab', Boolean(current), `${mod}W`), null, item('Snapshots…', 'snapshots'), item('Import / Export Sessions…', 'import-export')];
     case 'edit': return [item('Copy', 'copy', Boolean(current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(current)), null, item('Find…', 'find', Boolean(current), `${mod}F`), item('Configure Button Bar…', 'snippets')];
     case 'view': return [item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
-    case 'options': return [item('Session Options…', 'session-options', Boolean(actionProfile())), item('Global Options…', 'settings')];
+    case 'options': return [item('Session Options…', 'session-options', Boolean(actionProfile())), item('Global Options…', 'settings'), item('Color Schemes…', 'color-schemes')];
     case 'transfer': return [item('Open SFTP Session', 'sftp'), item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('SFTP Command Help…', 'help')];
     case 'script': return [item('Run Python Script…', 'script-run'), item('Cancel Script', 'script-cancel', scripts.hasRunning()), null, item(recorder.isRecording() ? 'Stop Recording…' : 'Record Input…', 'script-record', Boolean(current && !current.exited)), item('Script Output…', 'script-output')];
     case 'tools': return [item(current?.logging ? 'Stop Session Logging' : 'Log Session…', 'log', Boolean(current && !current.exited)), item(current?.logPaused ? 'Resume Log' : 'Pause Log', 'pause-log', Boolean(current && current.logging && !current.exited)), item('Configure Button Bar…', 'snippets'), item('Keyword Highlighting…', 'keyword-options'), null, item('Clear Screen', 'clear-screen', Boolean(current)), item('Reset Terminal', 'reset-terminal', Boolean(current)), item('Clear Command History…', 'clear-history'), null, item('Import / Export Sessions…', 'import-export')];
@@ -1207,7 +1228,7 @@ function setupMenus() {
 }
 
 function setupHandlers() {
-  installOptionDialogs(); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install();
+  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install();
   $('profile-form').noValidate = true; $('settings-form').noValidate = true;
   addToolbarIcons(); setupMenus(); setupSplitters(); loadLayout();
   $('settings-font').min = '8'; $('settings-font').max = '72'; $('settings-scrollback').max = '128000';
@@ -1231,7 +1252,7 @@ function setupHandlers() {
     catch (error) { toast(errorMessage(error), true); }
   });
   bind('button-bar-select', 'change', () => { selectedButtonBar = $('button-bar-select').value; renderSnippets(); });
-  const toolbarActions = { 'connect-session': 'connect', 'sidebar-connect': 'connect', 'disconnect-session': 'disconnect', 'reconnect-session': 'reconnect', 'session-options': 'session-options', 'sidebar-properties': 'session-options', 'copy-terminal': 'copy', 'paste-terminal': 'paste', 'find-terminal': 'find', 'sftp-session': 'sftp', 'session-log': 'log' };
+  const toolbarActions = { 'color-schemes-button': 'color-schemes', 'connect-session': 'connect', 'sidebar-connect': 'connect', 'disconnect-session': 'disconnect', 'reconnect-session': 'reconnect', 'session-options': 'session-options', 'sidebar-properties': 'session-options', 'copy-terminal': 'copy', 'paste-terminal': 'paste', 'find-terminal': 'find', 'sftp-session': 'sftp', 'session-log': 'log' };
   for (const [id, action] of Object.entries(toolbarActions)) bind(id, 'click', () => runAction(action));
   bind('close-session-manager', 'click', () => setPane('sessionManager', false));
   bind('close-command-window', 'click', () => setPane('commandWindow', false));
@@ -1239,7 +1260,7 @@ function setupHandlers() {
   for (const id of ['add-session-sidebar', 'new-session', 'welcome-new']) bind(id, 'click', () => runAction('new-session'));
   for (const id of ['quick-local', 'welcome-local']) bind(id, 'click', localShell);
   for (const button of document.querySelectorAll('.dialog-close')) button.addEventListener('click', () => button.closest('dialog').close());
-  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', (event) => {
+  for (const dialog of document.querySelectorAll('dialog:not(#color-scheme-dialog)')) dialog.addEventListener('click', (event) => {
     if (event.target !== dialog) return;
     const rect = dialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();

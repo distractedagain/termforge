@@ -1,0 +1,20 @@
+/* Each terminal owns its background, including the space around xterm. */
+.workspace,.terminal-workspace:not(.tiles),.terminal-pane,.terminal-mount,.welcome{background:var(--terminal-background,#000)}
+.terminal-mount .xterm-viewport{background:var(--terminal-background,#000)}
+.welcome,.welcome .disconnected-label,.welcome .empty-terminal-message{color:var(--terminal-foreground,#c0c0c0)}
+.empty-terminal-actions .secondary-button{background:var(--terminal-background);color:var(--terminal-foreground);border-color:var(--terminal-foreground)}
+.empty-terminal-actions .secondary-button:hover{background:var(--terminal-selection);color:var(--terminal-selection-text)}
+
+/* Keep the familiar desktop layout; only its optional colors change. */
+:root[data-platform="darwin"] .main-toolbar #color-schemes-button{display:flex;order:2}
+:root[data-match-colors="true"] .primary-button{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--border)}
+:root[data-match-colors="true"] .menu-item:hover:enabled,:root[data-match-colors="true"] .menu-item:focus-visible{border-color:var(--accent)}
+:root[data-match-colors="true"] .dock-tab,
+:root[data-platform="darwin"][data-match-colors="true"] .dock-tab{background:var(--panel);color:var(--text);border-color:var(--border)}
+:root[data-match-colors="true"] .dock-tab.selected,
+:root[data-platform="darwin"][data-match-colors="true"] .dock-tab.selected{background:var(--select);border-color:var(--accent)}
+:root[data-match-colors="true"] .tool-icon{color:var(--text)}
+:root[data-match-colors="true"] .folder-icon,
+:root[data-match-colors="true"] .folder-icon:before{background:var(--select);border-color:var(--accent)}
+:root[data-match-colors="true"] .session-icon{background:var(--field);border-color:var(--accent);color:var(--accent)}
+:root[data-match-colors="true"] .session-icon:after{background:var(--accent)}

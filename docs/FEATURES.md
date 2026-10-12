@@ -6,7 +6,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
-| Desktop | Electron with native PTYs and socket/device adapters; native CI/package checks passed on all four targets | Interactive packaged-app runtime verification pending |
+| Desktop | Electron with native PTYs and socket/device adapters; native CI/package checks passed on all four targets | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
 | Terminal | xterm.js scrollback, selection, resize, search, per-session fonts/schemes/cursor | TERM hints do not create distinct VT/ANSI engines; specialized emulations remain missing |
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Installed system OpenSSH | Installed client/server determine authentication and algorithm support; no authentication-state detector |
@@ -27,6 +27,18 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Jump / tunnels | One OpenSSH jump and loopback-requested local/remote/dynamic forwarding | No gateway session graph/multiple hops; server policy may reject or alter forwarding |
 | Configuration | Version-2 JSON with version-1 schema migration, commands/history/snapshots; limited plain SSH2 INI import | No CSV/text wizard, broad XML compatibility, encrypted-secret recovery or full conflict-policy UI |
 
+## In-development source — 0.4 color schemes
+
+| Workflow | Source implementation | Limits |
+| --- | --- | --- |
+| Palette selection | Options → Color Schemes and palette toolbar button; seven named presets with ANSI samples | Current published v0.3 download does not include the new picker |
+| Terminal palette | Sixteen normal/bright ANSI colors, foreground/background, cursor/accent, active/inactive selection | Programs with explicit RGB colors or their own themes may retain those colors |
+| Global and session colors | Global default plus per-session override or inheritance; saved appearance changes update open matching terminals | Connection settings still take effect on the next connection |
+| Matching interface | Optional toolbars, managers, tabs, dialogs and status colors based on the global default | Per-session palettes do not recolor the interface; operating-system UI remains system controlled |
+| Preview and save | Local xterm sample, keyboard radio selection, Apply/Cancel/Escape, inline save errors | Preview opens no shell or connection; changes apply only after a successful save |
+
+The presets are Traditional, Monochrome, Solarized Dark, Solarized Light, Forge Dark, Forge Light, and High Contrast. The Solarized variants follow [Ethan Schoonover's original sRGB palette and ANSI assignments](https://ethanschoonover.com/solarized/). Read [Color Schemes](COLOR-SCHEMES.md) for the controls, inheritance rules, and display limits.
+
 ## Remaining gaps
 
 SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, full credential/key/host-key management, advanced named proxies, X/Y/Zmodem/Kermit, printing, automatic logging/rotation, complete automation compatibility, and SecureFX integration remain missing or incomplete. The macOS layout choice does not remove applicable Windows/Linux capabilities from the overall goal.
@@ -41,7 +53,9 @@ On October 12, 2026, the 0.3 feature batch passed **84 local backend tests and 4
 
 [Native CI](https://github.com/distractedagain/termforge/actions/runs/38320236458) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38320240854) succeeded at released commit `09abaaefbb440d0600647ac389e32f72dca98700`: both Macs and Linux passed 84 tests each; Windows passed 81 and skipped three POSIX-specific checks. Linux passed 46 headless interface checks, and both Mac packages passed strict recursive ad-hoc signature checks. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38320923229) verified eight packages and four build records before public release; the public manifest and build records were independently downloaded and checked against GitHub asset digests.
 
-Interactive testing of the new packaged desktop app remains pending. Real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability still require integration coverage. Historical Harbor 0.1 macOS Intel checks established real local PTYs and isolated OpenSSH new-host/password/changed-key behavior; Harbor 0.2 passed source/package CI and 20 synthetic interface checks. Those results apply to historical source/packages. A generated installer does not verify every workflow.
+A user reported successful launch, local-shell use, and an SSH connection in the installed v0.3 macOS app. This limited manual evidence does not establish a complete native runtime test matrix. Real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability still require integration coverage. Historical Harbor 0.1 macOS Intel checks established real local PTYs and isolated OpenSSH new-host/password/changed-key behavior; Harbor 0.2 passed source/package CI and 20 synthetic interface checks. Those results apply to historical source/packages. A generated installer does not verify every workflow.
+
+The 0.4 source passed **92 backend tests and 63 headless renderer checks**, with no failures or browser console errors. Coverage includes complete palette definitions, strict saved-setting validation, inheritance and persistence, real xterm previews, cancellation and asynchronous save handling, interface matching, and live terminal updates. Headless renderer coverage uses a synthetic application bridge and does not prove packaged native rendering or live remote interoperability. Native CI, packaging, and release verification will be recorded separately.
 
 [TermForge v0.3.0 preview downloads](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) are public; historical v0.2 downloads remain separately available. macOS packages have ad-hoc signatures without Developer ID/notarization; Windows packages are unsigned. Automatic updates and a maintenance service are not included. Source/test and distribution provenance must be verified for each new release.
 

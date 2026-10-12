@@ -262,6 +262,16 @@ Each row remains **Partial** for the complete referenced requirement. The narrow
 
 Local verification at this checkpoint: **84/84 backend tests and 46/46 headless renderer checks passed**. Native CI, packaging and public v0.3 publication were verified at the exact released commit, as recorded in N7/N8. Interactive packaged runtime and the remaining acceptance gates are still pending. Keep version-specific verification boundaries; neither a test count nor a successful screenshot is a feature-parity certification.
 
+## Color-scheme update: TermForge 0.4 source
+
+The shared palette catalogue now supplies seven named presets, including canonical Solarized Dark and Light. Every preset defines foreground/background, all sixteen ANSI slots, cursor/accent and active/inactive selection colors. Options → Color Schemes and a palette toolbar button expose preview-only selection, keyboard navigation, Apply/Cancel and recoverable save errors. Global and per-session appearance pages share the same catalogue and ANSI previews; Multiple Session Options offers every preset for future connections.
+
+A global scheme updates inheriting live terminals, including their surrounding background. Explicit session overrides remain intact. Saving Session Options updates the matching saved session's open terminals, or the exact originating unsaved terminal, without replacing its transport. Optional interface matching follows the global palette; disabling it restores the saved independent light/dark interface.
+
+The local backend suite passed **92 tests** with no failures or skips. Eight palette tests cover canonical ANSI values, cursor/selection contrast, inheritance, strict setting validation, persistence/import/export and older configuration loading. The renderer passed **63 headless checks** with no failures or console errors, including actual ANSI cell colors, live saved/unsaved-session targeting, optional matching chrome, preview cancellation, save errors, and compact picker layout. These use a synthetic bridge; native build evidence will be recorded separately. These changes advance TE-10, but custom palette editing, external palette import, full SecureCRT appearance equivalence and packaged color testing remain unverified or incomplete.
+
+Separately, the user reported that installed v0.3 opened on macOS and that local-shell and SSH use worked. This is limited user-reported runtime evidence, not a full native test matrix or evidence for v0.4.
+
 ## Required comparison and completion gates
 
 1. Capture an authorized SecureCRT 9.7 macOS reference set: empty window, connected session, all menus/context menus, each Global/Session Options page, manager docking states, grouped tabs, Command Manager, transfers, script/credential/key dialogs, light/dark, and multiple display scales. Redact user data. Reference screenshots are analysis inputs, not bundled artwork.

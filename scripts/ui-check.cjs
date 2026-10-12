@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const core = require('../app/core.cjs');
+const { COLOR_SCHEME_IDS } = require('../app/color-schemes.cjs');
 const { recordedInputToPython } = require('../app/automation.cjs');
 const { createTftpServer } = require('../app/tftp.cjs');
 const installFixture = require('./ui-fixture.cjs');
@@ -42,7 +43,7 @@ const server = http.createServer(async (request, response) => {
   } catch { response.writeHead(404).end(); }
 });
 
-async function pageFor(platform = 'darwin', settings = {}) {
+async function pageFor(platform = 'darwin', settings = {}, sessionProfiles = profiles) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   pages.add(page); page.setDefaultTimeout(10000);
   page.on('pageerror', error => consoleErrors.push({ platform, message: error.message }));
@@ -56,7 +57,7 @@ async function pageFor(platform = 'darwin', settings = {}) {
   // Only construct and inspect this validator. Never call server.start(): the
   // UI fixture must not bind UDP or serve any actual folder.
   await page.exposeFunction('__validateTftp', ({ clientAddress, bindAddress, port, allowWrite }) => createTftpServer({ root: path.join(output, 'synthetic-tftp-root'), clientAddress, bindAddress, port, allowWrite }).status());
-  await page.addInitScript(installFixture, { platform, settings: core.validateSettings({ ...core.DEFAULT_SETTINGS, ...settings }), sessions: profiles, snippets });
+  await page.addInitScript(installFixture, { platform, settings: core.validateSettings({ ...core.DEFAULT_SETTINGS, ...settings }), sessions: sessionProfiles, snippets });
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(platform => document.documentElement.dataset.platform === platform, platform);
   await page.locator('#session-search').waitFor({ state: 'visible' });
@@ -108,6 +109,271 @@ async function dimensions(page) {
     const rect = id => { const element = document.getElementById(id); const box = element.getBoundingClientRect(); return { x: box.x, y: box.y, width: box.width, height: box.height, right: box.right, bottom: box.bottom }; };
     return { viewport: { width: innerWidth, height: innerHeight }, body: { width: document.body.scrollWidth, height: document.body.scrollHeight }, toolbar: rect('main-toolbar'), manager: rect('session-manager'), terminal: rect('terminal-workspace'), footer: document.querySelector('.workspace-footer').getBoundingClientRect().toJSON() };
   });
+}
+
+// These checks observe rendered elements and the existing in-memory bridge. No
+// terminal internals or production-only debug API are exposed to the test page.
+async function trackColorSaves(page) {
+  await page.evaluate(() => {
+    const save = window.termforge.saveSettings;
+    window.__qa.colorSaves = [];
+    window.__qa.failColorSave = false;
+    window.termforge.saveSettings = async settings => {
+      window.__qa.colorSaves.push(JSON.parse(JSON.stringify(settings)));
+      if (window.__qa.holdColorSave) await new Promise(resolve => { window.__qa.releaseColorSave = resolve; });
+      if (window.__qa.failColorSave) throw new Error('Synthetic color settings write failed.');
+      return save(settings);
+    };
+  });
+}
+async function colorState(page) {
+  return page.evaluate(() => ({
+    settings: window.__qa.getState().settings,
+    saves: JSON.parse(JSON.stringify(window.__qa.colorSaves)),
+    opens: window.__qa.calls.opens.length, writes: window.__qa.calls.writes.length,
+    closes: window.__qa.calls.closes.length,
+    theme: document.documentElement.dataset.theme,
+    body: getComputedStyle(document.body).backgroundColor,
+    chrome: getComputedStyle(document.documentElement).getPropertyValue('--chrome').trim(),
+  }));
+}
+async function selectPalette(page, id, matching) {
+  await page.locator(`#color-scheme-grid input[type="radio"][value="${id}"]`).check();
+  if (matching !== undefined) await page.locator('#color-scheme-match-interface').setChecked(matching);
+}
+async function applyPalette(page, id, matching) {
+  await nativeDialog(page, 'color-schemes', 'color-scheme-dialog');
+  await selectPalette(page, id, matching);
+  await page.locator('#color-scheme-apply').click();
+  await page.locator('#color-scheme-dialog').waitFor({ state: 'hidden' });
+}
+async function terminalColors(page, id) {
+  return page.locator(`.terminal-pane[data-connection-id="${id}"]`).evaluate(pane => ({
+    scheme: pane.dataset.colorScheme,
+    variable: getComputedStyle(pane).getPropertyValue('--terminal-background').trim(),
+    pane: getComputedStyle(pane).backgroundColor,
+    mount: getComputedStyle(pane.querySelector('.terminal-mount')).backgroundColor,
+    viewport: getComputedStyle(pane.querySelector('.xterm-viewport')).backgroundColor,
+  }));
+}
+async function expectTerminalColor(page, id, scheme, color, rgb) {
+  await page.waitForFunction(({ id, scheme, rgb }) => {
+    const pane = document.querySelector(`.terminal-pane[data-connection-id="${id}"]`);
+    return pane?.dataset.colorScheme === scheme && getComputedStyle(pane.querySelector('.xterm-viewport')).backgroundColor === rgb;
+  }, { id, scheme, rgb });
+  const actual = await terminalColors(page, id);
+  assert.deepEqual(actual, { scheme, variable: color, pane: rgb, mount: rgb, viewport: rgb });
+  return actual;
+}
+async function expectSolarizedAnsi(page, id) {
+  const actual = await page.locator(`.terminal-pane[data-connection-id="${id}"]`).evaluate(pane => Object.fromEntries([['red', 1], ['green', 2], ['brightBlack', 8]].map(([name, index]) => [name, getComputedStyle(pane.querySelector(`.xterm-fg-${index}`)).color])));
+  assert.deepEqual(actual, { red: 'rgb(220, 50, 47)', green: 'rgb(133, 153, 0)', brightBlack: 'rgb(0, 43, 54)' });
+  return actual;
+}
+async function runColorChecks() {
+  const colors = await pageFor('darwin', { theme: 'light' });
+  await trackColorSaves(colors);
+  await check('Color Schemes opens from the toolbar without an active connection and lists every preset', colors, async () => {
+    await colors.locator('#color-schemes-button').click();
+    await colors.locator('#color-scheme-dialog').waitFor({ state: 'visible' });
+    assert.deepEqual(await colors.locator('#color-scheme-grid input[type="radio"]').evaluateAll(inputs => inputs.map(input => input.value)), COLOR_SCHEME_IDS);
+    assert.equal(await colors.locator('#color-scheme-grid input:checked').inputValue(), 'traditional');
+    assert.equal(await colors.locator('#color-scheme-match-interface').isChecked(), false);
+    assert.equal((await calls(colors)).opens.length, 0);
+    await colors.locator('#color-scheme-cancel').click();
+  });
+  await check('Palette preview and Cancel leave saved colors, interface, and connection activity unchanged', colors, async () => {
+    const before = await colorState(colors);
+    await nativeDialog(colors, 'color-schemes', 'color-scheme-dialog');
+    await selectPalette(colors, 'solarized-dark', true);
+    await colors.waitForFunction(() => getComputedStyle(document.getElementById('color-scheme-preview')).backgroundColor === 'rgb(0, 43, 54)');
+    assert.equal(await colors.locator('#color-scheme-preview .xterm-viewport').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(0, 43, 54)');
+    assert.deepEqual(await colorState(colors), before);
+    await colors.locator('#color-scheme-cancel').click();
+    assert.deepEqual(await colorState(colors), before);
+  });
+  await check('Keyboard radio selection previews a palette and Escape discards it', colors, async () => {
+    const before = await colorState(colors);
+    await nativeDialog(colors, 'color-schemes', 'color-scheme-dialog');
+    const first = colors.locator('#color-scheme-grid input[type="radio"]').first();
+    await first.focus(); await colors.keyboard.press('ArrowRight');
+    assert.equal(await colors.locator('#color-scheme-grid input:checked').inputValue(), COLOR_SCHEME_IDS[1]);
+    await colors.keyboard.press('Escape');
+    await colors.locator('#color-scheme-dialog').waitFor({ state: 'hidden' });
+    assert.deepEqual(await colorState(colors), before);
+  });
+  await check('Solarized can be saved without a connection and restores its preferences when reopened', colors, async () => {
+    await applyPalette(colors, 'solarized-dark', true);
+    const actual = await colorState(colors);
+    assert.equal(actual.settings.colorScheme, 'solarized-dark'); assert.equal(actual.settings.matchColorScheme, true);
+    assert.equal(actual.settings.theme, 'light'); assert.equal(actual.saves.length, 1);
+    assert.equal(actual.body, 'rgb(7, 54, 66)'); assert.equal(actual.chrome, '#073642');
+    assert.equal(actual.opens, 0); assert.equal(actual.writes, 0); assert.equal(actual.closes, 0);
+    await nativeDialog(colors, 'color-schemes', 'color-scheme-dialog');
+    assert.equal(await colors.locator('#color-scheme-grid input:checked').inputValue(), 'solarized-dark');
+    assert.equal(await colors.locator('#color-scheme-match-interface').isChecked(), true);
+    await colors.locator('#color-scheme-cancel').click();
+    const reopened = await pageFor('darwin', actual.settings);
+    await trackColorSaves(reopened);
+    const restored = await colorState(reopened);
+    assert.equal(restored.body, actual.body); assert.equal(restored.chrome, actual.chrome); assert.deepEqual(restored.settings, actual.settings);
+    const terminal = await openProfile(reopened);
+    return expectTerminalColor(reopened, terminal.id, 'solarized-dark', '#002b36', 'rgb(0, 43, 54)');
+  });
+  const explicitProfiles = profiles.map(profile => profile.id === 'fixture-switch' ? core.validateSession({ ...profile, terminal: { ...profile.terminal, colorScheme: 'monochrome' } }) : profile);
+  const active = await pageFor('darwin', { theme: 'dark' }, explicitProfiles);
+  await trackColorSaves(active);
+  const originalChrome = (await colorState(active)).body;
+  const inherited = await openProfile(active);
+  const explicit = await openProfile(active, 'switch-01');
+  await action(active, 'tile-vertical');
+  await check('Applying Solarized Dark recolors existing terminals and padding while preserving explicit session colors', active, async () => {
+    const before = await colorState(active);
+    await applyPalette(active, 'solarized-dark', false);
+    const inheritedColor = await expectTerminalColor(active, inherited.id, 'solarized-dark', '#002b36', 'rgb(0, 43, 54)');
+    const explicitColor = await expectTerminalColor(active, explicit.id, 'monochrome', '#000000', 'rgb(0, 0, 0)');
+    const after = await colorState(active);
+    assert.equal(after.opens, before.opens); assert.equal(after.writes, before.writes); assert.equal(after.closes, before.closes); assert.equal(after.body, originalChrome);
+    assert.equal(after.saves.length, before.saves.length + 1);
+    return { inherited: inheritedColor, explicit: explicitColor };
+  });
+  await check('Solarized Dark ANSI cells render the canonical red, green, and bright-black palette', active, async () => {
+    await active.evaluate(id => window.__qa.emitData(id, '\x1b[2J\x1b[H\x1b[0;31mR\x1b[32mG\x1b[90mK\x1b[0m'), inherited.id);
+    await active.locator(`.terminal-pane[data-connection-id="${inherited.id}"] .xterm-fg-8`).waitFor({ state: 'attached' });
+    return expectSolarizedAnsi(active, inherited.id);
+  });
+  await check('Applying Solarized Light switches live xterm backgrounds without reconnecting', active, async () => {
+    const before = await colorState(active);
+    await applyPalette(active, 'solarized-light', true);
+    const inheritedColor = await expectTerminalColor(active, inherited.id, 'solarized-light', '#fdf6e3', 'rgb(253, 246, 227)');
+    await expectTerminalColor(active, explicit.id, 'monochrome', '#000000', 'rgb(0, 0, 0)');
+    const after = await colorState(active);
+    assert.equal(after.settings.theme, 'dark'); assert.equal(after.body, 'rgb(238, 232, 213)'); assert.equal(after.chrome, '#eee8d5');
+    assert.equal(after.opens, before.opens); assert.equal(after.writes, before.writes); assert.equal(after.closes, before.closes);
+    return { ...inheritedColor, ansi: await expectSolarizedAnsi(active, inherited.id) };
+  });
+  await check('Turning interface matching off restores the original desktop theme and retains terminal colors', active, async () => {
+    await applyPalette(active, 'solarized-light', false);
+    const after = await colorState(active);
+    assert.equal(after.settings.theme, 'dark'); assert.equal(after.theme, 'dark'); assert.equal(after.settings.matchColorScheme, false); assert.equal(after.body, originalChrome);
+    await expectTerminalColor(active, inherited.id, 'solarized-light', '#fdf6e3', 'rgb(253, 246, 227)');
+  });
+  await check('A pending color save prevents duplicate apply or dismissal and commits only after success', active, async () => {
+    const before = await colorState(active); const beforeTerminal = await terminalColors(active, inherited.id);
+    await active.evaluate(() => { window.__qa.holdColorSave = true; });
+    await nativeDialog(active, 'color-schemes', 'color-scheme-dialog'); await selectPalette(active, 'solarized-light', true);
+    await active.locator('#color-scheme-apply').click();
+    await active.waitForFunction(() => typeof window.__qa.releaseColorSave === 'function');
+    for (const id of ['color-scheme-apply', 'color-scheme-cancel', 'color-scheme-match-interface']) assert.equal(await active.locator(`#${id}`).isDisabled(), true);
+    assert.equal(await active.locator('#color-scheme-grid input[type="radio"]').first().isDisabled(), true);
+    await active.keyboard.press('Escape'); assert.equal(await active.locator('#color-scheme-dialog').isVisible(), true);
+    const pending = await colorState(active); assert.deepEqual({ ...pending, saves: before.saves }, before);
+    assert.equal(pending.saves.length, before.saves.length + 1); assert.deepEqual(await terminalColors(active, inherited.id), beforeTerminal);
+    await active.evaluate(() => { window.__qa.holdColorSave = false; window.__qa.releaseColorSave(); delete window.__qa.releaseColorSave; });
+    await active.locator('#color-scheme-dialog').waitFor({ state: 'hidden' });
+    assert.equal((await colorState(active)).settings.matchColorScheme, true);
+  });
+  await check('Color settings failures retain existing application and terminal colors until a successful retry', active, async () => {
+    const before = await colorState(active); const beforeTerminal = await terminalColors(active, inherited.id);
+    await active.evaluate(() => { window.__qa.failColorSave = true; });
+    await nativeDialog(active, 'color-schemes', 'color-scheme-dialog'); await selectPalette(active, 'solarized-dark', true);
+    await active.locator('#color-scheme-apply').click(); await active.locator('#color-scheme-error').waitFor({ state: 'visible' });
+    assert.ok((await active.locator('#color-scheme-error').innerText()).includes('Synthetic color settings write failed'));
+    const after = await colorState(active);
+    assert.deepEqual({ ...after, saves: before.saves }, before); assert.equal(after.saves.length, before.saves.length + 1);
+    assert.deepEqual(await terminalColors(active, inherited.id), beforeTerminal); assert.equal(await active.locator('#color-scheme-dialog').isVisible(), true);
+    assert.equal(await active.locator('#color-scheme-apply').isDisabled(), false);
+    await active.evaluate(() => { window.__qa.failColorSave = false; });
+    await active.locator('#color-scheme-apply').click(); await active.locator('#color-scheme-dialog').waitFor({ state: 'hidden' });
+    await expectTerminalColor(active, inherited.id, 'solarized-dark', '#002b36', 'rgb(0, 43, 54)');
+  });
+  await check('Global and per-session appearance controls expose all schemes and persist interface matching', active, async () => {
+    await nativeDialog(active, 'settings', 'settings-dialog'); await active.locator('#settings-dialog .category-item[data-category="appearance"]').click();
+    assert.deepEqual(await active.locator('#settings-color-scheme option').evaluateAll(options => options.map(option => option.value)), COLOR_SCHEME_IDS);
+    assert.equal(await active.locator('#settings-match-colors').isChecked(), true);
+    await active.locator('#settings-color-scheme').selectOption('forge-light');
+    await active.waitForFunction(() => document.querySelector('#settings-dialog .scheme-ansi-preview')?.dataset.scheme === 'forge-light');
+    await active.locator('#settings-match-colors').uncheck(); await active.locator('#settings-form [type="submit"]').click(); await active.locator('#settings-dialog').waitFor({ state: 'hidden' });
+    const saved = (await state(active)).settings; assert.equal(saved.colorScheme, 'forge-light'); assert.equal(saved.matchColorScheme, false);
+    await active.locator('#dock-sessions').click(); await active.locator('.session-main').filter({ hasText: 'switch-01' }).click();
+    await nativeDialog(active, 'session-options', 'profile-dialog'); await active.locator('#profile-dialog .category-item[data-category="appearance"]').click();
+    assert.deepEqual(await active.locator('#profile-color-scheme option').evaluateAll(options => options.map(option => option.value)), ['', ...COLOR_SCHEME_IDS]);
+    assert.equal(await active.locator('#profile-color-scheme').inputValue(), 'monochrome');
+    await active.locator('#profile-color-scheme').selectOption('solarized-dark');
+    await active.waitForFunction(() => document.querySelector('#profile-dialog .scheme-ansi-preview')?.dataset.scheme === 'solarized-dark');
+    await active.locator('#profile-color-scheme').selectOption('');
+    await active.waitForFunction(() => document.querySelector('#profile-dialog .scheme-ansi-preview')?.dataset.scheme === 'forge-light');
+    await closeDialog(active, 'profile-dialog');
+    assert.equal((await state(active)).sessions.find(profile => profile.id === 'fixture-switch').terminal.colorScheme, 'monochrome');
+  });
+  await check('Saving a per-session scheme immediately recolors every open copy of only that profile', active, async () => {
+    const anotherExplicit = await openProfile(active, 'switch-01');
+    const before = await colorState(active); const beforeInherited = await terminalColors(active, inherited.id);
+    await nativeDialog(active, 'session-options', 'profile-dialog'); await active.locator('#profile-dialog .category-item[data-category="appearance"]').click();
+    await active.locator('#profile-color-scheme').selectOption('solarized-light'); await active.locator('#save-profile').click();
+    await active.locator('#profile-dialog').waitFor({ state: 'hidden' });
+    for (const connection of [explicit, anotherExplicit]) await expectTerminalColor(active, connection.id, 'solarized-light', '#fdf6e3', 'rgb(253, 246, 227)');
+    assert.deepEqual(await terminalColors(active, inherited.id), beforeInherited);
+    assert.deepEqual(await colorState(active), before);
+    assert.equal((await state(active)).sessions.find(profile => profile.id === 'fixture-switch').terminal.colorScheme, 'solarized-light');
+  });
+  const unsaved = await pageFor('darwin', {}, []);
+  await trackColorSaves(unsaved);
+  await check('Session colors target the originating unsaved local tab without changing another unsaved tab', unsaved, async () => {
+    await action(unsaved, 'local-shell'); await unsaved.waitForFunction(() => window.__qa.calls.opens.length === 1);
+    const first = (await calls(unsaved)).opens[0];
+    await action(unsaved, 'local-shell'); await unsaved.waitForFunction(() => window.__qa.calls.opens.length === 2);
+    const second = (await calls(unsaved)).opens[1];
+    const before = await colorState(unsaved); const firstColors = await terminalColors(unsaved, first.id);
+    assert.equal((await state(unsaved)).sessions.length, 0);
+    await nativeDialog(unsaved, 'session-options', 'profile-dialog'); await unsaved.locator('#profile-name').fill('Saved color demo shell');
+    await unsaved.locator('#profile-dialog .category-item[data-category="appearance"]').click(); await unsaved.locator('#profile-color-scheme').selectOption('solarized-dark');
+    await unsaved.locator('#save-profile').click(); await unsaved.locator('#profile-dialog').waitFor({ state: 'hidden' });
+    await expectTerminalColor(unsaved, second.id, 'solarized-dark', '#002b36', 'rgb(0, 43, 54)');
+    assert.deepEqual(await terminalColors(unsaved, first.id), firstColors); assert.deepEqual(await colorState(unsaved), before);
+    const saved = (await state(unsaved)).sessions; assert.equal(saved.length, 1); assert.equal(saved[0].terminal.colorScheme, 'solarized-dark');
+  });
+  await check('Multiple Session Options exposes every palette and persists the chosen color only for selected profiles', active, async () => {
+    const before = await state(active);
+    await active.locator('#dock-sessions').click(); await active.locator('.session-main').filter({ hasText: 'router-01' }).click();
+    await active.locator('.session-main').filter({ hasText: 'switch-01' }).click({ modifiers: ['Meta'] });
+    await nativeDialog(active, 'session-options', 'bulk-dialog');
+    assert.deepEqual(await active.locator('#bulk-color option').evaluateAll(options => options.map(option => option.value)), ['', ...COLOR_SCHEME_IDS]);
+    await active.locator('#bulk-color-enable').check(); await active.locator('#bulk-color').selectOption('high-contrast'); await active.locator('#bulk-save').click();
+    await active.locator('#bulk-dialog').waitFor({ state: 'hidden' });
+    const after = await state(active);
+    for (const id of ['fixture-router', 'fixture-switch']) assert.equal(after.sessions.find(profile => profile.id === id).terminal.colorScheme, 'high-contrast');
+    assert.deepEqual(after.sessions.find(profile => profile.id === 'fixture-local'), before.sessions.find(profile => profile.id === 'fixture-local'));
+  });
+  await check('Color scheme picker and its Apply button fit an 850 by 600 viewport', colors, async () => {
+    await colors.setViewportSize({ width: 850, height: 600 });
+    await nativeDialog(colors, 'color-schemes', 'color-scheme-dialog');
+    const boxes = await colors.evaluate(() => Object.fromEntries(['color-scheme-dialog', 'color-scheme-apply', 'color-scheme-cancel'].map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()])));
+    assert.ok(boxes['color-scheme-dialog'].width >= 740, 'The full two-column color picker should retain its intended width.');
+    for (const box of Object.values(boxes)) { assert.ok(box.x >= 0 && box.y >= 0); assert.ok(box.right <= 850 && box.bottom <= 600); }
+    assert.equal(await colors.locator('#color-scheme-apply').isVisible(), true);
+    await screenshot(colors, 'macos-color-picker-850x600'); await colors.locator('#color-scheme-cancel').click();
+    await colors.setViewportSize({ width: 1280, height: 800 }); return boxes;
+  });
+  for (const platform of ['win32', 'linux']) {
+    const desktop = await pageFor(platform);
+    await check(`${platform} Options menu opens color schemes without a session`, desktop, async () => {
+      await desktop.locator('[data-menu="options"]').click();
+      await desktop.locator('#menu-dropdown .menu-item').filter({ hasText: 'Color Schemes' }).click();
+      await desktop.locator('#color-scheme-dialog').waitFor({ state: 'visible' });
+      assert.equal(await desktop.locator('#color-scheme-grid input[type="radio"]').count(), COLOR_SCHEME_IDS.length);
+      assert.equal((await calls(desktop)).opens.length, 0); await desktop.locator('#color-scheme-cancel').click();
+    });
+  }
+  // Clean ANSI samples identify the scene as synthetic and make both light and
+  // dark palette output visible without device data or test notifications.
+  const preview = await pageFor('darwin', { theme: 'dark', fontSize: 15 });
+  const terminal = await openProfile(preview);
+  await preview.evaluate(id => window.__qa.emitData(id, '\x1b[2J\x1b[HDEMO SESSION — Synthetic preview; no actual device connected\r\n\r\n\x1b[1mTermForge color schemes\x1b[0m\r\n\r\nrouter-01# show interfaces status\r\n\r\nPort       Name                  Status       VLAN  Speed\r\nGi0/1      Demo workstation      \x1b[32mconnected\x1b[0m    10    1G\r\nGi0/2      Demo access point     \x1b[32mconnected\x1b[0m    20    1G\r\nGi0/3      Demo lab              \x1b[33mnotconnect\x1b[0m   30    auto\r\nGi0/4      Demo uplink           \x1b[36mconnected\x1b[0m    99    1G\r\n\r\nANSI: \x1b[31mred\x1b[0m  \x1b[32mgreen\x1b[0m  \x1b[33myellow\x1b[0m  \x1b[34mblue\x1b[0m  \x1b[35mmagenta\x1b[0m  \x1b[36mcyan\x1b[0m\r\n\r\nrouter-01# '), terminal.id);
+  for (const id of ['solarized-dark', 'solarized-light']) {
+    await applyPalette(preview, id, true);
+    await screenshot(preview, `macos-${id}-matching-preview`);
+  }
 }
 
 async function run() {
@@ -314,6 +580,7 @@ async function run() {
       await page.setViewportSize({ width: 850, height: 600 }); await screenshot(page, `${platform}-synthetic-850x600`); const size = await dimensions(page); assert.equal(size.body.width, 850); assert.equal(size.body.height, 600); assert.ok(size.terminal.right <= 850); assert.ok(size.footer.bottom <= 600); return size;
     });
   }
+  await runColorChecks();
   // Separate, clearly labelled synthetic previews. Test notifications and
   // modified profiles from the preceding checks never appear in these images.
   const preview = await pageFor('darwin', { theme: 'dark', fontSize: 15, keywords: [{ text: 'DEMO SESSION', caseSensitive: false, foreground: '#000000', background: '#70e330' }] });

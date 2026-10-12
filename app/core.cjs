@@ -5,12 +5,12 @@ const path = require('node:path');
 const net = require('node:net');
 const { randomUUID } = require('node:crypto');
 const keymap = require('./keymap.cjs');
+const { COLOR_SCHEME_IDS: COLOR_SCHEMES } = require('./color-schemes.cjs');
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const SESSION_KEYS = ['id', 'name', 'folder', 'protocol', 'host', 'port', 'username', 'identityFile', 'jumpHost', 'cwd', 'description', 'color', 'forwardings', 'terminal', 'ssh', 'serial'];
-const SETTINGS_KEYS = ['theme', 'fontSize', 'scrollback', 'fontFamily', 'colorScheme', 'cursorStyle', 'cursorBlink', 'bellStyle', 'copyOnSelect', 'pasteOnRightClick', 'confirmPaste', 'wordDelimiters', 'closeOnExit', 'commandHistoryLimit', 'keywords', 'keywordHighlightEnabled'];
-const COLOR_SCHEMES = ['traditional', 'monochrome', 'solarized-dark', 'solarized-light'];
-const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', fontSize: 14, scrollback: 5000, fontFamily: 'Menlo, Monaco, Consolas, monospace', colorScheme: 'traditional', cursorStyle: 'block', cursorBlink: true, bellStyle: 'none', copyOnSelect: false, pasteOnRightClick: false, confirmPaste: true, wordDelimiters: ' ()[]{}\'"', closeOnExit: false, commandHistoryLimit: 100, keywords: [], keywordHighlightEnabled: true });
+const SETTINGS_KEYS = ['theme', 'fontSize', 'scrollback', 'fontFamily', 'colorScheme', 'matchColorScheme', 'cursorStyle', 'cursorBlink', 'bellStyle', 'copyOnSelect', 'pasteOnRightClick', 'confirmPaste', 'wordDelimiters', 'closeOnExit', 'commandHistoryLimit', 'keywords', 'keywordHighlightEnabled'];
+const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', fontSize: 14, scrollback: 5000, fontFamily: 'Menlo, Monaco, Consolas, monospace', colorScheme: 'traditional', matchColorScheme: false, cursorStyle: 'block', cursorBlink: true, bellStyle: 'none', copyOnSelect: false, pasteOnRightClick: false, confirmPaste: true, wordDelimiters: ' ()[]{}\'"', closeOnExit: false, commandHistoryLimit: 100, keywords: [], keywordHighlightEnabled: true });
 
 function boolean(value, label, fallback = false) {
   if (value === undefined) return fallback;
@@ -176,6 +176,7 @@ function validateSettings(input = {}) {
   return {
     theme, fontSize: integer(input.fontSize, 'Font size', 8, 72, DEFAULT_SETTINGS.fontSize), scrollback: integer(input.scrollback, 'Scrollback', 100, 128000, DEFAULT_SETTINGS.scrollback),
     fontFamily: singleLine(input.fontFamily, 'Font family', 240, DEFAULT_SETTINGS.fontFamily), colorScheme: choice(input.colorScheme, 'Color scheme', COLOR_SCHEMES, DEFAULT_SETTINGS.colorScheme),
+    matchColorScheme: boolean(input.matchColorScheme, 'Match interface to terminal colors', DEFAULT_SETTINGS.matchColorScheme),
     cursorStyle: choice(input.cursorStyle, 'Cursor style', ['block', 'bar', 'underline'], DEFAULT_SETTINGS.cursorStyle), cursorBlink: boolean(input.cursorBlink, 'Cursor blink', DEFAULT_SETTINGS.cursorBlink),
     bellStyle: choice(input.bellStyle, 'Bell style', ['none', 'visual'], DEFAULT_SETTINGS.bellStyle), copyOnSelect: boolean(input.copyOnSelect, 'Copy on select'), pasteOnRightClick: boolean(input.pasteOnRightClick, 'Paste on right click'),
     confirmPaste: boolean(input.confirmPaste, 'Confirm multiline paste', true), wordDelimiters: singleLine(input.wordDelimiters, 'Word delimiters', 240, DEFAULT_SETTINGS.wordDelimiters), closeOnExit: boolean(input.closeOnExit, 'Close on exit'),

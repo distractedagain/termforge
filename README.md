@@ -14,7 +14,29 @@ This 0.3 image uses synthetic sessions and output; no device is connected. It wa
 
 The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
 
+### Opening the macOS preview
+
+If macOS says it cannot verify the developer or check TermForge for malware, the preview's missing Apple notarization can cause this warning. For a copy downloaded from the release above that you choose to trust:
+
+1. Try opening **TermForge** once, then dismiss the warning.
+2. Open **System Settings → Privacy & Security** and scroll down to **Security**.
+3. Find the message naming **TermForge**, click **Open Anyway**, and then click **Open** in the confirmation.
+
+This creates an exception for this app. Follow [Apple's opening instructions](https://support.apple.com/en-us/102445); these steps concern an unidentified developer or missing notarization, not a warning that an app will damage your computer.
+
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
+
+## In development — 0.4 color schemes
+
+The current source adds **Options → Color Schemes…** and a palette toolbar button. Choose Traditional, Monochrome, Solarized Dark, Solarized Light, Forge Dark, Forge Light, or High Contrast. Each preset defines all sixteen ANSI colors, foreground/background, cursor, and selection colors. The dialog renders a local ANSI sample; **Cancel** or **Escape** leaves your saved settings and live terminals unchanged.
+
+Choose **Match interface to default scheme** to also color TermForge's toolbars, managers, tabs, and dialogs while preserving the compact desktop layout. **Apply** updates open terminals that inherit the global scheme. Per-session overrides remain independent; Session Options includes the same palettes and a **Use Global Options** choice. See [Color Schemes](docs/COLOR-SCHEMES.md) for details and [Ethan Schoonover's Solarized project](https://ethanschoonover.com/solarized/) for the original palette.
+
+The published download above remains v0.3.0 while the 0.4 release is being prepared. The 0.4 source passed **92 backend tests and 63 headless interface checks**, with no failures or browser console errors. Coverage includes palette validation, inheritance and persistence, preview cancellation, failed-save handling, and live renderer updates. Native build and release verification will be recorded separately.
+
+![Solarized Dark with a matching TermForge interface and synthetic demo output](docs/images/solarized-dark.png)
+
+This 0.4 image uses synthetic sessions and output in a headless browser; it does not show a connected device or native macOS window controls. See [the color guide](docs/COLOR-SCHEMES.md) for the light variant and palette picker.
 
 ## Included
 
@@ -70,7 +92,7 @@ The local 0.3 feature batch passed **84 backend tests** and **46 headless render
 
 [Native CI](https://github.com/distractedagain/termforge/actions/runs/38320236458) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38320240854) passed for all four targets at released source commit `09abaaefbb440d0600647ac389e32f72dca98700`. Both Mac architectures and Linux passed 84 backend tests each; Windows passed 81 with three POSIX-specific tests skipped. Linux also passed 46 headless interface checks. Both Mac packages passed strict recursive ad-hoc signature verification. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38320923229) verified all packages, source records and checksums before making the preview public.
 
-Interactive testing of the new packaged desktop app remains pending; real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests. Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic interface checks and native source/build/package CI. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). Those historical results do not certify the 0.3 native runtime.
+A user reported that the installed v0.3 macOS app opened successfully and that its local shell and an SSH connection worked. This is limited manual feedback, not a complete packaged-app runtime test matrix. Real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests. Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic interface checks and native source/build/package CI. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). Those historical results do not certify the 0.4 native runtime.
 
 Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
