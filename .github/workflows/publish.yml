@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       tag:
-        description: Release tag matching the built package version
+        description: Existing tag at the build commit, matching the package version
         required: true
         default: v0.2.0
         type: string

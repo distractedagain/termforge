@@ -164,12 +164,9 @@ async function main({ env = process.env, runCommand = execute } = {}) {
     return matches[0] || null;
   };
   assert(!await releaseForTag(), 'A release already exists for this tag; refusing to overwrite it.');
-  const checkTag = async (required = false) => {
+  const checkTag = async () => {
     const ref = await optionalApi(`repos/${repository}/git/ref/tags/${encodeURIComponent(tag)}`);
-    if (!ref) {
-      assert(!required, 'Published release tag is missing.');
-      return;
-    }
+    assert(ref, 'Release tag must already exist at the original build commit; create it with an authorized account before dispatch.');
     let object = ref.object;
     for (let depth = 0; object?.type === 'tag' && depth < 8; depth++) object = (await api(`repos/${repository}/git/tags/${object.sha}`)).object;
     assert(object?.type === 'commit' && object.sha === sha, 'Existing tag does not point to the original build commit.');
@@ -198,13 +195,18 @@ async function main({ env = process.env, runCommand = execute } = {}) {
   await fsp.writeFile(checksumPath, assets.map(asset => `${asset.hash}  ${asset.name}`).join('\n') + '\n', { flag: 'wx' });
   assets.push({ name: 'SHA256SUMS.txt', path: checksumPath, hash: await hashFile(checksumPath), size: (await fsp.stat(checksumPath)).size });
   // Create privately only after every platform is validated. Failed uploads leave a draft.
-  await gh(['release', 'create', tag, '--repo', repository, '--target', sha, '--title', `Harbor Terminal ${tag} — public preview`, '--notes-file', notesFile, '--draft', '--prerelease']);
+  // The tag is already bound to the build SHA. Do not ask GITHUB_TOKEN to create
+  // an older workflow-bearing ref, and do not use target_commitish as provenance:
+  // GitHub ignores it when a tag exists and can report the default branch here.
+  await checkTag();
+  await gh(['release', 'create', tag, '--repo', repository, '--verify-tag', '--title', `Harbor Terminal ${tag} — public preview`, '--notes-file', notesFile, '--draft', '--prerelease']);
   const created = await releaseForTag();
-  assert(created && Number.isSafeInteger(created.id) && created.id > 0 && created.tag_name === tag && created.draft === true && created.prerelease === true && created.target_commitish === sha, 'Created draft provenance mismatch; leaving it private.');
+  assert(created && Number.isSafeInteger(created.id) && created.id > 0 && created.tag_name === tag && created.draft === true && created.prerelease === true, 'Created draft provenance mismatch; leaving it private.');
+  await checkTag();
   const releaseRoute = `repos/${repository}/releases/${created.id}`;
   await gh(['release', 'upload', tag, '--repo', repository, ...assets.map(asset => asset.path)]);
   const draft = await api(releaseRoute);
-  assert(draft.draft === true && draft.prerelease === true && draft.target_commitish === sha, 'Draft release provenance mismatch; leaving it private.');
+  assert(draft.tag_name === tag && draft.draft === true && draft.prerelease === true, 'Draft release provenance mismatch; leaving it private.');
   assert(Array.isArray(draft.assets) && draft.assets.length === assets.length, 'Incomplete draft upload; leaving it private.');
   for (const asset of assets) {
     const matches = draft.assets.filter(upload => upload.name === asset.name);
@@ -214,8 +216,8 @@ async function main({ env = process.env, runCommand = execute } = {}) {
   await checkTag();
   await gh(['release', 'edit', tag, '--repo', repository, '--draft=false', '--prerelease=true']);
   const published = await api(releaseRoute);
-  assert(published.draft === false && published.prerelease === true && published.target_commitish === sha, 'Cannot confirm the final published release state.');
-  await checkTag(true);
+  assert(published.tag_name === tag && published.draft === false && published.prerelease === true, 'Cannot confirm the final published release state.');
+  await checkTag();
   const url = `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`;
   assert(published.html_url === url, 'Unexpected published release URL.');
   if (env.GITHUB_OUTPUT) await fsp.appendFile(env.GITHUB_OUTPUT, `release_url=${url}\ncommit=${sha}\n`);

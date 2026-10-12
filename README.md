@@ -23,7 +23,7 @@ This is an original implementation of familiar terminal-client workflows, inform
 - Opt-in output logging, terminal search, themes, and font preferences.
 - JSON configuration import/export and a limited importer for plain SecureCRT SSH2 session INI files. Passwords and proprietary settings are excluded.
 
-See [the feature map and limits](docs/FEATURES.md). This is an initial application, not complete SecureCRT feature parity. Windows and Linux native runtime verification is still required; CI definitions are included to build and test on all three platforms.
+See [the feature map and limits](docs/FEATURES.md). This is an initial application, not complete SecureCRT feature parity. Native-platform CI tests and packaging passed for Intel and Apple Silicon Macs, Windows x64, and Linux x64. Interactive runtime verification on Windows, Linux, and Apple Silicon is still required.
 
 ## Classic desktop layout
 
@@ -66,7 +66,7 @@ Version 0.2 passed the 16 backend tests and 20 headless interface checks, with n
 
 Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
-The workflows retain build artifacts. They do not publish a GitHub release or upload application configuration. A successful CI run is evidence of that runner's tests and packaging, not a substitute for an interactive remote-session test.
+The test and build workflows retain build artifacts. A separate, manually dispatched publisher verifies all four platform artifacts, their checksums and source commit, and the complete upload before publishing a preview release. These workflows do not upload application configuration. A successful CI run is evidence of that runner's tests and packaging, not a substitute for an interactive remote-session test.
 
 ## Connections and privacy
 
