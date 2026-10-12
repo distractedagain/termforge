@@ -8,7 +8,9 @@ This 0.3 image uses synthetic sessions and output; no device is connected. It wa
 
 ## Download
 
-**TermForge 0.3.0 is currently unreleased.** Run the development source below to use the new features. [Historical Harbor Terminal v0.2.0 downloads](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) remain available and do not include the new 0.3 code or name. Their release notes describe available platforms and verification limits. Those macOS builds use ad-hoc signatures and are not notarized; Windows builds are unsigned.
+[Download the TermForge v0.3.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+
+[Historical Harbor Terminal v0.2.0 downloads](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) remain available and do not include the new 0.3 code or name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
 
@@ -66,7 +68,9 @@ npm run dist
 
 The local 0.3 feature batch passed **84 backend tests** and **46 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. Renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
 
-Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic headless interface checks and native source/build/package CI on Intel/Apple Silicon Macs, Windows x64 and Linux x64. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). These historical results do not establish the new 0.3 native runtime. Current-version native CI/packaging and interactive checks remain pending; real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests.
+[Native CI](https://github.com/distractedagain/termforge/actions/runs/38320236458) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38320240854) passed for all four targets at released source commit `09abaaefbb440d0600647ac389e32f72dca98700`. Both Mac architectures and Linux passed 84 backend tests each; Windows passed 81 with three POSIX-specific tests skipped. Linux also passed 46 headless interface checks. Both Mac packages passed strict recursive ad-hoc signature verification. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38320923229) verified all packages, source records and checksums before making the preview public.
+
+Interactive testing of the new packaged desktop app remains pending; real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests. Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic interface checks and native source/build/package CI. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). Those historical results do not certify the 0.3 native runtime.
 
 Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
