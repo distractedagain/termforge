@@ -136,6 +136,16 @@ async function execute(command, args, options) {
   return execFileAsync(command, args, { ...options, shell: false, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
 
+function releaseStateDiagnostic(release) {
+  const value = release && typeof release === 'object' ? release : {};
+  return JSON.stringify({
+    id: Number.isSafeInteger(value.id) ? value.id : null,
+    tag: typeof value.tag_name === 'string' ? value.tag_name.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120) : null,
+    draft: typeof value.draft === 'boolean' ? value.draft : null,
+    prerelease: typeof value.prerelease === 'boolean' ? value.prerelease : null,
+  });
+}
+
 async function main({ env = process.env, runCommand = execute } = {}) {
   const { repository, runId, tag, version } = validateInputs(env);
   const gh = async args => (await runCommand('gh', args, { env })).stdout;
@@ -199,9 +209,18 @@ async function main({ env = process.env, runCommand = execute } = {}) {
   // an older workflow-bearing ref, and do not use target_commitish as provenance:
   // GitHub ignores it when a tag exists and can report the default branch here.
   await checkTag();
-  await gh(['release', 'create', tag, '--repo', repository, '--verify-tag', '--title', `Harbor Terminal ${tag} — public preview`, '--notes-file', notesFile, '--draft', '--prerelease']);
-  const created = await releaseForTag();
-  assert(created && Number.isSafeInteger(created.id) && created.id > 0 && created.tag_name === tag && created.draft === true && created.prerelease === true, 'Created draft provenance mismatch; leaving it private.');
+  const creationPayload = path.join(temporary, 'create-release.json');
+  await fsp.writeFile(creationPayload, JSON.stringify({
+    tag_name: tag,
+    name: `Harbor Terminal ${tag} — public preview`,
+    body: notes,
+    draft: true,
+    prerelease: true,
+  }), { flag: 'wx' });
+  // Use the creation response directly: the release list can lag behind a
+  // newly created draft. All subsequent release reads use this returned ID.
+  const created = JSON.parse(await gh(['api', '--method', 'POST', `repos/${repository}/releases`, '--input', creationPayload]));
+  assert(created && Number.isSafeInteger(created.id) && created.id > 0 && created.tag_name === tag && created.draft === true && created.prerelease === true, `Created draft provenance mismatch ${releaseStateDiagnostic(created)}; leaving it private.`);
   await checkTag();
   const releaseRoute = `repos/${repository}/releases/${created.id}`;
   await gh(['release', 'upload', tag, '--repo', repository, ...assets.map(asset => asset.path)]);
@@ -236,4 +255,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { SEMVER, PLATFORMS, validateInputs, validateRun, validateArtifacts, safeFilename, parseChecksums, hashFile, validateBuildInfo, normalizedBinaryName, verifyAndStage, main };
+module.exports = { SEMVER, PLATFORMS, validateInputs, validateRun, validateArtifacts, safeFilename, parseChecksums, hashFile, validateBuildInfo, normalizedBinaryName, verifyAndStage, releaseStateDiagnostic, main };
