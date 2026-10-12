@@ -10,6 +10,10 @@ const { createAutomationManager, recordedInputToPython } = require('../app/autom
 
 const pythonPath = process.env.TERMFORGE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 
+// Compare Python's printed lines portably without changing captured output,
+// terminal writes, or JSON/RPC payloads. Windows Python prints CRLF by default.
+function printedText(state, stream) { return state.text(stream).replace(/\r\n/gu, '\n'); }
+
 async function until(check, message = 'condition', timeout = 8000) {
   const start = Date.now();
   while (!check()) {
@@ -68,8 +72,8 @@ print('stderr line', file=sys.stderr)
 crt.Screen.Send('echo synthetic\\r')
 `, { arguments: ['two words', 'λ'] });
   assert.equal((await state.finished(script.id)).state, 'completed');
-  assert.equal(state.text('stdout'), 'firstλ-last\n');
-  assert.equal(state.text('stderr'), 'stderr line\n');
+  assert.equal(printedText(state, 'stdout'), 'firstλ-last\n');
+  assert.equal(printedText(state, 'stderr'), 'stderr line\n');
   assert.deepEqual(state.writes, [{ id: 'terminal-a', data: 'echo synthetic\r' }]);
   assert.equal(state.children[0].options.shell, false);
   assert.equal(state.children[0].options.windowsHide, true);
@@ -116,7 +120,7 @@ assert crt.Screen.ReadString('none', 0.03) == ''
 print('timeouts-ok')
 `);
   assert.equal((await state.finished(script.id)).state, 'completed');
-  assert.equal(state.text('stdout'), 'timeouts-ok\n');
+  assert.equal(printedText(state, 'stdout'), 'timeouts-ok\n');
 });
 
 test('cancellation interrupts an indefinite terminal wait, closes Python and allows another script', { timeout: 15000 }, async t => {
@@ -169,7 +173,7 @@ test('maximum-sized control-character input is supported without confusing JSON 
   assert.equal((await state.finished(script.id)).state, 'completed');
   assert.equal(state.writes.length, 1);
   assert.equal(Buffer.byteLength(state.writes[0].data), 256 * 1024);
-  assert.equal(state.text(), 'large-send-ok\n');
+  assert.equal(printedText(state), 'large-send-ok\n');
 });
 
 test('terminal closure rejects waits and Connected follows terminal availability', { timeout: 15000 }, async t => {
@@ -218,7 +222,7 @@ print('saved-profile-ok')
   assert.deepEqual(opened, [profile]);
   assert.deepEqual(closed, ['terminal-a', 'terminal-b']);
   assert.deepEqual(state.writes, [{ id: 'terminal-b', data: 'pwd\r' }]);
-  assert.equal(state.text(), 'saved-profile-ok\n');
+  assert.equal(printedText(state), 'saved-profile-ok\n');
 });
 
 test('oversized unconsumed terminal output fails visibly and cannot leave the interpreter running', { timeout: 15000 }, async t => {
@@ -294,7 +298,7 @@ print('two-tabs-ok')
   assert.deepEqual(state.writes.map(value => value.id), ['terminal-a', 'terminal-b']);
   assert.equal(active, 'terminal-b');
   assert.ok(reads.some(input => input.id === 'terminal-b' && input.startRow === 2 && input.endColumn === 20));
-  assert.equal(state.text(), 'two-tabs-ok\n');
+  assert.equal(printedText(state), 'two-tabs-ok\n');
 });
 
 test('Clone and ConnectInTab open real profiles and reconnect keeps existing Python tab references usable', { timeout: 15000 }, async t => {
@@ -337,7 +341,7 @@ print('clone-connect-ok')
   assert.deepEqual(opened, [profile, profile, profile]);
   assert.deepEqual(closed, ['opened-1', 'opened-2', 'opened-3']);
   assert.deepEqual(state.writes, [{ id: 'opened-3', data: 'reconnected-tab\r' }]);
-  assert.equal(state.text(), 'clone-connect-ok\n');
+  assert.equal(printedText(state), 'clone-connect-ok\n');
 });
 
 test('missing tab/screen integrations and invalid coordinate requests fail explicitly', { timeout: 15000 }, async t => {
@@ -353,7 +357,7 @@ for action in [lambda: crt.GetTabCount(), lambda: crt.Screen.Rows,
 print('unavailable-ok')
 `);
   assert.equal((await state.finished(script.id)).state, 'completed');
-  assert.equal(state.text(), 'unavailable-ok\n');
+  assert.equal(printedText(state), 'unavailable-ok\n');
 
   let calls = 0;
   const invalid = setup(t, { getScreen: () => { calls++; return { text: 'screen', rows: 24, columns: 80, currentRow: 25, currentColumn: 1 }; } });
@@ -373,7 +377,7 @@ print('invalid-screen-ok')
 `);
   assert.equal((await invalid.finished(next.id)).state, 'completed');
   assert.equal(calls, 1, 'invalid rectangles are rejected before accessing the renderer');
-  assert.equal(invalid.text(), 'invalid-screen-ok\n');
+  assert.equal(printedText(invalid), 'invalid-screen-ok\n');
 });
 
 test('cancellation interrupts waits in a different tab without closing either terminal', { timeout: 15000 }, async t => {
