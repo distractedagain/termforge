@@ -1,0 +1,13 @@
+'use strict';
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const directory = process.env.HARBOR_SMOKE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'harbor-smoke-'));
+fs.mkdirSync(directory, { recursive: true });
+const env = { ...process.env, HARBOR_DATA_DIR: path.join(directory, 'profile'), HARBOR_SMOKE_DIR: directory };
+delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(require('electron'), ['.', '--harbor-smoke'], { cwd: path.join(__dirname, '..'), env, stdio: 'inherit' });
+const timeout = setTimeout(() => { child.kill('SIGKILL'); console.error('Smoke test timed out'); }, 60000);
+child.on('error', (error) => { clearTimeout(timeout); console.error(error); process.exitCode = 1; });
+child.on('exit', (code, signal) => { clearTimeout(timeout); if (signal) console.error(`Electron stopped with signal ${signal}`); process.exitCode = code === 0 ? 0 : 1; });

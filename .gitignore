@@ -1,0 +1,17 @@
+node_modules/
+dist/
+release/
+third-party-licenses/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.vscode/
+.idea/
