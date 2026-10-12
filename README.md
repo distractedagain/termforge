@@ -8,7 +8,7 @@ The preview uses synthetic sessions and output; no device is connected.
 
 ## Download
 
-[Download the v0.2.0 public preview](https://github.com/distractedagain/harbor-terminal/releases/tag/v0.2.0). Release notes identify the available platforms and verification limits. The packages are unsigned; macOS and Windows may show an operating-system warning when opening them.
+[Download the v0.2.0 public preview](https://github.com/distractedagain/harbor-terminal/releases/tag/v0.2.0). Release notes identify the available platforms and verification limits. macOS builds use ad-hoc signatures and are not notarized; Windows builds are unsigned. Both may show an operating-system warning when opening them.
 
 The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
 
@@ -37,18 +37,13 @@ Install Node.js 24 and npm (the source requires Node.js 22 or newer). Native mod
 
 The `ssh` and `sftp` programs must be available on your PATH for remote sessions. On Windows, enable the OpenSSH Client optional feature if these commands are missing. Local terminals can run without them.
 
-From this directory:
-
-```sh
-npm ci
-npm start
-```
-
-To obtain the source first:
+Get the source and start the application:
 
 ```sh
 git clone https://github.com/distractedagain/harbor-terminal.git
 cd harbor-terminal
+npm ci
+npm start
 ```
 
 Use `npm install` if you are changing dependencies. The lockfile makes clean installs repeatable. Installation fetches dependencies and Electron and builds the native terminal module.
@@ -69,7 +64,7 @@ Version 0.1 was verified on macOS x64 on October 12, 2026: all 16 backend tests 
 
 Version 0.2 passed the 16 backend tests and 20 headless interface checks, with no browser console errors. Its menu, toolbar, tree, tabs, panel dividers, command review, and responsive layout were checked at 1280 × 800 and 850 × 600. See [the interface verification report](docs/UI-VERIFICATION.md).
 
-Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. Apple code signing/notarization and Windows code signing require your own certificates and release setup; unsigned local builds may trigger operating-system warnings.
+Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
 The workflows retain build artifacts. They do not publish a GitHub release or upload application configuration. A successful CI run is evidence of that runner's tests and packaging, not a substitute for an interactive remote-session test.
 

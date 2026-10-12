@@ -58,7 +58,7 @@
         "dmg"
       ],
       "category": "public.app-category.developer-tools",
-      "identity": null
+      "identity": "-"
     },
     "win": {
       "target": [

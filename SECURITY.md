@@ -21,6 +21,6 @@ Keep Electron and dependencies current, preserve the lockfile, and investigate d
 
 ## Report a vulnerability
 
-This source package does not yet have a published private reporting endpoint. Contact the maintainer or person who supplied the repository to arrange a private channel. If the repository is later hosted with private vulnerability reporting enabled, use that channel.
+Use [GitHub's private vulnerability reporting](https://github.com/distractedagain/harbor-terminal/security/advisories/new) to contact the maintainers privately. Private reporting is enabled for this public repository. Report ordinary bugs through Issues, without including credentials or sensitive logs.
 
 Include the version, operating system, reproduction steps, and expected impact. Use a local test host and synthetic data. Do not include real credentials, keys, account configuration, or production logs. Avoid publishing exploit details before the maintainer has had a chance to evaluate them.

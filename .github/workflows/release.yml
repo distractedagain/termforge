@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   package:
-    name: Package ${{ matrix.platform }} ${{ matrix.arch }} (unsigned)
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }} (public preview)
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -54,6 +54,28 @@ jobs:
         run: npm run build
       - name: Package for this operating system
         run: npx --no-install electron-builder --${{ matrix.arch }} --publish never
+      - name: Verify macOS ad-hoc signature integrity (unnotarized)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { execFileSync, spawnSync } = require('node:child_process');
+          const appName = require('./package.json').productName + '.app';
+          const bundles = fs.readdirSync('release', { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => path.join('release', entry.name, appName))
+            .filter(bundle => fs.existsSync(bundle) && fs.statSync(bundle).isDirectory());
+          if (bundles.length !== 1) throw new Error('Expected one packaged macOS application');
+          const bundle = bundles[0];
+          execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', bundle], { stdio: 'inherit' });
+          const signature = spawnSync('codesign', ['--display', '--verbose=4', bundle], { encoding: 'utf8' });
+          if (signature.error) throw signature.error;
+          if (signature.status !== 0) throw new Error(signature.stderr || 'Cannot inspect macOS signature');
+          if (!/(^|\n)Signature=adhoc(\r?\n|$)/.test(signature.stderr)) throw new Error('Expected an ad-hoc signature');
+          process.stdout.write(signature.stderr);
+          NODE
       - name: Record checksums and build provenance
         shell: bash
         run: |
@@ -68,23 +90,28 @@ jobs:
             return `${hash}  ${file}`;
           });
           fs.writeFileSync('release/SHA256SUMS.txt', checksums.join('\n') + '\n');
+          const signing = process.platform === 'darwin'
+            ? { type: 'ad-hoc', developerIdSigned: false, notarized: false, signatureIntegrityVerified: true }
+            : process.platform === 'win32'
+              ? { type: 'unsigned', authenticodeSigned: false }
+              : { type: 'none' };
           fs.writeFileSync('release/BUILD_INFO.json', JSON.stringify({
             name: require('./package.json').productName,
             version: require('./package.json').version,
             commit: process.env.GITHUB_SHA,
             platform: process.platform,
             architecture: process.arch,
-            unsigned: true,
+            signing,
             backendUnitTestsPassed: true,
             rendererBuildPassed: true,
             desktopRuntimeTested: false,
             files
           }, null, 2) + '\n');
           NODE
-      - name: Retain unsigned build artifacts
+      - name: Retain public preview build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: harbor-terminal-${{ matrix.platform }}-${{ matrix.arch }}-unsigned
+          name: harbor-terminal-${{ matrix.platform }}-${{ matrix.arch }}-public-preview
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

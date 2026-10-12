@@ -37,7 +37,7 @@ On October 12, 2026, version 0.1 macOS x64 verification passed all 16 backend te
 
 Windows and Linux have launch-contract tests and native-platform CI/build definitions, but their native applications have not been run in this workspace. Real SFTP transfers, key/agent authentication, jump hosts, and forwarding have not received integration tests. The GitHub workflows still have to run in the eventual repository before their results can be claimed. A generated installer is not evidence that every protocol, authentication method, or target-platform shell has been exercised.
 
-The first distribution is a source package and local build. Code signing, notarization, public hosting, automatic updates, and a maintenance service are not established by this package. Add native interactive tests and signing before distributing production releases broadly.
+The public distribution is an early preview with source and platform builds. macOS packages have ad-hoc signatures; Apple Developer ID signing, notarization, and Windows publisher signing are not established. Automatic updates and a maintenance service are not included. Add native interactive tests and trusted publisher signing before treating it as a production release.
 
 ## Ownership and attribution
 
