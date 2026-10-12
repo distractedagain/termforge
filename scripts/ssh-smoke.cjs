@@ -26,7 +26,7 @@ module.exports = async (directory) => {
       client.on('error', () => {});
       client.on('close', () => clients.delete(client));
       client.on('authentication', (context) => {
-        if (context.method === 'password' && context.username === 'harbor-test' && context.password === 'test-only-password') context.accept();
+        if (context.method === 'password' && context.username === 'termforge-test' && context.password === 'test-only-password') context.accept();
         else context.reject(['password']);
       });
       client.on('ready', () => client.on('session', (accept) => {
@@ -35,9 +35,9 @@ module.exports = async (directory) => {
         session.on('window-change', (acceptWindow) => acceptWindow && acceptWindow());
         session.on('shell', (acceptShell) => {
           const stream = acceptShell();
-          stream.write('Loopback SSH test shell\r\nharbor-test> ');
+          stream.write('Loopback SSH test shell\r\ntermforge-test> ');
           stream.on('data', (data) => {
-            if (data.toString().includes('harbor-probe')) stream.write('HARBOR_SSH_AUTHENTICATED\r\n');
+            if (data.toString().includes('termforge-probe')) stream.write('TERMFORGE_SSH_AUTHENTICATED\r\n');
           });
         });
       }));
@@ -66,16 +66,16 @@ module.exports = async (directory) => {
   try {
     server = await startServer(keyOne);
     const port = server.address().port;
-    const profile = { name: 'Loopback SSH test', protocol: 'ssh', host: '127.0.0.1', username: 'harbor-test', port };
+    const profile = { name: 'Loopback SSH test', protocol: 'ssh', host: '127.0.0.1', username: 'termforge-test', port };
     const connection = manager.open(profile);
     await waitFor(() => output.includes('Are you sure you want to continue connecting'), 'new host confirmation');
     manager.write({ id: connection.id, data: 'yes\r' });
     await waitFor(() => output.includes('password:'), 'authentication prompt');
     manager.write({ id: connection.id, data: 'test-only-password\r' });
-    await waitFor(() => output.includes('harbor-test>'), 'authenticated remote shell');
+    await waitFor(() => output.includes('termforge-test>'), 'authenticated remote shell');
     manager.resize({ id: connection.id, cols: 100, rows: 40 });
-    manager.write({ id: connection.id, data: 'harbor-probe\r' });
-    await waitFor(() => output.includes('HARBOR_SSH_AUTHENTICATED'), 'remote command output');
+    manager.write({ id: connection.id, data: 'termforge-probe\r' });
+    await waitFor(() => output.includes('TERMFORGE_SSH_AUTHENTICATED'), 'remote command output');
     manager.close(connection.id);
     await stopServer(server); server = null;
     output = ''; exited = false;

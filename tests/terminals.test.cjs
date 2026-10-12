@@ -101,7 +101,7 @@ test('close and closeAll terminate each native process exactly once, including a
 });
 
 test('logging records output only, creates private files, and closes on terminal exit', async t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harbor-log-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'termforge-log-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const state = setup();
   t.after(() => state.manager.closeAll());
@@ -115,9 +115,13 @@ test('logging records output only, creates private files, and closes on terminal
   if (process.platform !== 'win32') assert.equal(fs.statSync(filename).mode & 0o777, 0o600);
   assert.throws(() => state.manager.enableLog(terminal.id, filename), /EEXIST/);
   state.handles[0].data('still logging\n');
+  state.manager.pauseLog(terminal.id, true);
+  state.handles[0].data('paused output\n');
+  state.manager.pauseLog(terminal.id, false);
+  state.handles[0].data('resumed in same file\n');
   state.manager.disableLog(terminal.id);
   state.handles[0].data('after disable\n');
-  assert.equal(fs.readFileSync(filename, 'utf8'), 'remote output\r\nstill logging\n');
+  assert.equal(fs.readFileSync(filename, 'utf8'), 'remote output\r\nstill logging\nresumed in same file\n');
   state.manager.enableLog(terminal.id, path.join(directory, 'second.log'));
   state.handles[0].exit({ exitCode: 0 });
   assert.equal(state.manager.count, 0);
@@ -144,4 +148,54 @@ test('a synchronous native exit during registration disposes both subscriptions'
   manager.open({ protocol: 'local' });
   assert.equal(manager.count, 0);
   assert.equal(disposed, 2);
+});
+
+test('TCP and serial sessions share terminal buffering/logging/cleanup without spawning a process', async t => {
+  const calls = [];
+  const output = [];
+  const handle = {
+    onData(fn) { this.data = fn; fn('transport ready'); return { dispose() {} }; },
+    onExit(fn) { this.exit = fn; return { dispose() {} }; },
+    write(text) { calls.push(['write', text]); }, resize(cols, rows) { calls.push(['resize', cols, rows]); },
+    sendBreak() { calls.push(['break']); }, kill() { calls.push(['kill']); this.exit({ exitCode: 0 }); },
+  };
+  const manager = createTerminalManager({ spawn() { assert.fail('Socket sessions must never spawn SSH.'); }, transport(session) { calls.push(['transport', session.protocol]); return handle; }, emitData(event) { output.push(event); } });
+  t.after(() => manager.closeAll());
+  const result = manager.open({ name: 'Legacy', host: 'localhost', protocol: 'telnet' });
+  assert.equal(output.length, 0);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(output[0].data, 'transport ready');
+  manager.write({ id: result.id, data: 'show version\r' }); manager.resize({ id: result.id, cols: 80, rows: 24 }); manager.sendBreak(result.id); manager.close(result.id);
+  assert.deepEqual(calls, [['transport', 'telnet'], ['write', 'show version\r'], ['resize', 80, 24], ['break'], ['kill']]);
+  assert.equal(manager.count, 0);
+});
+
+test('asynchronous device close remains counted until confirmed, and failed closes can retry', async () => {
+  let resolveClose, rejectClose, attempts = 0;
+  const handle = { write() {}, resize() {}, onData() { return { dispose() {} }; }, onExit(fn) { this.exit = fn; return { dispose() {} }; }, kill() { attempts++; return new Promise((resolve, reject) => { resolveClose = resolve; rejectClose = reject; }); } };
+  const manager = createTerminalManager({ transport() { return handle; } });
+  const terminal = manager.open({ name: 'Device', protocol: 'serial', serial: { path: 'COM1' } });
+  const first = manager.close(terminal.id);
+  assert.equal(manager.close(terminal.id), first);
+  assert.equal(manager.count, 1); assert.equal(attempts, 1);
+  rejectClose(new Error('Device did not close'));
+  await assert.rejects(first, /did not close/);
+  assert.equal(manager.count, 1);
+  const second = manager.closeAll();
+  assert.equal(attempts, 2); assert.equal(manager.count, 1);
+  resolveClose();
+  await second;
+  assert.equal(manager.count, 0);
+});
+
+test('live terminal metadata follows dragged order without replacing process handles', t => {
+  const state = setup(); t.after(() => state.manager.closeAll());
+  const first = state.manager.open({ protocol: 'local', name: 'First' }); const second = state.manager.open({ protocol: 'local', name: 'Second' });
+  state.manager.reorder([second.id, first.id]);
+  assert.deepEqual(state.manager.list().map(terminal => terminal.id), [second.id, first.id]);
+  assert.equal(state.manager.describe(first.id).title, 'First');
+  state.manager.write({ id: first.id, data: 'same process' }); assert.deepEqual(state.handles[0].writes, ['same process']);
+  const detached = state.manager.describe(first.id); detached.session.name = 'Changed copy'; assert.equal(state.manager.describe(first.id).title, 'First');
+  assert.throws(() => state.manager.reorder([first.id, first.id]), /Invalid terminal order/);
+  state.manager.close(second.id); state.manager.reorder([second.id, first.id]); assert.deepEqual(state.manager.list().map(terminal => terminal.id), [first.id]);
 });

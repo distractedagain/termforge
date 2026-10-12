@@ -1,18 +1,24 @@
 {
-  "name": "harbor-terminal",
-  "productName": "Harbor Terminal",
-  "version": "0.2.0",
-  "description": "An independent open-source desktop terminal and SSH session manager",
+  "name": "termforge",
+  "productName": "TermForge",
+  "version": "0.3.0",
+  "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",
-  "author": "Harbor Terminal contributors",
-  "homepage": "https://github.com/distractedagain/harbor-terminal",
-  "repository": { "type": "git", "url": "https://github.com/distractedagain/harbor-terminal.git" },
-  "bugs": { "url": "https://github.com/distractedagain/harbor-terminal/issues" },
+  "author": "TermForge contributors",
+  "homepage": "https://github.com/distractedagain/termforge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/distractedagain/termforge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/distractedagain/termforge/issues"
+  },
   "scripts": {
     "build": "node scripts/build.cjs",
     "start": "npm run build && electron .",
     "test": "node --test tests/*.test.cjs",
+    "test:ui": "npm run build && node scripts/ui-check.cjs",
     "smoke": "npm run build && node scripts/smoke.cjs",
     "postinstall": "electron-builder install-app-deps && node scripts/fix-pty-permissions.cjs",
     "dist": "npm run build && electron-builder --publish never",
@@ -22,17 +28,19 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^6.0.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "serialport": "^13.0.0"
   },
   "devDependencies": {
     "electron": "44.7.0",
     "electron-builder": "26.15.3",
     "esbuild": "^0.25.12",
+    "playwright": "^1.64.0",
     "ssh2": "^1.17.0"
   },
   "build": {
-    "appId": "org.harbor-terminal.desktop",
-    "productName": "Harbor Terminal",
+    "appId": "org.termforge.desktop",
+    "productName": "TermForge",
     "icon": "build/icon.png",
     "beforePack": "scripts/package-licenses.cjs",
     "directories": {
@@ -40,6 +48,8 @@
     },
     "files": [
       "app/**/*",
+      "!app/**/__pycache__/**",
+      "!app/**/*.pyc",
       "renderer/index.html",
       "renderer/dist/**/*",
       "LICENSE",
@@ -50,7 +60,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/node-pty/**/*"
+      "node_modules/node-pty/**/*",
+      "node_modules/@serialport/bindings-cpp/**/*"
     ],
     "mac": {
       "target": [
@@ -72,7 +83,7 @@
         "deb"
       ],
       "category": "Development",
-      "maintainer": "Harbor Terminal contributors"
+      "maintainer": "TermForge contributors"
     },
     "nsis": {
       "oneClick": false,

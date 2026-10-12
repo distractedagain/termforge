@@ -41,6 +41,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
       - name: Install Linux native build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3 build-essential
@@ -52,3 +55,9 @@ jobs:
         run: npm test
       - name: Build renderer
         run: npm run build
+      - name: Install headless browser
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium --only-shell
+      - name: Check interface without launching Electron
+        if: runner.os == 'Linux'
+        run: npm run test:ui

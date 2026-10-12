@@ -1,0 +1,227 @@
+const $ = (id) => document.getElementById(id);
+const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
+
+export function createWorkflows(context) {
+  const { api, getState, setState, getConnections, getActiveId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets, setPane, confirmAction, toast, getSelection, setSelection, getLayout, setLayout, renderSessions } = context;
+  let manager = 'sessions';
+  let selectedCommandId = null;
+  const collapsed = new Set();
+  const state = () => getState();
+  const current = () => getConnections().get(getActiveId());
+  const report = (error) => toast(error.message || String(error), true);
+  const attempt = (fn) => Promise.resolve().then(fn).catch(report);
+  const dialog = (id) => { if (!$(id).open) $(id).showModal(); };
+  function showManager(name) {
+    manager = name;
+    setPane('sessionManager', true);
+    $('manager-title').textContent = { sessions: 'Session Manager', commands: 'Command Manager', active: 'Active Sessions' }[name];
+    for (const key of ['sessions', 'commands', 'active']) {
+      $(`${key}-manager-content`).hidden = key !== name;
+      $(`dock-${key}`).classList.toggle('selected', key === name);
+      $(`dock-${key}`).setAttribute('aria-pressed', String(key === name));
+    }
+    if (name === 'commands') renderCommands();
+    if (name === 'active') renderActive();
+  }
+  function previewCommand(command) {
+    setPane('commandWindow', true); $('command-input').value = command.command; $('command-input').focus();
+  }
+  async function launchCommand(command) {
+    previewCommand(command);
+    await sendCommand();
+  }
+  function renderCommands() {
+    const needle = $('command-filter').value.trim().toLowerCase();
+    const commands = state().snippets.filter((command) => `${command.folder || ''} ${command.name}`.toLowerCase().includes(needle));
+    const root = { name: 'Commands', path: '', folders: new Map(), commands: [] };
+    for (const command of commands) {
+      let branch = root;
+      const parts = String(command.folder || '').split(/[\\/]/).filter(Boolean);
+      for (let index = 0; index < parts.length; index += 1) {
+        const path = parts.slice(0, index + 1).join('/');
+        if (!branch.folders.has(parts[index])) branch.folders.set(parts[index], { name: parts[index], path, folders: new Map(), commands: [] });
+        branch = branch.folders.get(parts[index]);
+      }
+      branch.commands.push(command);
+    }
+    const branchNode = (branch, depth) => {
+      const group = make('div', 'session-group');
+      const expanded = needle || !collapsed.has(branch.path);
+      const heading = make('button', 'folder-heading'); heading.setAttribute('role', 'treeitem'); heading.setAttribute('aria-expanded', String(Boolean(expanded))); heading.setAttribute('aria-level', String(depth));
+      heading.append(make('span', 'tree-chevron', expanded ? '▾' : '▸'), make('span', 'folder-icon'), make('span', 'folder-name', branch.name));
+      heading.addEventListener('click', () => { if (collapsed.has(branch.path)) collapsed.delete(branch.path); else collapsed.add(branch.path); renderCommands(); }); group.append(heading);
+      if (expanded) {
+        const list = make('div', 'tree-children'); list.setAttribute('role', 'group');
+        for (const child of [...branch.folders.values()].sort((a, b) => a.name.localeCompare(b.name))) list.append(branchNode(child, depth + 1));
+        for (const command of branch.commands) {
+          const button = make('button', `command-manager-row${selectedCommandId === command.id ? ' selected' : ''}`); button.setAttribute('role', 'treeitem'); button.setAttribute('aria-level', String(depth + 1)); button.setAttribute('aria-selected', String(selectedCommandId === command.id)); button.dataset.commandId = command.id;
+          const dot = make('span', 'command-color'); if (/^#[a-f0-9]{6}$/i.test(command.color || '')) dot.style.backgroundColor = command.color;
+          button.append(dot, make('span', '', command.name)); button.title = command.command;
+          button.addEventListener('click', () => { selectedCommandId = command.id; renderCommands(); previewCommand(command); $('command-manager-list').querySelector(`[data-command-id="${CSS.escape(command.id)}"]`)?.focus(); });
+          button.addEventListener('dblclick', () => attempt(() => launchCommand(command)));
+          button.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); attempt(() => launchCommand(command)); } });
+          list.append(button);
+        }
+        group.append(list);
+      }
+      return group;
+    };
+    $('command-manager-list').replaceChildren(branchNode(root, 1));
+    if (!commands.length) $('command-manager-list').append(make('p', 'sidebar-empty', needle ? 'No matching commands.' : 'Use + to add a command.'));
+    $('command-run').disabled = !commands.some((command) => command.id === selectedCommandId) || ![...getConnections().values()].some((connection) => !connection.exited);
+  }
+  function renderActive() {
+    const needle = $('active-filter').value.trim().toLowerCase();
+    const rows = [];
+    for (const connection of getConnections().values()) {
+      if (!`${connection.title} ${connection.profile.host || ''}`.toLowerCase().includes(needle)) continue;
+      const button = make('button', `active-session-row${connection.id === getActiveId() ? ' selected' : ''}`); button.setAttribute('role', 'treeitem'); button.dataset.connectionId = connection.id;
+      button.setAttribute('aria-selected', String(connection.id === getActiveId()));
+      button.append(make('span', `tab-dot ${connection.exited ? 'exited' : 'active'}`), make('span', 'active-session-name', connection.title));
+      button.title = `${connection.protocol.toUpperCase()} · ${connection.exited ? 'Terminal ended' : 'Terminal open'}`;
+      button.addEventListener('click', () => activate(connection.id)); button.addEventListener('dblclick', () => activate(connection.id)); rows.push(button);
+    }
+    const heading = make('div', 'folder-heading'); heading.append(make('span', 'tree-chevron', '▾'), make('span', 'folder-icon'), make('span', 'folder-name', `Sessions (${getConnections().size})`));
+    $('active-manager-list').replaceChildren(heading, ...rows);
+    for (const id of ['active-clone', 'active-close', 'active-reconnect']) $(id).disabled = !current();
+  }
+  function refresh() {
+    renderCommands(); renderActive(); renderHistory();
+    $('connect-suggestions').replaceChildren(...state().sessions.map((profile) => { const option = make('option'); option.value = profile.folder ? `${profile.folder}/${profile.name}` : profile.name; option.label = profile.host || profile.protocol; return option; }));
+  }
+  function renderHistory() {
+    $('command-history').replaceChildren(make('option', '', 'Command history'));
+    $('command-history').firstElementChild.value = '';
+    for (const [index, command] of (state().commandHistory || []).entries()) {
+      const option = make('option', '', command.replace(/[\r\n]+/g, ' ↵ ').slice(0, 120)); option.value = String(index); $('command-history').append(option);
+    }
+  }
+  async function recordHistory(command) {
+    const limit = Number(state().settings.commandHistoryLimit ?? 100);
+    if (!limit) return;
+    const history = [command, ...(state().commandHistory || []).filter((entry) => entry !== command)].slice(0, Math.min(limit, 200));
+    const saved = await api.saveCommandHistory(history); setState({ commandHistory: saved }); renderHistory();
+  }
+  function quickFields() {
+    const protocol = $('quick-protocol').value;
+    const remote = ['ssh', 'sftp', 'telnet', 'raw'].includes(protocol);
+    for (const key of ['host', 'port']) { $(`quick-${key}-label`).hidden = !remote; $(`quick-${key}`).disabled = !remote; }
+    $('quick-host').required = remote;
+    $('quick-user-label').hidden = !['ssh', 'sftp'].includes(protocol); $('quick-user').disabled = !['ssh', 'sftp'].includes(protocol);
+    $('quick-serial-label').hidden = protocol !== 'serial'; $('quick-serial').disabled = protocol !== 'serial'; $('quick-serial').required = protocol === 'serial';
+    $('quick-cwd-label').hidden = protocol !== 'local'; $('quick-cwd').disabled = protocol !== 'local';
+    $('quick-name-label').hidden = !$('quick-save').checked; $('quick-name').required = $('quick-save').checked;
+  }
+  function openQuickConnect() {
+    $('quick-connect-form').reset(); $('quick-error').hidden = true; quickFields(); dialog('quick-connect-dialog'); $('quick-host').focus();
+  }
+  async function submitQuick(event) {
+    event.preventDefault(); const protocol = $('quick-protocol').value;
+    const profile = { name: $('quick-name').value.trim() || $('quick-host').value.trim() || (protocol === 'local' ? 'Local shell' : 'Serial'), protocol, host: $('quick-host').value.trim(), port: Number($('quick-port').value), username: $('quick-user').value.trim(), cwd: $('quick-cwd').value.trim(), serial: { path: $('quick-serial').value.trim(), baudRate: 9600 }, forwardings: [] };
+    $('quick-submit').disabled = true;
+    try {
+      let target = profile;
+      if ($('quick-save').checked) { target = await api.saveSession(profile); setState({ sessions: [...state().sessions, target] }); renderSessions(); refresh(); }
+      $('quick-connect-dialog').close(); await openConnection(target);
+    } catch (error) { $('quick-error').textContent = error.message || String(error); $('quick-error').hidden = false; }
+    finally { $('quick-submit').disabled = false; }
+  }
+  async function connectAddress() {
+    const input = $('connect-address').value.trim(); if (!input) return;
+    const sessionName = input.startsWith('/S ') ? input.slice(3).replace(/^"(.*)"$/, '$1') : input;
+    const saved = state().sessions.find((profile) => profile.name === sessionName || `${profile.folder}/${profile.name}` === sessionName);
+    if (saved) { await openConnection(saved); return; }
+    let address;
+    try { address = new URL(input.includes('://') ? input : `ssh://${input}`); } catch { toast('Enter a saved session name or host, such as ssh://user@example.com:22.', true); return; }
+    const protocol = address.protocol.replace(':', '');
+    if (!['ssh', 'sftp', 'telnet', 'raw'].includes(protocol)) { toast('Connect Bar supports SSH, SFTP, Telnet, and Raw TCP hosts.', true); return; }
+    if (address.password || address.search || address.hash || !address.hostname || address.pathname && address.pathname !== '/') { toast('Use a host, username, and optional port. Passwords must be entered in the terminal.', true); return; }
+    await openConnection({ name: address.hostname, protocol, host: address.hostname.replace(/^\[|\]$/g, ''), username: decodeURIComponent(address.username), port: address.port ? Number(address.port) : ['telnet', 'raw'].includes(protocol) ? 23 : 22, forwardings: [] });
+  }
+  function bulkOptions() {
+    const profiles = state().sessions.filter((profile) => getSelection().has(profile.id)); if (profiles.length < 2) return false;
+    $('bulk-form').reset(); $('bulk-description').textContent = `Edit ${profiles.length} selected sessions: ${profiles.map((profile) => profile.name).join(', ')}`; $('bulk-error').hidden = true; dialog('bulk-dialog'); return true;
+  }
+  async function saveBulk(event) {
+    event.preventDefault();
+    const targets = state().sessions.filter((profile) => getSelection().has(profile.id)).map((profile) => {
+      const next = { ...profile, terminal: { ...profile.terminal } };
+      if ($('bulk-folder-enable').checked) next.folder = $('bulk-folder').value.trim();
+      if ($('bulk-user-enable').checked && ['ssh', 'sftp'].includes(profile.protocol)) next.username = $('bulk-user').value.trim();
+      if ($('bulk-font-enable').checked) next.terminal.fontSize = Number($('bulk-font').value);
+      if ($('bulk-color-enable').checked) next.terminal.colorScheme = $('bulk-color').value;
+      return next;
+    });
+    if (!['folder', 'user', 'font', 'color'].some((key) => $(`bulk-${key}-enable`).checked)) { $('bulk-error').textContent = 'Check at least one setting to apply.'; $('bulk-error').hidden = false; return; }
+    $('bulk-save').disabled = true;
+    try { const sessions = await api.saveSessions(targets); setState({ sessions }); renderSessions(); refresh(); $('bulk-dialog').close(); toast(`${targets.length} sessions updated.`); }
+    catch (error) { $('bulk-error').textContent = error.message || String(error); $('bulk-error').hidden = false; }
+    finally { $('bulk-save').disabled = false; }
+  }
+  function renderSnapshots() {
+    $('snapshot-list').replaceChildren();
+    for (const snapshot of state().snapshots || []) {
+      const row = make('div', 'snapshot-row');
+      const description = make('div'); description.append(make('strong', '', snapshot.name), make('span', 'field-note', `${snapshot.sessionIds.length} sessions · ${snapshot.layout.tile ? snapshot.layout.orientation : 'tabs'}`));
+      const load = make('button', 'secondary-button', 'Select'); load.addEventListener('click', () => selectSnapshot(snapshot));
+      const connect = make('button', 'secondary-button', 'Connect…'); connect.addEventListener('click', () => attempt(() => connectSnapshot(snapshot)));
+      const remove = make('button', 'icon-button', '×'); remove.setAttribute('aria-label', `Delete snapshot ${snapshot.name}`); remove.addEventListener('click', () => attempt(async () => { const accepted = await confirmAction({ title: 'Delete snapshot?', message: `Delete “${snapshot.name}”? Saved session profiles remain available.`, accept: 'Delete' }); if (!accepted) return; const saved = await api.saveSnapshots((state().snapshots || []).filter((entry) => entry.id !== snapshot.id)); setState({ snapshots: saved }); renderSnapshots(); }));
+      row.append(description, load, connect, remove); $('snapshot-list').append(row);
+    }
+    if (!$('snapshot-list').children.length) $('snapshot-list').append(make('p', 'field-note', 'No snapshots saved.'));
+  }
+  function selectSnapshot(snapshot) {
+    const profiles = state().sessions.filter((profile) => snapshot.sessionIds.includes(profile.id));
+    setSelection(profiles.map((profile) => profile.id)); setLayout(snapshot.layout); renderSessions();
+    const missing = snapshot.sessionIds.length - profiles.length;
+    $('snapshot-status').textContent = `Selected ${profiles.length} profiles${missing ? `; ${missing} profiles are no longer available` : ''}. No connections were opened.`;
+  }
+  async function connectSnapshot(snapshot) {
+    const profiles = snapshot.sessionIds.map((id) => state().sessions.find((profile) => profile.id === id)).filter(Boolean);
+    if (!profiles.length) { toast('This snapshot has no available saved sessions.', true); return; }
+    const accepted = await confirmAction({ title: `Connect ${profiles.length} saved sessions?`, message: `Open the saved sessions from “${snapshot.name}”. Current tabs stay open.`, targets: profiles.map((profile) => `${profile.name} · ${profile.protocol.toUpperCase()} · ${profile.host || profile.serial?.path || 'Local shell'}`), accept: 'Connect sessions' });
+    if (!accepted) return;
+    setLayout(snapshot.layout); $('snapshots-dialog').close();
+    for (const profile of profiles) await openConnection(profile);
+    const active = [...getConnections().values()].reverse().find((connection) => connection.profile.id === snapshot.layout.activeSessionId);
+    if (active) activate(active.id);
+  }
+  async function saveSnapshot() {
+    const name = $('snapshot-name').value.trim(); if (!name) { toast('Give the snapshot a name.', true); return; }
+    const sessionIds = [...new Set([...getConnections().values()].map((connection) => connection.profile.id).filter((id) => state().sessions.some((profile) => profile.id === id)))];
+    if (!sessionIds.length) { toast('Open at least one saved session before saving a snapshot. Quick connections must be saved first.', true); return; }
+    const existing = (state().snapshots || []).find((entry) => entry.name === name);
+    if (existing && !await confirmAction({ title: 'Replace snapshot?', message: `Replace the saved workspace “${name}”?`, accept: 'Replace' })) return;
+    const snapshot = { ...(existing ? { id: existing.id } : {}), name, sessionIds, layout: { ...getLayout(), activeSessionId: sessionIds.includes(current()?.profile.id) ? current().profile.id : '' } };
+    $('snapshot-save').disabled = true;
+    try { const saved = await api.saveSnapshots([...(state().snapshots || []).filter((entry) => entry !== existing), snapshot]); setState({ snapshots: saved }); renderSnapshots(); $('snapshot-name').value = ''; $('snapshot-status').textContent = `Saved “${name}”. Unsaved quick connections are excluded.`; }
+    finally { $('snapshot-save').disabled = false; }
+  }
+  async function perform(action) {
+    switch (action) {
+      case 'quick-connect': openQuickConnect(); return true;
+      case 'connect-bar': $('connect-address').focus(); $('connect-address').select(); return true;
+      case 'show-command-manager': showManager('commands'); return true;
+      case 'show-active-sessions': showManager('active'); return true;
+      case 'snapshots': renderSnapshots(); $('snapshot-status').textContent = ''; dialog('snapshots-dialog'); return true;
+      case 'clone-session': if (current()) await openConnection({ ...current().profile }); return true;
+      case 'clear-history': {
+        const accepted = await confirmAction({ title: 'Clear command history?', message: 'Remove saved Command Window history from this computer?', accept: 'Clear history' });
+        if (accepted) { setState({ commandHistory: await api.saveCommandHistory([]) }); renderHistory(); } return true;
+      }
+      default: return false;
+    }
+  }
+  function install() {
+    for (const name of ['sessions', 'commands', 'active']) $(`dock-${name}`).addEventListener('click', () => showManager(name));
+    $('command-filter').addEventListener('input', renderCommands); $('active-filter').addEventListener('input', renderActive);
+    $('command-edit').addEventListener('click', showSnippets); $('command-new').addEventListener('click', showSnippets);
+    $('command-run').addEventListener('click', () => { const command = state().snippets.find((entry) => entry.id === selectedCommandId); if (command) attempt(() => launchCommand(command)); });
+    $('active-clone').addEventListener('click', () => attempt(() => perform('clone-session'))); $('active-close').addEventListener('click', () => { if (current()) attempt(() => closeConnection(current().id)); }); $('active-reconnect').addEventListener('click', () => { if (current()) attempt(() => reconnect(current().id)); });
+    $('quick-connect').addEventListener('click', openQuickConnect); $('quick-protocol').addEventListener('change', () => { $('quick-port').value = ['telnet', 'raw'].includes($('quick-protocol').value) ? '23' : '22'; quickFields(); }); $('quick-save').addEventListener('change', quickFields);
+    $('quick-connect-form').addEventListener('submit', submitQuick); $('connect-address').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); attempt(connectAddress); } });
+    $('bulk-form').addEventListener('submit', saveBulk); $('snapshot-save').addEventListener('click', () => attempt(saveSnapshot));
+    $('command-history').addEventListener('change', () => { if ($('command-history').value === '') return; $('command-input').value = state().commandHistory[Number($('command-history').value)] || ''; $('command-input').focus(); $('command-history').value = ''; });
+  }
+  return { install, refresh, showManager, recordHistory, bulkOptions, perform, renderHistory, renderCommands, renderActive };
+}

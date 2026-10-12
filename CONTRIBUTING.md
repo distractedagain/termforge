@@ -1,6 +1,6 @@
 # Contributing
 
-Harbor Terminal welcomes improvements to its original, MIT-licensed implementation. Keep contributions independent: do not submit proprietary SecureCRT code, copied artwork, restricted documentation, or code obtained through license circumvention.
+TermForge welcomes improvements to its original, MIT-licensed implementation. Keep contributions independent: do not submit proprietary SecureCRT code, copied artwork, restricted documentation, or code obtained through license circumvention.
 
 ## Development
 

@@ -8,7 +8,7 @@ const os = require('node:os');
 const { validateSession, validateSettings, validateSnippets, buildLaunch, parseSecureCRTIni, createStore } = require('../app/core.cjs');
 
 function temporary(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harbor-core-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'termforge-core-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -21,7 +21,7 @@ test('SSH validation rejects option injection and malformed structured fields', 
   assert.throws(() => validateSession(ssh({ password: 'secret' })), /unsupported field: password/);
   assert.throws(() => validateSession(ssh({ folder: '../elsewhere' })), /Folder/);
   assert.throws(() => validateSession(ssh({ port: Infinity })), /Port/);
-  assert.throws(() => validateSession(ssh({ protocol: 'telnet' })), /protocol/);
+  assert.throws(() => validateSession(ssh({ protocol: 'unknown' })), /protocol/);
   assert.throws(() => validateSession(ssh({ forwardings: [{ type: 'local', listenPort: 8080, targetHost: 'x', targetPort: 80 }, { type: 'dynamic', listenPort: 8080 }] })), /Duplicate/);
 });
 
@@ -78,11 +78,13 @@ test('SecureCRT INI reader imports plain SSH2 metadata and excludes credentials 
 });
 
 test('settings and snippets are allowlisted and bounded', () => {
-  assert.deepEqual(validateSettings({}), { theme: 'light', fontSize: 14, scrollback: 5000 });
+  const defaults = validateSettings({});
+  assert.equal(defaults.theme, 'light'); assert.equal(defaults.fontSize, 14); assert.equal(defaults.scrollback, 5000);
   assert.throws(() => validateSettings({ theme: 'neon' }), /Theme/);
   assert.throws(() => validateSettings({ fontSize: 1000 }), /Font size/);
   assert.throws(() => validateSettings({ remoteScript: 'x' }), /unsupported/);
-  assert.deepEqual(validateSnippets([{ id: 'example', name: 'Directory', command: 'pwd' }]), [{ id: 'example', name: 'Directory', command: 'pwd' }]);
+  const snippets = validateSnippets([{ id: 'example', name: 'Directory', command: 'pwd' }]);
+  assert.equal(snippets[0].id, 'example'); assert.equal(snippets[0].name, 'Directory'); assert.equal(snippets[0].command, 'pwd'); assert.equal(snippets[0].buttonBar, 'Default');
   assert.throws(() => validateSnippets([{ name: 'Run', command: 'x', password: 'secret' }]), /unsupported/);
   assert.throws(() => validateSnippets([{ name: 'Empty', command: '' }]), /required/);
   assert.throws(() => validateSnippets([{ id: 'same', name: 'One', command: 'one' }, { id: 'same', name: 'Two', command: 'two' }]), /unique/);
@@ -124,7 +126,7 @@ test('imports validate the complete payload before mutation and retain colliding
   const before = fs.readFileSync(path.join(directory, 'config.json'), 'utf8');
   assert.throws(() => store.importConfig({ version: 1, sessions: [ssh({ id: 'valid' }), ssh({ host: '-oBad' })] }), /Host/);
   assert.equal(fs.readFileSync(path.join(directory, 'config.json'), 'utf8'), before);
-  assert.throws(() => store.importConfig({ version: 2, sessions: [] }), /version/);
+  assert.throws(() => store.importConfig({ version: 100, sessions: [] }), /version/);
   assert.throws(() => store.importConfig({ sessions: [], credentials: {} }), /unsupported/);
   const imported = store.importConfig({ version: 1, sessions: [ssh({ id: 'router-one', name: 'Imported router' })] });
   assert.equal(imported.sessions.length, 3);

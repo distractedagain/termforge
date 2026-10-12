@@ -1,52 +1,55 @@
-# Harbor Terminal
+# TermForge
 
-A free, open-source desktop terminal client for macOS, Windows, and Linux. Harbor Terminal brings saved connections, SSH terminals, tabs, tiled views, and reusable commands into one application.
+A free, open-source desktop terminal client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, and Python automation. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, using its macOS interface as the visual reference.
 
-![Harbor Terminal classic interface with illustrative demo sessions](docs/images/classic-interface.png)
+![TermForge macOS interface with illustrative demo sessions](docs/images/current-macos-interface.png)
 
-The preview uses synthetic sessions and output; no device is connected.
+This 0.3 image uses synthetic sessions and output; no device is connected. It was captured in a headless browser, so native macOS window controls are not shown.
 
 ## Download
 
-[Download the v0.2.0 public preview](https://github.com/distractedagain/harbor-terminal/releases/tag/v0.2.0). Release notes identify the available platforms and verification limits. macOS builds use ad-hoc signatures and are not notarized; Windows builds are unsigned. Both may show an operating-system warning when opening them.
+**TermForge 0.3.0 is currently unreleased.** Run the development source below to use the new features. [Historical Harbor Terminal v0.2.0 downloads](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) remain available and do not include the new 0.3 code or name. Their release notes describe available platforms and verification limits. Those macOS builds use ad-hoc signatures and are not notarized; Windows builds are unsigned.
 
 The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
 
-This is an original implementation of familiar terminal-client workflows, informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and [public feature overview](https://www.vandyke.com/products/securecrt/key_features.html). No VanDyke source code, executable disassembly, artwork, or proprietary scripting API is included. Harbor Terminal is independent of VanDyke Software; SecureCRT is its trademark.
+This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
 ## Included
 
-- SSH and interactive SFTP through the operating system's OpenSSH client, plus local shell terminals.
-- Saved sessions organized into folders, session search, tabs, and tiled terminals.
-- SSH identity files, jump hosts, and local, remote, and dynamic port forwarding.
-- Command snippets with a preview and confirmation before sending to multiple terminals.
-- Opt-in output logging, terminal search, themes, and font preferences.
-- JSON configuration import/export and a limited importer for plain SecureCRT SSH2 session INI files. Passwords and proprietary settings are excluded.
+- SSH, interactive SFTP, and local shells through installed system tools; native Telnet and Raw TCP connections; serial device selection and connection settings.
+- Saved session folders, filtering, Quick Connect, Connect Bar, multi-selection and selected-field bulk editing.
+- Reorderable/cloned tabs, horizontal/vertical/grid tiling, an Active Sessions list, and snapshots of saved session sets and basic layout.
+- Categorized Session/Global Options, per-session font/color/cursor/scrollback, mapped text/menu keys, and literal keyword highlighting.
+- A nested Command Manager, named Button Bars, command history, and reviewed multi-session sends.
+- Installed Python execution with a documented send/wait/read/tab/screen API subset, cancellation, output display, and reviewed input recording.
+- Opt-in output logs with pause/resume, terminal search, reviewed ASCII file sends, and a restricted octet TFTP server.
+- SSH identity/certificate paths, jump host, requested forwarding, authentication/algorithm controls, compression and keepalive options.
+- JSON configuration import/export, version-1 migration, and a limited importer for plain nonsecret SecureCRT SSH2 session INI fields.
 
-See [the feature map and limits](docs/FEATURES.md). This is an initial application, not complete SecureCRT feature parity. Native-platform CI tests and packaging passed for Intel and Apple Silicon Macs, Windows x64, and Linux x64. Interactive runtime verification on Windows, Linux, and Apple Silicon is still required.
+See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, independent tab groups/multiple windows, and Windows-specific RDP/ActiveX features remain gaps. TermForge is not yet near identical or feature complete.
 
 ## Classic desktop layout
 
-Version 0.2 uses a compact desktop layout modeled on SecureCRT's familiar window organization: menus and an icon toolbar, a nested Session Manager at the left, flat terminal tabs, a Command Window, a Button Bar, and a segmented status bar. New workspaces default to light gray controls and a black terminal; existing theme preferences remain available.
+Version 0.3 develops the SecureCRT 9.7 macOS layout: the native macOS menu, one compact toolbar with Connect/Keyword fields, vertical Session/Command/Active manager selectors, terminal tabs, Command Window, named Button Bar and segmented status bar. Windows and Linux expose in-window menus. Light/dark controls and independent terminal schemes are available. A comprehensive comparison with a running SecureCRT installation remains required.
 
-Click a saved session to select it, then double-click it, press Enter, or choose Connect. Use View to show or hide the Session Manager, Command Window, and Button Bar. Drag the panel dividers to resize the session tree and Command Window. Button Bar commands populate the Command Window for review before sending.
+Click a saved session to select it, then double-click it, press Enter, or choose Connect. Use View to select managers and show/hide panels. Resize the manager and Command Window with their dividers. Button Bar commands populate the Command Window for review; Command Manager Enter/double-click sends through the command workflow.
 
 ## Run from source
 
 Install Node.js 24 and npm (the source requires Node.js 22 or newer). Native module compilation requires a C++ compiler and Python: Xcode Command Line Tools on macOS, Visual Studio Build Tools with the C++ workload on Windows, or your distribution's C++ build tools on Linux.
 
-The `ssh` and `sftp` programs must be available on your PATH for remote sessions. On Windows, enable the OpenSSH Client optional feature if these commands are missing. Local terminals can run without them.
+The `ssh` and `sftp` programs must be available on PATH for those protocols. On Windows, enable OpenSSH Client if they are missing. Local/Telnet/Raw/serial sessions do not require those executables. Python automation requires an installed Python 3 interpreter (`python3` on macOS/Linux, `python` on Windows); Python is not bundled.
 
 Get the source and start the application:
 
 ```sh
-git clone https://github.com/distractedagain/harbor-terminal.git
-cd harbor-terminal
+git clone https://github.com/distractedagain/termforge.git
+cd termforge
 npm ci
 npm start
 ```
 
-Use `npm install` if you are changing dependencies. The lockfile makes clean installs repeatable. Installation fetches dependencies and Electron and builds the native terminal module.
+Use `npm install` if you are changing dependencies. The lockfile makes clean installs repeatable. Installation fetches dependencies and Electron and prepares native PTY/serial modules. `npm start` opens a desktop window.
 
 Choose **Local shell** to open a terminal. Save an SSH connection with its host, username, and port, then connect. OpenSSH's authenticity and authentication prompts appear inside the terminal. Verify a new server's fingerprint through a trusted source before accepting it.
 
@@ -55,14 +58,15 @@ Choose **Local shell** to open a terminal. Save an SSH connection with its host,
 ```sh
 npm test
 npm run build
+npm run test:ui
 npm run dist
 ```
 
 `npm run smoke` opens the desktop app and exercises a real local PTY and a temporary loopback SSH server, including new-host confirmation, password authentication, remote output, and changed-key refusal. It requires a graphical desktop and OpenSSH's `ssh`/`ssh-keygen` commands. The test uses an isolated application profile and known-hosts file and writes its result and screenshot to a temporary directory. It still uses your ordinary local shell environment.
 
-Version 0.1 was verified on macOS x64 on October 12, 2026: all 16 backend tests passed, and the desktop checks passed for renderer isolation, saved-profile round trips, real local PTYs, two tiled terminals, broadcast withheld until confirmation and then delivered to two targets, persisted preferences, and terminal search. Profile form switching, multiline snippets and commands, and canceled multiline paste were also checked. The system SSH client passed an isolated loopback test for a new-host prompt, password authentication, remote output, and refusal after the server host key changed. The packaged application launched and returned real local-shell output. The 0.2 interface redesign is checked separately without launching Electron; those browser checks use a synthetic bridge and do not establish new live SSH or PTY results. Native Windows/Linux execution, real SFTP transfers, and key/jump-host/forwarding integration have not yet been exercised.
+The local 0.3 feature batch passed **84 backend tests** and **46 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. Renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
 
-Version 0.2 passed the 16 backend tests and 20 headless interface checks, with no browser console errors. Its menu, toolbar, tree, tabs, panel dividers, command review, and responsive layout were checked at 1280 × 800 and 850 × 600. See [the interface verification report](docs/UI-VERIFICATION.md).
+Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic headless interface checks and native source/build/package CI on Intel/Apple Silicon Macs, Windows x64 and Linux x64. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). These historical results do not establish the new 0.3 native runtime. Current-version native CI/packaging and interactive checks remain pending; real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests.
 
 Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
@@ -70,10 +74,10 @@ The test and build workflows retain build artifacts. A separate, manually dispat
 
 ## Connections and privacy
 
-Harbor Terminal launches system OpenSSH without a shell wrapper, with connection arguments passed separately. It uses OpenSSH's known-hosts and authentication mechanisms. Passwords and private-key contents are not stored in Harbor's saved sessions. The existing SSH agent can supply authentication keys. Harbor ignores SSH configuration files and uses the settings you enter in the session editor, so SSH aliases and configured proxy commands are not imported automatically.
+TermForge launches system OpenSSH without a shell wrapper, passing arguments separately and preserving host-key checks. Saved sessions do not store password/private-key contents; the system agent may supply keys. SSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive input. Review recordings before saving or replaying them.
 
-Saved sessions and exported configuration can contain hostnames, usernames, paths, forwarding rules, and command snippets. Output logs can contain secrets printed by a local or remote program. Review these files before sharing them. See [SECURITY.md](SECURITY.md) for the security boundary and reporting guidance.
+Configuration exports/history/snippets may reveal infrastructure or commands; output logs may contain secrets. The TFTP server starts only explicitly, defaults to loopback port 6969, permits one chosen client IP and shares one selected folder; uploads create new files without replacing existing files. See [Python automation](docs/PYTHON-AUTOMATION.md), [TFTP limits](docs/TFTP.md), and [SECURITY.md](SECURITY.md).
 
 ## Contributing and license
 
-[Contributions](CONTRIBUTING.md) are welcome. Harbor's original source is licensed under [MIT](LICENSE), with no subscription or activation requirement. Dependencies retain their respective licenses; MIT does not relicense Electron, xterm.js, node-pty, OpenSSH, or other third-party code.
+[Contributions](CONTRIBUTING.md) are welcome. TermForge's original source is licensed under [MIT](LICENSE), with no subscription or activation requirement. Dependencies retain their respective licenses; MIT does not relicense Electron, xterm.js, node-pty, OpenSSH, or other third-party code.

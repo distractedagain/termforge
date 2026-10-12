@@ -41,6 +41,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
       - name: Install Linux native build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3 build-essential
@@ -111,7 +114,7 @@ jobs:
       - name: Retain public preview build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: harbor-terminal-${{ matrix.platform }}-${{ matrix.arch }}-public-preview
+          name: termforge-${{ matrix.platform }}-${{ matrix.arch }}-public-preview
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
