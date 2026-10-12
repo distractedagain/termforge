@@ -1,0 +1,44 @@
+name: Publish verified public preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful manual Build release artifacts run ID
+        required: true
+        type: string
+      tag:
+        description: Release tag matching the built package version
+        required: true
+        default: v0.2.0
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate artifacts and publish preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Verify all four builds and publish the release
+        id: release
+        run: node scripts/publish-preview.cjs
