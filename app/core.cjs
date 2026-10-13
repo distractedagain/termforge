@@ -6,6 +6,7 @@ const net = require('node:net');
 const { randomUUID } = require('node:crypto');
 const keymap = require('./keymap.cjs');
 const { COLOR_SCHEME_IDS: COLOR_SCHEMES } = require('./color-schemes.cjs');
+const { validateInstanceLayout, pruneSnapshotSession } = require('./snapshot-layout.cjs');
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const SESSION_KEYS = ['id', 'name', 'folder', 'protocol', 'host', 'port', 'username', 'identityFile', 'jumpHost', 'cwd', 'description', 'color', 'forwardings', 'terminal', 'ssh', 'serial'];
@@ -211,7 +212,7 @@ function validateSnapshots(input = [], sessions) {
   const ids = new Set();
   const available = sessions && new Set(sessions.map(session => session.id));
   return input.map(item => {
-    object(item, 'Snapshot', ['id', 'name', 'sessionIds', 'layout']);
+    object(item, 'Snapshot', ['id', 'name', 'sessionIds', 'instances', 'layout']);
     const snapshotId = id(item.id);
     if (ids.has(snapshotId)) fail('Snapshot IDs must be unique.');
     ids.add(snapshotId);
@@ -219,10 +220,17 @@ function validateSnapshots(input = [], sessions) {
     if (!name) fail('Snapshot name is required.');
     if (!Array.isArray(item.sessionIds) || item.sessionIds.length > 32 || new Set(item.sessionIds).size !== item.sessionIds.length) fail('A snapshot may reference at most 32 unique saved sessions.');
     const sessionIds = item.sessionIds.map(value => { const result = id(value); if (result !== value || (available && !available.has(result))) fail('Snapshot refers to an unknown session.'); return result; });
-    const layout = object(item.layout || {}, 'Snapshot layout', ['tile', 'orientation', 'activeSessionId']);
+    const hasInstances = Object.hasOwn(item, 'instances');
+    const layout = object(item.layout === undefined ? {} : item.layout, 'Snapshot layout', ['tile', 'orientation', 'activeSessionId', ...(hasInstances ? ['groups', 'tree', 'activeGroupId'] : [])]);
     const activeSessionId = singleLine(layout.activeSessionId, 'Snapshot active session', 80);
     if (activeSessionId && !sessionIds.includes(activeSessionId)) fail('Snapshot active session must be included.');
-    return { id: snapshotId, name, sessionIds, layout: { tile: boolean(layout.tile, 'Snapshot tile mode'), orientation: choice(layout.orientation, 'Tile orientation', ['grid', 'vertical', 'horizontal'], 'grid'), activeSessionId } };
+    const snapshot = { id: snapshotId, name, sessionIds, layout: { tile: boolean(layout.tile, 'Snapshot tile mode'), orientation: choice(layout.orientation, 'Tile orientation', ['grid', 'vertical', 'horizontal'], 'grid'), activeSessionId } };
+    if (hasInstances) {
+      const workspace = validateInstanceLayout({ ...item, layout }, sessionIds);
+      snapshot.instances = workspace.instances;
+      Object.assign(snapshot.layout, workspace.layout);
+    }
+    return snapshot;
   });
 }
 function expandHome(value, env) {
@@ -387,7 +395,7 @@ function createStore(directory) {
     deleteSession(sessionId) {
       if (typeof sessionId !== 'string' || !sessionId) fail('Session ID is required.');
       const state = load(); state.sessions = state.sessions.filter(item => item.id !== sessionId);
-      state.snapshots = state.snapshots.map(snapshot => ({ ...snapshot, sessionIds: snapshot.sessionIds.filter(id => id !== sessionId), layout: { ...snapshot.layout, activeSessionId: snapshot.layout.activeSessionId === sessionId ? '' : snapshot.layout.activeSessionId } }));
+      state.snapshots = state.snapshots.map(snapshot => pruneSnapshotSession(snapshot, sessionId));
       return persist(state);
     },
     saveSnippets(input) { const snippets = validateSnippets(input); const state = load(); state.snippets = snippets; return persist(state); },
@@ -415,6 +423,7 @@ function createStore(directory) {
           if (snapshotIds.has(snapshot.id)) snapshot.id = randomUUID();
           snapshotIds.add(snapshot.id);
           snapshot.sessionIds = snapshot.sessionIds.map(id => remappedIds.get(id) || id);
+          if (snapshot.instances) snapshot.instances = snapshot.instances.map(instance => ({ ...instance, sessionId: remappedIds.get(instance.sessionId) || instance.sessionId }));
           snapshot.layout.activeSessionId = remappedIds.get(snapshot.layout.activeSessionId) || snapshot.layout.activeSessionId;
           state.snapshots.push(snapshot);
         }

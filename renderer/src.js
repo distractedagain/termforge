@@ -11,9 +11,11 @@ import { matchingMapping, decodeMappedText } from './keymap.js';
 import { createTransferUi } from './transfers.js';
 import './style.css';
 import './extensions.css';
+import './tab-groups.css';
 import { resolveColorScheme } from '../app/color-schemes.cjs';
 import { createColorPicker } from './color-picker.js';
 import { applyInterfaceColors, applyTerminalColors } from './appearance.js';
+import { createTabGroups } from './tab-groups.js';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -33,6 +35,9 @@ const collapsedFolders = new Set();
 let activeId = null;
 let tileView = false;
 let tileOrientation = 'grid';
+const tabGroups = createTabGroups();
+const groupNodes = new Map();
+let renderedTreeRoot;
 let selectedButtonBar = 'Default';
 let dragConnectionId = null;
 let quickKeyword = '';
@@ -53,8 +58,9 @@ const panes = { sessionManager: true, commandWindow: true, buttonBar: true };
 const workflows = createWorkflows({ api, getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
   getSelection: () => selectedSessionIds,
   setSelection: (ids) => { selectedSessionIds.clear(); for (const id of ids) selectedSessionIds.add(id); selectedSessionId = ids[0] || null; },
-  getLayout: () => ({ tile: tileView, orientation: tileOrientation }),
-  setLayout: (layout) => { tileView = Boolean(layout.tile); tileOrientation = ['vertical', 'horizontal', 'grid'].includes(layout.orientation) ? layout.orientation : 'grid'; renderWorkspace(); requestAnimationFrame(fitVisible); }, renderSessions
+  getLayout: () => tabGroups.getLayout(),
+  setLayout: (layout) => { if (layout.tile) tabGroups.tile(layout.orientation); else tabGroups.collapse(); refreshGroups(); },
+  restoreLayout: (layout, idMap, previousLayout) => { if (tabGroups.restore(layout, idMap, previousLayout)) refreshGroups(); }, renderSessions
 });
 const scripts = createScriptUi({ api, getActiveId: () => activeId, toast });
 const recorder = createRecorder({ api, getConnection: () => connections.get(activeId), confirmAction, toast, changed: updateWorkspaceStatus });
@@ -572,7 +578,7 @@ function applySettings() {
   requestAnimationFrame(fitVisible);
 }
 
-function createConnection(response, profile) {
+function createConnection(response, profile, oldId = null) {
   const pane = make('section', 'terminal-pane');
   pane.dataset.connectionId = response.id;
   const toolbar = make('div', 'pane-toolbar');
@@ -606,6 +612,7 @@ function createConnection(response, profile) {
   term.loadAddon(search);
   const connection = { id: response.id, title: response.title || profile.name, protocol: response.protocol || profile.protocol, profile: { ...profile }, pane, mount, term, fit, search, exitBar, exitLabel, logButton, exited: false, logging: false, logPaused: false, reconnecting: false, writeErrorShown: false };
   connections.set(response.id, connection);
+  if (!oldId || !tabGroups.replace(oldId, response.id)) tabGroups.add(response.id);
   $('terminal-workspace').append(pane);
   term.open(mount);
   applyTerminalColors(connection, state.settings.colorScheme);
@@ -644,9 +651,8 @@ function createConnection(response, profile) {
     else pasteClipboard(connection);
   }, true);
   mount.addEventListener('contextmenu', (event) => { if (state.settings.pasteOnRightClick) { event.preventDefault(); pasteClipboard(connection); } });
-  pane.addEventListener('mousedown', () => {
-    if (activeId !== connection.id) { activeId = connection.id; renderTabs(); renderWorkspace(); updateWorkspaceStatus(); }
-  });
+  pane.addEventListener('mousedown', () => { if (activeId !== connection.id) activate(connection.id, false); });
+  mount.addEventListener('focusin', () => { if (activeId !== connection.id) activate(connection.id, false); });
   const observer = new ResizeObserver(() => { if (!pane.hidden) requestAnimationFrame(() => safeFit(connection)); });
   observer.observe(mount);
   connection.observer = observer;
@@ -695,22 +701,26 @@ function handleTerminalExit(event) {
   connection.exitBar.hidden = false;
   connection.exitLabel.textContent = `Connection ended${event.exitCode !== undefined && event.exitCode !== null ? ` · exit ${event.exitCode}` : ''}${event.signal ? ` · ${event.signal}` : ''}. Terminal output is retained.`;
   renderTabs(); renderSessions(); updateWorkspaceStatus();
-  if (state.settings.closeOnExit) { requestAnimationFrame(() => disposeConnection(connection.id)); return; }
+  if (state.settings.closeOnExit && !connection.reconnecting) {
+    requestAnimationFrame(() => { if (connections.get(connection.id) === connection && !connection.reconnecting) disposeConnection(connection.id); });
+    return;
+  }
   requestAnimationFrame(() => safeFit(connection));
 }
 
 async function openConnection(profile, oldId = null) {
-  if (!ready) { toast('The workspace is still loading. Please try again in a moment.'); return; }
+  if (!ready) { toast('The workspace is still loading. Please try again in a moment.'); return null; }
   if (profile.id) profile = state.sessions.find((session) => session.id === profile.id) || profile;
   openingCount += 1;
   updateWorkspaceStatus();
   try {
     const result = await api.terminalOpen(profile.id ? { sessionId: profile.id } : { profile });
-    const connection = createConnection(result, profile);
+    const connection = createConnection(result, profile, oldId);
     if (oldId) disposeConnection(oldId);
     activate(connection.id);
     renderSessions(); workflows.refresh();
-  } catch (error) { toast(`Could not open ${profile.name}: ${errorMessage(error)}`, true); }
+    return connection;
+  } catch (error) { toast(`Could not open ${profile.name}: ${errorMessage(error)}`, true); return null; }
   finally { openingCount -= 1; updateWorkspaceStatus(); }
 }
 
@@ -729,6 +739,7 @@ function fitVisible() {
 
 function activate(id, focus = true) {
   if (!connections.has(id)) return;
+  tabGroups.activate(id);
   activeId = id;
   renderTabs();
   renderWorkspace();
@@ -739,63 +750,178 @@ function activate(id, focus = true) {
   });
 }
 
+function clearTabDrag() {
+  dragConnectionId = null;
+  for (const node of document.querySelectorAll('.drop-before, .drop-target')) node.classList.remove('drop-before', 'drop-target');
+  for (const node of document.querySelectorAll('[data-drop-edge]')) delete node.dataset.dropEdge;
+}
+
+function syncConnectionOrder() {
+  const ids = tabGroups.ordered().flatMap(group => group.tabs).filter(id => connections.has(id));
+  if (ids.length !== connections.size || ids.every((id, index) => id === [...connections.keys()][index])) return;
+  const order = ids.map(id => connections.get(id));
+  connections.clear(); for (const connection of order) connections.set(connection.id, connection);
+  if (api?.terminalReorder) Promise.resolve(api.terminalReorder(order.filter(entry => !entry.exited).map(entry => entry.id))).catch(error => toast(`Could not update script tab order: ${errorMessage(error)}`, true));
+}
+
+function refreshGroups(focus = true) {
+  activeId = tabGroups.activeId;
+  syncConnectionOrder(); renderTabs(); renderWorkspace(); updateWorkspaceStatus();
+  requestAnimationFrame(() => { fitVisible(); if (focus && !document.querySelector('dialog[open]')) connections.get(activeId)?.term.focus(); });
+}
+
+function bindStripDrop(strip, getGroupId) {
+  strip.addEventListener('dragover', event => { if (dragConnectionId) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; strip.classList.add('drop-target'); } });
+  strip.addEventListener('dragleave', event => { if (!strip.contains(event.relatedTarget)) strip.classList.remove('drop-target'); });
+  strip.addEventListener('drop', event => {
+    if (!dragConnectionId) return;
+    event.preventDefault(); event.stopPropagation();
+    const changed = tabGroups.move(dragConnectionId, getGroupId()); clearTabDrag(); if (changed) refreshGroups();
+  });
+}
+
+function ensureGroupNode(group) {
+  if (groupNodes.has(group.id)) return groupNodes.get(group.id);
+  const node = make('section', 'tab-group'); node.dataset.groupId = group.id;
+  const strip = make('div', 'tab-strip tab-group-strip'); strip.setAttribute('role', 'tablist'); strip.setAttribute('aria-label', 'Sessions in tab group');
+  const body = make('div', 'tab-group-body');
+  bindStripDrop(strip, () => group.id);
+  const dropEdge = event => {
+    const source = tabGroups.groupFor(dragConnectionId);
+    if (!source || source.id === group.id && source.tabs.length < 2) return 'center';
+    const rect = body.getBoundingClientRect();
+    const right = rect.right - event.clientX; const bottom = rect.bottom - event.clientY;
+    if (right < Math.min(70, rect.width * 0.25) && right / rect.width < bottom / rect.height) return 'vertical';
+    if (bottom < Math.min(60, rect.height * 0.25)) return 'horizontal';
+    return 'center';
+  };
+  body.addEventListener('dragover', event => {
+    if (!dragConnectionId) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'move'; body.dataset.dropEdge = dropEdge(event);
+  });
+  body.addEventListener('dragleave', event => { if (!body.contains(event.relatedTarget)) delete body.dataset.dropEdge; });
+  body.addEventListener('drop', event => {
+    if (!dragConnectionId) return;
+    event.preventDefault(); event.stopPropagation();
+    const edge = dropEdge(event);
+    const changed = edge === 'center' ? tabGroups.move(dragConnectionId, group.id) : tabGroups.split(dragConnectionId, group.id, edge);
+    clearTabDrag(); if (changed) refreshGroups();
+  });
+  node.append(strip, body);
+  const entry = { node, strip, body }; groupNodes.set(group.id, entry); return entry;
+}
+
+function renderTab(connection, group) {
+  const selected = connection.id === group.activeId;
+  const tab = make('div', `terminal-tab${selected ? ' active' : ''}`);
+  tab.dataset.connectionId = connection.id; tab.draggable = true; tab.setAttribute('role', 'presentation');
+  tab.addEventListener('dragstart', event => { dragConnectionId = connection.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', connection.id); });
+  tab.addEventListener('dragover', event => {
+    if (dragConnectionId && dragConnectionId !== connection.id) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; tab.classList.add('drop-before'); }
+  });
+  tab.addEventListener('dragleave', () => tab.classList.remove('drop-before'));
+  tab.addEventListener('drop', event => {
+    if (!dragConnectionId) return;
+    event.preventDefault(); event.stopPropagation();
+    const changed = tabGroups.move(dragConnectionId, group.id, connection.id); clearTabDrag(); if (changed) refreshGroups();
+  });
+  tab.addEventListener('dragend', clearTabDrag);
+  const dot = make('span', `tab-dot ${connection.exited ? 'exited' : 'active'}`);
+  if (!connection.exited && /^#[0-9a-f]{6}$/i.test(connection.profile.color || '')) dot.style.backgroundColor = connection.profile.color;
+  const button = make('button', 'tab-label', connection.title);
+  button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(selected));
+  button.setAttribute('aria-controls', `pane-${connection.id}`); button.tabIndex = selected ? 0 : -1;
+  connection.pane.id = `pane-${connection.id}`;
+  button.title = `${connection.title} · ${connection.exited ? 'Ended' : 'Open'}`;
+  button.addEventListener('click', () => activate(connection.id));
+  button.addEventListener('dblclick', () => openConnection({ ...connection.profile }));
+  button.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const index = group.tabs.indexOf(connection.id);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? group.tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + group.tabs.length) % group.tabs.length;
+    activate(group.tabs[next], false);
+    document.querySelector(`.terminal-tab[data-connection-id="${group.tabs[next]}"] .tab-label`)?.focus();
+  });
+  tab.append(dot, button);
+  if (connection.logging) tab.append(make('span', 'tab-log-dot', '●'));
+  const close = make('button', 'icon-button', '×'); close.title = `Close ${connection.title}`; close.setAttribute('aria-label', close.title);
+  close.addEventListener('click', () => closeConnection(connection.id)); tab.append(close);
+  return tab;
+}
+
 function renderTabs() {
-  const nodes = [];
-  for (const connection of connections.values()) {
-    const tab = make('div', `terminal-tab${connection.id === activeId ? ' active' : ''}`);
-    tab.dataset.connectionId = connection.id; tab.draggable = true;
-    tab.addEventListener('dragstart', (event) => { dragConnectionId = connection.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', connection.id); });
-    tab.addEventListener('dragover', (event) => { if (dragConnectionId && dragConnectionId !== connection.id) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; tab.classList.add('drop-before'); } });
-    tab.addEventListener('dragleave', () => tab.classList.remove('drop-before'));
-    tab.addEventListener('drop', (event) => {
-      event.preventDefault(); tab.classList.remove('drop-before');
-      if (!dragConnectionId || dragConnectionId === connection.id || !connections.has(dragConnectionId)) return;
-      const order = [...connections.values()].filter((entry) => entry.id !== dragConnectionId); order.splice(order.findIndex((entry) => entry.id === connection.id), 0, connections.get(dragConnectionId));
-      connections.clear(); for (const entry of order) connections.set(entry.id, entry); dragConnectionId = null; renderTabs(); workflows.renderActive();
-      if (api.terminalReorder) Promise.resolve(api.terminalReorder(order.filter(entry => !entry.exited).map(entry => entry.id))).catch(error => toast(`Could not update script tab order: ${errorMessage(error)}`, true));
-    });
-    tab.addEventListener('dragend', () => { dragConnectionId = null; for (const node of $('tab-strip').children) node.classList.remove('drop-before'); });
-    tab.setAttribute('role', 'presentation');
-    const dot = make('span', `tab-dot ${connection.exited ? 'exited' : 'active'}`);
-    if (!connection.exited && /^#[0-9a-f]{6}$/i.test(connection.profile.color || '')) dot.style.backgroundColor = connection.profile.color;
-    const button = make('button', 'tab-label', connection.title);
-    button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', String(connection.id === activeId));
-    button.setAttribute('aria-controls', `pane-${connection.id}`);
-    connection.pane.id = `pane-${connection.id}`;
-    button.title = `${connection.title} · ${connection.exited ? 'Ended' : 'Open'}`;
-    button.addEventListener('click', () => activate(connection.id));
-    button.addEventListener('dblclick', () => openConnection({ ...connection.profile }));
-    tab.append(dot, button);
-    if (connection.logging) tab.append(make('span', 'tab-log-dot', '●'));
-    const close = make('button', 'icon-button', '×');
-    close.title = `Close ${connection.title}`;
-    close.setAttribute('aria-label', close.title);
-    close.addEventListener('click', () => closeConnection(connection.id));
-    tab.append(close);
-    nodes.push(tab);
+  const groups = tabGroups.ordered();
+  const grouped = groups.length > 1;
+  $('tab-strip').replaceChildren();
+  for (const group of groups) {
+    const entry = ensureGroupNode(group);
+    const nodes = group.tabs.map(id => connections.get(id)).filter(Boolean).map(connection => renderTab(connection, group));
+    entry.strip.hidden = !grouped;
+    if (grouped) entry.strip.replaceChildren(...nodes);
+    else { entry.strip.replaceChildren(); $('tab-strip').replaceChildren(...nodes); }
   }
-  $('tab-strip').replaceChildren(...nodes);
+  $('tab-strip').hidden = grouped;
   $('connection-count').textContent = `${connections.size} session${connections.size === 1 ? '' : 's'}`;
   $('toggle-tile').disabled = connections.size < 1;
   workflows.renderActive();
 }
 
+function renderGroupTree(node) {
+  if (node.groupId) return ensureGroupNode(tabGroups.groupById(node.groupId)).node;
+  const split = make('div', 'tab-group-split'); split.dataset.direction = node.direction;
+  const first = renderGroupTree(node.first); const second = renderGroupTree(node.second);
+  const divider = make('div', 'group-divider'); divider.tabIndex = 0;
+  divider.setAttribute('role', 'separator'); divider.setAttribute('aria-label', `Resize ${node.direction} tab groups`);
+  divider.setAttribute('aria-orientation', node.direction); divider.setAttribute('aria-valuemin', '10'); divider.setAttribute('aria-valuemax', '90');
+  const resize = value => {
+    node.ratio = Math.max(0.1, Math.min(0.9, value));
+    first.style.flexGrow = String(node.ratio); second.style.flexGrow = String(1 - node.ratio);
+    split.dataset.ratio = String(node.ratio); divider.setAttribute('aria-valuenow', String(Math.round(node.ratio * 100)));
+    divider.setAttribute('aria-valuetext', `${Math.round(node.ratio * 100)} percent`);
+    requestAnimationFrame(fitVisible);
+  };
+  divider.addEventListener('keydown', event => {
+    const decrease = node.direction === 'vertical' ? 'ArrowLeft' : 'ArrowUp';
+    const increase = node.direction === 'vertical' ? 'ArrowRight' : 'ArrowDown';
+    if (![decrease, increase, 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault(); resize(event.key === 'Home' ? 0.1 : event.key === 'End' ? 0.9 : node.ratio + (event.key === increase ? 0.05 : -0.05));
+  });
+  divider.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault(); divider.focus(); divider.setPointerCapture(event.pointerId); divider.classList.add('resizing');
+    const rect = split.getBoundingClientRect();
+    const move = moveEvent => { if (moveEvent.pointerId === event.pointerId) resize(node.direction === 'vertical' ? (moveEvent.clientX - rect.left) / rect.width : (moveEvent.clientY - rect.top) / rect.height); };
+    const stop = () => { divider.classList.remove('resizing'); divider.removeEventListener('pointermove', move); divider.removeEventListener('pointerup', stop); divider.removeEventListener('pointercancel', stop); divider.removeEventListener('lostpointercapture', stop); };
+    divider.addEventListener('pointermove', move); divider.addEventListener('pointerup', stop); divider.addEventListener('pointercancel', stop); divider.addEventListener('lostpointercapture', stop);
+  });
+  split.append(first, divider, second); resize(node.ratio);
+  return split;
+}
+
 function renderWorkspace() {
+  const groups = tabGroups.ordered(); const layout = tabGroups.getLayout();
+  tileView = groups.length > 1; tileOrientation = layout.orientation;
   const hasConnections = connections.size > 0;
   $('welcome').hidden = hasConnections;
-  $('terminal-workspace').hidden = !hasConnections;
-  $('tab-strip').hidden = false;
-  applyPaneVisibility();
-  $('footer-search').hidden = !hasConnections;
-  $('terminal-workspace').classList.toggle('tiles', tileView);
-  $('terminal-workspace').classList.toggle('single-tile', connections.size === 1);
-  $('terminal-workspace').dataset.orientation = tileOrientation;
-  $('toggle-tile').setAttribute('aria-pressed', String(tileView));
-  for (const connection of connections.values()) {
-    connection.pane.hidden = !tileView && connection.id !== activeId;
-    connection.pane.classList.toggle('active', connection.id === activeId);
+  const workspace = $('terminal-workspace'); workspace.hidden = !hasConnections;
+  $('tab-strip').hidden = tileView;
+  applyPaneVisibility(); $('footer-search').hidden = !hasConnections;
+  workspace.classList.add('group-workspace'); workspace.classList.toggle('tiles', tileView); workspace.classList.toggle('single-tile', connections.size === 1);
+  workspace.dataset.orientation = tileOrientation; $('toggle-tile').setAttribute('aria-pressed', String(tileView));
+  if (tabGroups.tree !== renderedTreeRoot) {
+    workspace.replaceChildren(...(tabGroups.tree ? [renderGroupTree(tabGroups.tree)] : [])); renderedTreeRoot = tabGroups.tree;
   }
+  for (const group of groups) {
+    const entry = ensureGroupNode(group); entry.node.classList.toggle('active-group', group.id === layout.activeGroupId);
+    for (const id of group.tabs) {
+      const connection = connections.get(id); if (!connection) continue;
+      if (connection.pane.parentNode !== entry.body) entry.body.append(connection.pane);
+      connection.pane.hidden = id !== group.activeId; connection.pane.classList.toggle('active', id === activeId);
+    }
+  }
+  for (const [id, entry] of groupNodes) if (!tabGroups.groupById(id)) { entry.node.remove(); groupNodes.delete(id); }
+  syncConnectionOrder();
   if (!hasConnections) { $('terminal-search-bar').hidden = true; $('broadcast-mode').checked = false; }
 }
 
@@ -843,16 +969,21 @@ function applyMappedKey(connection, mapping) {
 function disposeConnection(id) {
   const connection = connections.get(id);
   if (!connection) return;
+  const wasActive = activeId === id;
   closedIds.add(id);
   connection.observer.disconnect();
   connection.highlight.dispose();
   connection.term.dispose();
   connection.pane.remove();
   connections.delete(id);
+  tabGroups.remove(id);
   pendingData.delete(id); pendingExits.delete(id);
-  if (activeId === id) activeId = [...connections.keys()].at(-1) || null;
+  activeId = tabGroups.activeId;
   renderTabs(); renderWorkspace(); renderSessions(); updateWorkspaceStatus();
-  requestAnimationFrame(fitVisible);
+  requestAnimationFrame(() => {
+    fitVisible();
+    if (wasActive && !document.querySelector('dialog[open]')) connections.get(activeId)?.term.focus();
+  });
 }
 
 async function closeConnection(id) {
@@ -1113,8 +1244,20 @@ async function performAction(action) {
       if (accepted && connections.has(current.id) && !current.exited) await writeToConnection(current, file.text.replace(/\r\n|\n/g, '\r'));
       break;
     }
-    case 'tile': tileView = !tileView; renderWorkspace(); requestAnimationFrame(fitVisible); break;
-    case 'tile-horizontal': case 'tile-vertical': case 'tile-grid': tileView = true; tileOrientation = action.slice(5); renderWorkspace(); requestAnimationFrame(fitVisible); break;
+    case 'tile': if (tabGroups.ordered().length > 1) tabGroups.collapse(); else tabGroups.tile(tileOrientation); refreshGroups(); break;
+    case 'tile-horizontal': case 'tile-vertical': case 'tile-grid': tabGroups.tile(action.slice(5)); refreshGroups(); break;
+    case 'group-vertical': case 'group-horizontal': {
+      const group = tabGroups.groupFor(activeId);
+      if (group && tabGroups.split(activeId, group.id, action.slice(6))) refreshGroups();
+      else toast('Open at least two tabs in this group before creating another group.');
+      break;
+    }
+    case 'group-move-next': {
+      const groups = tabGroups.ordered(); const group = tabGroups.groupFor(activeId); const index = groups.indexOf(group);
+      if (groups.length > 1 && index >= 0 && tabGroups.move(activeId, groups[(index + 1) % groups.length].id)) refreshGroups();
+      break;
+    }
+    case 'group-collapse': tabGroups.collapse(); refreshGroups(); break;
     case 'clear-screen': if (current) current.term.clear(); break;
     case 'reset-terminal': if (current) current.term.reset(); break;
     case 'keyword-options': openSettings(); selectCategory('settings-dialog', 'keywords'); break;
@@ -1130,7 +1273,7 @@ async function performAction(action) {
     case 'show-button-bar': setPane('buttonBar', !panes.buttonBar); break;
     case 'sftp': openSftp(); break;
     case 'next-tab': case 'previous-tab': {
-      const ids = [...connections.keys()]; const index = ids.indexOf(activeId);
+      const ids = tabGroups.groupFor(activeId)?.tabs || []; const index = ids.indexOf(activeId);
       if (ids.length) activate(ids[(index + (action === 'next-tab' ? 1 : -1) + ids.length) % ids.length]);
       break;
     }
@@ -1156,7 +1299,7 @@ function menuDefinitions(name) {
     case 'transfer': return [item('Open SFTP Session', 'sftp'), item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('SFTP Command Help…', 'help')];
     case 'script': return [item('Run Python Script…', 'script-run'), item('Cancel Script', 'script-cancel', scripts.hasRunning()), null, item(recorder.isRecording() ? 'Stop Recording…' : 'Record Input…', 'script-record', Boolean(current && !current.exited)), item('Script Output…', 'script-output')];
     case 'tools': return [item(current?.logging ? 'Stop Session Logging' : 'Log Session…', 'log', Boolean(current && !current.exited)), item(current?.logPaused ? 'Resume Log' : 'Pause Log', 'pause-log', Boolean(current && current.logging && !current.exited)), item('Configure Button Bar…', 'snippets'), item('Keyword Highlighting…', 'keyword-options'), null, item('Clear Screen', 'clear-screen', Boolean(current)), item('Reset Terminal', 'reset-terminal', Boolean(current)), item('Clear Command History…', 'clear-history'), null, item('Import / Export Sessions…', 'import-export')];
-    case 'window': return [item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0), item('Clone Session', 'clone-session', Boolean(current)), item('Next Tab', 'next-tab', connections.size > 1), item('Previous Tab', 'previous-tab', connections.size > 1), null, ...[...connections.values()].map((connection, index) => item(`${index + 1}  ${connection.title}`, `activate:${connection.id}`, true, '', connection.id === activeId))];
+    case 'window': return [item('New Vertical Tab Group', 'group-vertical', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('New Horizontal Tab Group', 'group-horizontal', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('Move Tab to Next Group', 'group-move-next', tileView), item('Collapse Tab Groups', 'group-collapse', tileView), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0), item('Clone Session', 'clone-session', Boolean(current)), item('Next Tab', 'next-tab', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('Previous Tab', 'previous-tab', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), null, ...[...connections.values()].map((connection, index) => item(`${index + 1}  ${connection.title}`, `activate:${connection.id}`, true, '', connection.id === activeId))];
     case 'help': return [item('TermForge Help…', 'help'), item('About TermForge…', 'help')];
     default: return [];
   }
@@ -1282,7 +1425,8 @@ function setupHandlers() {
     catch (error) { toast(errorMessage(error), true); }
     finally { $('choose-key').disabled = false; }
   });
-  bind('toggle-tile', 'click', () => { tileView = !tileView; renderWorkspace(); requestAnimationFrame(fitVisible); });
+  bind('toggle-tile', 'click', () => runAction('tile'));
+  bindStripDrop($('tab-strip'), () => tabGroups.ordered()[0]?.id);
   bind('send-command', 'click', sendCommand);
   bind('command-input', 'keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); } });
   bind('broadcast-mode', 'change', () => { $('command-input').placeholder = $('broadcast-mode').checked ? 'Command for all active sessions. Review targets before sending.' : 'Enter a command here. Press Enter to send; Shift+Enter adds a line.'; updateWorkspaceStatus(); });

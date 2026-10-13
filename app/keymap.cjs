@@ -2,7 +2,7 @@
 
 const MODIFIERS = Object.freeze(['Ctrl', 'Alt', 'Shift', 'Meta']);
 const NAMED_KEYS = Object.freeze(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Backspace', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Tab', 'Escape', 'Space']);
-const MENU_ACTIONS = Object.freeze(['connect', 'disconnect', 'reconnect', 'local-shell', 'quick-connect', 'find', 'copy', 'paste', 'select-all', 'clear-screen', 'reset-terminal', 'sftp', 'snapshots', 'next-tab', 'previous-tab', 'tile', 'tile-horizontal', 'tile-vertical', 'tile-grid', 'script-run']);
+const MENU_ACTIONS = Object.freeze(['connect', 'disconnect', 'reconnect', 'local-shell', 'quick-connect', 'find', 'copy', 'paste', 'select-all', 'clear-screen', 'reset-terminal', 'sftp', 'snapshots', 'next-tab', 'previous-tab', 'tile', 'tile-horizontal', 'tile-vertical', 'tile-grid', 'group-vertical', 'group-horizontal', 'group-move-next', 'group-collapse', 'script-run']);
 
 function normalizeKeyCombination(value) {
   if (typeof value !== 'string' || value.length > 100) throw new Error('Key combination must be text of at most 100 characters.');

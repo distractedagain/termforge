@@ -26,7 +26,19 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.4 — color schemes
+## New in 0.5 source — tab groups and workspace snapshots
+
+The current source adds independent tab groups with adjustable splits, tab movement, and per-group selected terminals. Use **Window → New Vertical Tab Group**, **New Horizontal Tab Group**, or **Collapse Tab Groups**. Existing tile commands remain available.
+
+Snapshots now preserve repeated saved-session connections, tab order, each group's selected tab, focused group and split sizes. Restore adds the saved arrangement beside current tabs and reports partial failures. Older snapshots remain readable; unsaved quick connections must be saved as profiles first. See [Tab Groups and Snapshots](docs/TAB-GROUPS.md).
+
+The 0.5 source passed **115 backend tests and 72 headless interface checks**, with no failures or browser console errors. Tests cover live tab movement, keyboard/pointer resizing, duplicate-session restoration, partial failures, and reconnecting with close-on-exit enabled. Packaged interactive runtime testing remains pending.
+
+![Independent tab groups using Solarized Dark](docs/images/tab-groups-solarized-dark.png)
+
+This 0.5 preview uses synthetic sessions and output in a headless browser. No device is connected and native macOS window controls are not shown.
+
+## Color schemes added in 0.4
 
 The current source adds **Options → Color Schemes…** and a palette toolbar button. Choose Traditional, Monochrome, Solarized Dark, Solarized Light, Forge Dark, Forge Light, or High Contrast. Each preset defines all sixteen ANSI colors, foreground/background, cursor, and selection colors. The dialog renders a local ANSI sample; **Cancel** or **Escape** leaves your saved settings and live terminals unchanged.
 
@@ -42,7 +54,7 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 
 - SSH, interactive SFTP, and local shells through installed system tools; native Telnet and Raw TCP connections; serial device selection and connection settings.
 - Saved session folders, filtering, Quick Connect, Connect Bar, multi-selection and selected-field bulk editing.
-- Reorderable/cloned tabs, horizontal/vertical/grid tiling, an Active Sessions list, and snapshots of saved session sets and basic layout.
+- Reorderable/cloned tabs, independent resizable tab groups, horizontal/vertical/grid tiling, an Active Sessions list, and snapshots retaining repeated saved-session connections and group layouts.
 - Categorized Session/Global Options, per-session font/color/cursor/scrollback, mapped text/menu keys, and literal keyword highlighting.
 - A nested Command Manager, named Button Bars, command history, and reviewed multi-session sends.
 - Installed Python execution with a documented send/wait/read/tab/screen API subset, cancellation, output display, and reviewed input recording.
@@ -50,7 +62,7 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 - SSH identity/certificate paths, jump host, requested forwarding, authentication/algorithm controls, compression and keepalive options.
 - JSON configuration import/export, version-1 migration, and a limited importer for plain nonsecret SecureCRT SSH2 session INI fields.
 
-See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, independent tab groups/multiple windows, and Windows-specific RDP/ActiveX features remain gaps. TermForge is not yet near identical or feature complete.
+See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, live tabs across multiple windows, and Windows-specific RDP/ActiveX features remain gaps. TermForge is not yet near identical or feature complete.
 
 ## Classic desktop layout
 

@@ -25,3 +25,11 @@ Clean previews, captured before the isolated injection test:
 - `classic-empty-1280x800.png` and `classic-empty-850x600.png`: clean unconfigured workspace.
 
 `report.json` contains per-check results and geometry evidence. `fixture.cjs` and `run.cjs` contain the isolated fixture and repeatable harness. Browser and server processes were closed by the harness after the run.
+
+## TermForge 0.5 tab group verification
+
+On October 12, 2026, the complete `scripts/ui-check.cjs` harness passed **72/72 checks**, with no renderer console/page errors. It uses a synthetic bridge and real xterm rendering; it does not launch Electron or real terminal processes.
+
+New checks cover independent active tabs and focused command routing; cross-group drag with retained output and no transport restart; keyboard and pointer resizing, including a resize after moving a tab; collapse with preserved order; reconnect placement with delayed opening and close-on-exit enabled; repeated saved-session instances; per-group selection and ratio restoration beside existing groups; failed active-tab fallback; and pruning a wholly failed group. Existing palette, dialogs, synthetic transfer/script and platform layout checks remain included.
+
+The clean `docs/images/tab-groups-solarized-dark.png` image shows three groups, four synthetic connections (including two instances of the router profile), and matching Solarized Dark chrome at 1280×800. The screenshot was visually inspected. Native macOS title/menu controls are not shown. These checks establish renderer behavior with a simulated bridge, not full SecureCRT visual parity or packaged native behavior.

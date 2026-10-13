@@ -376,6 +376,221 @@ async function runColorChecks() {
   }
 }
 
+const terminalTab = (page, id) => page.locator(`.terminal-tab[data-connection-id="${id}"]:visible`);
+async function visibleTerminalIds(page) {
+  return page.locator('.terminal-pane:visible').evaluateAll(panes => panes.map(pane => pane.dataset.connectionId).sort());
+}
+async function groupFor(page, id) {
+  return page.locator(`.terminal-pane[data-connection-id="${id}"]`).evaluate(pane => pane.closest('.tab-group')?.dataset.groupId);
+}
+async function workspaceView(page) {
+  return page.evaluate(() => {
+    const groups = [...document.querySelectorAll('.tab-group')];
+    const read = element => {
+      if (element.classList.contains('tab-group')) {
+        const strip = groups.length === 1 ? document.getElementById('tab-strip') : element.querySelector('.tab-group-strip');
+        return { groupId: element.dataset.groupId, tabs: [...strip.querySelectorAll('.terminal-tab')].map(tab => tab.dataset.connectionId), activeId: strip.querySelector('.tab-label[aria-selected="true"]')?.closest('.terminal-tab')?.dataset.connectionId };
+      }
+      const children = [...element.children].filter(child => child.matches('.tab-group, .tab-group-split'));
+      if (children.length !== 2) throw new Error('A workspace split must have two group branches.');
+      const divider = [...element.children].find(child => child.classList.contains('group-divider'));
+      return { direction: element.dataset.direction, ratio: Number(divider.getAttribute('aria-valuenow')) / 100, first: read(children[0]), second: read(children[1]) };
+    };
+    const root = document.querySelector('#terminal-workspace > .tab-group, #terminal-workspace > .tab-group-split');
+    return { groups: groups.map(read), tree: root ? read(root) : null, activeGroupId: document.querySelector('.tab-group.active-group')?.dataset.groupId };
+  });
+}
+function filteredWorkspaceTree(tree, ids) {
+  if (!tree) return null;
+  if (tree.tabs) {
+    const tabs = tree.tabs.filter(id => ids.has(id));
+    return tabs.length ? { tabs, activeId: tabs.includes(tree.activeId) ? tree.activeId : null } : null;
+  }
+  const first = filteredWorkspaceTree(tree.first, ids); const second = filteredWorkspaceTree(tree.second, ids);
+  return first && second ? { direction: tree.direction, ratio: tree.ratio, first, second } : first || second;
+}
+function expectedSnapshotTree(snapshot, opened) {
+  const mapping = new Map(snapshot.instances.map((instance, index) => [instance.id, opened[index]?.id]));
+  const read = node => {
+    if (node.groupId) {
+      const group = snapshot.layout.groups.find(group => group.id === node.groupId);
+      return { tabs: group.tabs.map(id => mapping.get(id)), activeId: mapping.get(group.activeId) };
+    }
+    return { direction: node.direction, ratio: Math.round(node.ratio * 100) / 100, first: read(node.first), second: read(node.second) };
+  };
+  return read(snapshot.layout.tree);
+}
+async function saveWorkspaceSnapshot(page, name) {
+  await nativeDialog(page, 'snapshots', 'snapshots-dialog');
+  await page.locator('#snapshot-name').fill(name); await page.locator('#snapshot-save').click();
+  await page.waitForFunction(name => window.__qa.getState().snapshots.some(snapshot => snapshot.name === name), name);
+  return (await state(page)).snapshots.find(snapshot => snapshot.name === name);
+}
+async function runWorkspaceChecks() {
+  const grouped = await pageFor();
+  const first = await openProfile(grouped); const second = await openProfile(grouped, 'switch-01');
+  let repeated;
+  await check('Independent tab groups retain their own active tabs and command focus', grouped, async () => {
+    await action(grouped, 'group-vertical'); await grouped.waitForFunction(() => document.querySelectorAll('.tab-group').length === 2);
+    repeated = await openProfile(grouped);
+    await terminalTab(grouped, second.id).locator('.tab-label').click(); await terminalTab(grouped, first.id).locator('.tab-label').click();
+    assert.deepEqual(await visibleTerminalIds(grouped), [first.id, second.id].sort());
+    assert.equal(await grouped.locator('.tab-group-strip .tab-label[aria-selected="true"]').count(), 2);
+    assert.equal((await workspaceView(grouped)).activeGroupId, await groupFor(grouped, first.id));
+    const before = (await calls(grouped)).writes.length;
+    await action(grouped, 'show-command-window'); await grouped.locator('#command-input').fill('show version'); await grouped.locator('#send-command').click();
+    await grouped.waitForFunction(before => window.__qa.calls.writes.length === before + 1, before);
+    assert.deepEqual((await calls(grouped)).writes.at(-1), { id: first.id, data: 'show version\r' });
+  });
+  await check('Dragging tabs between groups and moving to the next group retain the live terminal', grouped, async () => {
+    assert.ok(repeated); const before = await calls(grouped); const source = await groupFor(grouped, repeated.id); const destination = await groupFor(grouped, first.id);
+    await grouped.evaluate(id => window.__qa.emitData(id, '\x1b[2J\x1b[HRETAINED GROUP OUTPUT'), repeated.id);
+    await terminalTab(grouped, repeated.id).dragTo(terminalTab(grouped, first.id));
+    await grouped.waitForFunction(({ id, destination }) => document.querySelector(`.terminal-pane[data-connection-id="${id}"]`)?.closest('.tab-group')?.dataset.groupId === destination, { id: repeated.id, destination });
+    await terminalTab(grouped, repeated.id).locator('.tab-label').click(); await action(grouped, 'group-move-next');
+    await grouped.waitForFunction(({ id, source }) => document.querySelector(`.terminal-pane[data-connection-id="${id}"]`)?.closest('.tab-group')?.dataset.groupId === source, { id: repeated.id, source });
+    await grouped.evaluate(id => window.__qa.emitScreen({ requestId: 'group-retained-screen', id, startRow: 1, endRow: 1, startColumn: 1, endColumn: 30 }), repeated.id);
+    await grouped.waitForFunction(() => window.__qa.calls.screens.some(screen => screen.requestId === 'group-retained-screen'));
+    const after = await calls(grouped);
+    assert.ok(after.screens.find(screen => screen.requestId === 'group-retained-screen').text.startsWith('RETAINED GROUP OUTPUT'));
+    assert.equal(after.opens.length, before.opens.length); assert.equal(after.closes.length, before.closes.length);
+    assert.equal(await grouped.locator('.terminal-pane .xterm').count(), before.opens.length);
+  });
+  await check('Group dividers resize with the pointer and expose keyboard range controls', grouped, async () => {
+    const divider = grouped.locator('.group-divider[aria-orientation="vertical"]').first();
+    const firstGroup = grouped.locator('.tab-group').first(); const original = await firstGroup.boundingBox(); const box = await divider.boundingBox();
+    await grouped.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await grouped.mouse.down(); await grouped.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 8 }); await grouped.mouse.up();
+    await grouped.waitForFunction(width => document.querySelector('.tab-group').getBoundingClientRect().width > width + 40, original.width);
+    assert.equal(await divider.getAttribute('role'), 'separator'); assert.equal(await divider.getAttribute('aria-valuemin'), '10'); assert.equal(await divider.getAttribute('aria-valuemax'), '90');
+    await divider.focus(); await divider.press('Home'); assert.equal(await divider.getAttribute('aria-valuenow'), '10');
+    await divider.press('End'); assert.equal(await divider.getAttribute('aria-valuenow'), '90');
+    await divider.press('ArrowLeft'); assert.equal(await divider.getAttribute('aria-valuenow'), '85');
+    await action(grouped, 'group-move-next');
+    const moved = await firstGroup.boundingBox(); const movedDivider = await divider.boundingBox();
+    await grouped.mouse.move(movedDivider.x + movedDivider.width / 2, movedDivider.y + movedDivider.height / 2); await grouped.mouse.down(); await grouped.mouse.move(movedDivider.x + movedDivider.width / 2 - 80, movedDivider.y + movedDivider.height / 2, { steps: 8 }); await grouped.mouse.up();
+    await grouped.waitForFunction(width => document.querySelector('.tab-group').getBoundingClientRect().width < width - 40, moved.width);
+    const actualRatio = Number(await grouped.locator('.tab-group-split').first().getAttribute('data-ratio'));
+    const saved = await saveWorkspaceSnapshot(grouped, 'Resized after tab movement');
+    assert.ok(Math.abs(saved.layout.tree.ratio - actualRatio) < 0.000001);
+    await closeDialog(grouped, 'snapshots-dialog');
+    return { before: original.width, savedRatioAfterMovement: saved.layout.tree.ratio, actualRatio };
+  });
+  await check('Collapsing groups preserves every tab and focuses the current terminal without reopening', grouped, async () => {
+    await terminalTab(grouped, repeated.id).locator('.tab-label').click();
+    const order = await grouped.locator('.terminal-tab').evaluateAll(tabs => tabs.filter(tab => !tab.closest('[hidden]')).map(tab => tab.dataset.connectionId)); const before = await calls(grouped);
+    await action(grouped, 'group-collapse'); await grouped.waitForFunction(() => document.querySelectorAll('.tab-group').length === 1);
+    assert.deepEqual(await grouped.locator('#tab-strip .terminal-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.connectionId)), order);
+    assert.deepEqual(await visibleTerminalIds(grouped), [repeated.id]); assert.equal(await grouped.locator('.group-divider').count(), 0);
+    const after = await calls(grouped); assert.equal(after.opens.length, before.opens.length); assert.equal(after.closes.length, before.closes.length);
+  });
+
+  const reconnecting = await pageFor('darwin', { closeOnExit: true });
+  await openProfile(reconnecting); const reconnectTarget = await openProfile(reconnecting, 'switch-01'); await action(reconnecting, 'group-vertical'); await openProfile(reconnecting, 'local-shell');
+  await check('Reconnect with close-on-exit enabled replaces the original group slot after a delayed open', reconnecting, async () => {
+    await terminalTab(reconnecting, reconnectTarget.id).locator('.tab-label').click();
+    const before = await workspaceView(reconnecting); const callsBefore = await calls(reconnecting);
+    await reconnecting.evaluate(() => {
+      const open = window.termforge.terminalOpen;
+      window.termforge.terminalOpen = async request => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return open(request);
+      };
+    });
+    await nativeDialog(reconnecting, 'reconnect', 'confirm-dialog'); await reconnecting.locator('#confirm-accept').click();
+    await reconnecting.waitForFunction(count => window.__qa.calls.opens.length === count, callsBefore.opens.length + 1);
+    const callsAfter = await calls(reconnecting); const replacement = callsAfter.opens.at(-1);
+    await reconnecting.locator(`.terminal-pane[data-connection-id="${replacement.id}"]`).waitFor({ state: 'visible' });
+    await reconnecting.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const expected = JSON.parse(JSON.stringify(before));
+    const update = node => {
+      if (node.tabs) { node.tabs = node.tabs.map(id => id === reconnectTarget.id ? replacement.id : id); if (node.activeId === reconnectTarget.id) node.activeId = replacement.id; }
+      else { update(node.first); update(node.second); }
+    };
+    expected.groups.forEach(update); update(expected.tree);
+    assert.deepEqual(await workspaceView(reconnecting), expected); assert.equal(await reconnecting.locator(`.terminal-pane[data-connection-id="${reconnectTarget.id}"]`).count(), 0);
+    assert.deepEqual(callsAfter.closes.slice(callsBefore.closes.length), [reconnectTarget.id]); assert.equal(callsAfter.opens.length, callsBefore.opens.length + 1);
+  });
+
+  const snapshots = await pageFor('darwin', { theme: 'dark', colorScheme: 'solarized-dark', matchColorScheme: true });
+  const router = await openProfile(snapshots); const selectedSwitch = await openProfile(snapshots, 'switch-01');
+  await action(snapshots, 'group-vertical'); await openProfile(snapshots);
+  await terminalTab(snapshots, router.id).locator('.tab-label').click(); await openProfile(snapshots, 'local-shell'); await action(snapshots, 'group-horizontal');
+  let saved;
+  await check('Workspace snapshots capture repeated instances, independent selection, and nested pane sizes', snapshots, async () => {
+    const vertical = snapshots.locator('.group-divider[aria-orientation="vertical"]').first(); await vertical.focus(); await vertical.press('ArrowRight'); await vertical.press('ArrowRight');
+    const horizontal = snapshots.locator('.group-divider[aria-orientation="horizontal"]').first(); await horizontal.focus(); for (let i = 0; i < 3; i += 1) await horizontal.press('ArrowUp');
+    await terminalTab(snapshots, selectedSwitch.id).locator('.tab-label').click();
+    const before = await workspaceView(snapshots); saved = await saveWorkspaceSnapshot(snapshots, 'Nested repeated sessions');
+    assert.equal(saved.instances.length, 4); assert.equal(saved.instances.filter(instance => instance.sessionId === 'fixture-router').length, 2); assert.equal(saved.sessionIds.length, 3);
+    assert.equal(saved.layout.groups.length, 3); assert.ok(saved.layout.groups.every(group => group.tabs.includes(group.activeId)));
+    const original = await calls(snapshots); const bySession = new Map(original.opens.map(opened => [opened.id, opened]));
+    const connectionsInSavedOrder = saved.layout.groups.flatMap(group => group.tabs).map(id => saved.instances.find(instance => instance.id === id));
+    assert.equal(connectionsInSavedOrder.length, 4); assert.ok(connectionsInSavedOrder.every(Boolean));
+    assert.equal(saved.layout.tree.direction, before.tree.direction); assert.ok(Math.abs(saved.layout.tree.ratio - 0.6) < 0.000001);
+    assert.equal(saved.layout.activeSessionId, bySession.get(selectedSwitch.id).profile.id);
+    const selected = saved.layout.groups.find(group => group.id === saved.layout.activeGroupId);
+    assert.equal(saved.instances.find(instance => instance.id === selected.activeId).sessionId, 'fixture-switch');
+    await snapshots.locator('.snapshot-row').getByRole('button', { name: 'Select', exact: true }).click();
+    assert.equal((await calls(snapshots)).opens.length, original.opens.length);
+    assert.deepEqual(await workspaceView(snapshots), before);
+    await closeDialog(snapshots, 'snapshots-dialog'); await screenshot(snapshots, 'macos-tab-groups-solarized-dark-preview');
+  });
+  await check('Restoring a snapshot recreates repeated tabs, selected tabs, and pane proportions beside existing sessions', snapshots, async () => {
+    assert.ok(saved); const before = await calls(snapshots); const existing = before.opens.map(opened => opened.id);
+    await nativeDialog(snapshots, 'snapshots', 'snapshots-dialog');
+    await snapshots.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await snapshots.locator('#confirm-dialog').waitFor({ state: 'visible' });
+    assert.equal(await snapshots.locator('.confirm-target-item').count(), saved.instances.length); assert.equal((await calls(snapshots)).opens.length, before.opens.length);
+    await snapshots.locator('#confirm-accept').click();
+    await snapshots.waitForFunction(count => window.__qa.calls.opens.length === count && document.querySelectorAll('.tab-group').length === 6, before.opens.length + saved.instances.length);
+    const after = await calls(snapshots); const opened = after.opens.slice(before.opens.length); const restoredIds = new Set(opened.map(opened => opened.id));
+    assert.deepEqual(opened.map(opened => opened.request.sessionId), saved.instances.map(instance => instance.sessionId)); assert.equal(after.closes.length, before.closes.length);
+    for (const id of existing) assert.equal(await snapshots.locator(`.terminal-pane[data-connection-id="${id}"]`).count(), 1);
+    const view = await workspaceView(snapshots); assert.deepEqual(filteredWorkspaceTree(view.tree, restoredIds), expectedSnapshotTree(saved, opened));
+    const selected = saved.layout.groups.find(group => group.id === saved.layout.activeGroupId); const active = opened[saved.instances.findIndex(instance => instance.id === selected.activeId)].id;
+    assert.equal(view.activeGroupId, await groupFor(snapshots, active));
+    await screenshot(snapshots, 'macos-independent-groups-restored');
+  });
+  await check('A failed snapshot connection leaves successful instances usable and reports the partial restore', snapshots, async () => {
+    assert.ok(saved); await snapshots.evaluate(() => {
+      const open = window.termforge.terminalOpen; window.__qa.restoreAttempts = []; let failed = false;
+      window.__qa.originalTerminalOpen = open;
+      window.termforge.terminalOpen = async request => {
+        window.__qa.restoreAttempts.push(JSON.parse(JSON.stringify(request)));
+        if (!failed && request.sessionId === 'fixture-switch') { failed = true; throw new Error('Synthetic snapshot connection failure.'); }
+        return open(request);
+      };
+    });
+    const before = await calls(snapshots); await nativeDialog(snapshots, 'snapshots', 'snapshots-dialog'); await snapshots.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await snapshots.locator('#confirm-accept').click();
+    await snapshots.waitForFunction(({ attempts, opens }) => window.__qa.restoreAttempts.length === attempts && window.__qa.calls.opens.length === opens, { attempts: saved.instances.length, opens: before.opens.length + saved.instances.length - 1 });
+    await snapshots.waitForFunction(() => /(?:failed|could not restore)/i.test(document.getElementById('toast-stack').textContent) && !document.getElementById('workspace-status').textContent.startsWith('Opening'));
+    const after = await calls(snapshots); const opened = after.opens.slice(before.opens.length);
+    assert.equal(opened.length, saved.instances.length - 1); assert.deepEqual(await snapshots.evaluate(() => window.__qa.restoreAttempts.map(request => request.sessionId)), saved.instances.map(instance => instance.sessionId));
+    assert.equal(after.closes.length, before.closes.length);
+    const view = await workspaceView(snapshots); assert.ok(view.groups.every(group => group.tabs.length > 0 && group.tabs.includes(group.activeId)));
+    assert.ok(view.groups.some(group => group.groupId === view.activeGroupId));
+    const newIds = new Set(opened.map(opened => opened.id)); assert.equal(view.groups.filter(group => group.tabs.some(id => newIds.has(id))).length, 3);
+    assert.ok((await visibleTerminalIds(snapshots)).some(id => newIds.has(id)));
+    assert.match(await snapshots.locator('#toast-stack').innerText(), /1[^\n]*(?:failed|could not)|(?:failed|could not)[^\n]*1/i);
+  });
+  await check('Snapshot restore prunes a group whose only connection failed', snapshots, async () => {
+    assert.ok(saved); await snapshots.evaluate(() => {
+      const open = window.__qa.originalTerminalOpen; window.__qa.restoreAttempts = [];
+      window.termforge.terminalOpen = async request => {
+        window.__qa.restoreAttempts.push(JSON.parse(JSON.stringify(request)));
+        if (request.sessionId === 'fixture-local') throw new Error('Synthetic empty group failure.');
+        return open(request);
+      };
+    });
+    const before = await calls(snapshots); const groupsBefore = (await workspaceView(snapshots)).groups.length;
+    await nativeDialog(snapshots, 'snapshots', 'snapshots-dialog'); await snapshots.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await snapshots.locator('#confirm-accept').click();
+    await snapshots.waitForFunction(({ attempts, opens, groups }) => window.__qa.restoreAttempts.length === attempts && window.__qa.calls.opens.length === opens && document.querySelectorAll('.tab-group').length === groups, { attempts: saved.instances.length, opens: before.opens.length + saved.instances.length - 1, groups: groupsBefore + 2 });
+    const after = await calls(snapshots); const view = await workspaceView(snapshots); const newIds = new Set(after.opens.slice(before.opens.length).map(opened => opened.id));
+    const restored = filteredWorkspaceTree(view.tree, newIds);
+    assert.equal(restored.direction, 'vertical'); assert.equal(restored.ratio, 0.6); assert.equal(restored.first.tabs.length, 1); assert.equal(restored.second.tabs.length, 2);
+    assert.ok(view.groups.every(group => group.tabs.length > 0 && group.tabs.includes(group.activeId))); assert.equal(after.closes.length, before.closes.length);
+  });
+}
+
 async function run() {
   const mac = await pageFor();
   await check('macOS uses a single toolbar, vertical managers, and no duplicate menu', mac, async () => {
@@ -459,14 +674,15 @@ async function run() {
     const displayed = await mac.locator('.terminal-tab').evaluateAll(nodes => nodes.map(node => node.dataset.connectionId));
     assert.deepEqual((await calls(mac)).orders.at(-1), displayed);
   });
-  await check('Snapshots deduplicate cloned profiles and selecting never connects', mac, async () => {
+  await check('Snapshots preserve cloned instances while profile selection never connects', mac, async () => {
     await nativeDialog(mac, 'snapshots', 'snapshots-dialog'); await mac.locator('#snapshot-name').fill('Synthetic workspace'); await mac.locator('#snapshot-save').click(); await mac.waitForFunction(() => window.__qa.getState().snapshots.length === 1);
-    const snapshot = (await state(mac)).snapshots[0]; assert.equal(new Set(snapshot.sessionIds).size, snapshot.sessionIds.length); assert.equal(snapshot.sessionIds.filter(id => id === 'fixture-router').length, 1); assert.ok(snapshot.sessionIds.includes('fixture-local')); assert.equal(snapshot.layout.activeSessionId, 'fixture-router');
+    const snapshot = (await state(mac)).snapshots[0]; assert.equal(new Set(snapshot.sessionIds).size, snapshot.sessionIds.length); assert.equal(snapshot.instances.filter(instance => instance.sessionId === 'fixture-router').length, 2); assert.ok(snapshot.sessionIds.includes('fixture-local')); assert.equal(snapshot.layout.activeSessionId, 'fixture-router');
+    assert.equal(snapshot.instances.length, 3); assert.equal(new Set(snapshot.instances.map(instance => instance.id)).size, snapshot.instances.length);
     const before = (await calls(mac)).opens.length; await mac.locator('.snapshot-row').getByRole('button', { name: 'Select', exact: true }).click(); assert.equal((await calls(mac)).opens.length, before);
   });
   await check('Snapshot connections require confirmation and preserve saved order', mac, async () => {
     const before = (await calls(mac)).opens.length; const snapshot = (await state(mac)).snapshots[0]; await mac.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await mac.locator('#confirm-dialog').waitFor(); assert.equal((await calls(mac)).opens.length, before); await mac.locator('#confirm-cancel').click(); assert.equal((await calls(mac)).opens.length, before);
-    await mac.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await mac.locator('#confirm-accept').click(); await mac.waitForFunction(count => window.__qa.calls.opens.length === count, before + snapshot.sessionIds.length); assert.deepEqual((await calls(mac)).opens.slice(before).map(item => item.request.sessionId), snapshot.sessionIds);
+    await mac.locator('.snapshot-row').getByRole('button', { name: 'Connect…' }).click(); await mac.locator('#confirm-accept').click(); await mac.waitForFunction(count => window.__qa.calls.opens.length === count, before + snapshot.instances.length); assert.deepEqual((await calls(mac)).opens.slice(before).map(item => item.request.sessionId), snapshot.instances.map(instance => instance.sessionId));
   });
   await check('Tile orientations and Active Sessions manage all open tabs', mac, async () => {
     for (const orientation of ['horizontal', 'vertical', 'grid']) { await action(mac, `tile-${orientation}`); await mac.waitForFunction(value => document.getElementById('terminal-workspace').dataset.orientation === value, orientation); assert.equal(await mac.locator('.terminal-pane:visible').count(), (await calls(mac)).opens.length); }
@@ -581,6 +797,7 @@ async function run() {
     });
   }
   await runColorChecks();
+  await runWorkspaceChecks();
   // Separate, clearly labelled synthetic previews. Test notifications and
   // modified profiles from the preceding checks never appear in these images.
   const preview = await pageFor('darwin', { theme: 'dark', fontSize: 15, keywords: [{ text: 'DEMO SESSION', caseSensitive: false, foreground: '#000000', background: '#70e330' }] });

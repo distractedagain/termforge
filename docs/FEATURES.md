@@ -2,11 +2,11 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. SecureCRT 9.7 macOS is the visual reference; the overall feature goal covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current preview scope — TermForge 0.4.0
+## Current source scope — TermForge 0.5.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
-| Desktop | Electron with native PTYs and socket/device adapters; native CI/package checks passed on all four targets | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
+| Desktop | Electron with native PTYs and socket/device adapters; versioned CI/package evidence below | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
 | Terminal | xterm.js scrollback, selection, resize, search, per-session fonts/schemes/cursor | TERM hints do not create distinct VT/ANSI engines; specialized emulations remain missing |
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Installed system OpenSSH | Installed client/server determine authentication and algorithm support; no authentication-state detector |
@@ -14,8 +14,8 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Telnet / Raw TCP | Original adapters; Telnet option/NAWS/terminal-type/echo handling and break | UTF-8 text stream; real loopback tests, no external-device interoperability coverage |
 | Serial | Device enumeration, baud/data/stop/parity/flow options, streaming/break, asynchronous close/retry | Mock/injected adapter tests; no physical hardware/device interoperability verification or Hex View |
 | Saved sessions | Nested inferred folders/filter, Quick Connect, Connect Bar, selected/folder connect and selected-field bulk edits | Up to 1,000 profiles; no explicit empty folders, complete bulk option catalog or default/auto session system |
-| Workspace | Reorder/clone tabs, horizontal/vertical/grid tiles, Active Sessions list | Up to 32 open terminals; no independent tab groups, floating managers, live-tab multi-window movement or locking |
-| Snapshots | Saved-profile order, tile orientation and active profile | Cloned profile IDs deduplicated; unsaved sessions and detailed pane/group geometry excluded |
+| Workspace | Reorder/clone tabs, independent tab groups, resizable splits, horizontal/vertical/grid tiles, Active Sessions list | Up to 32 open terminals; no floating managers, live-tab multi-window movement or locking |
+| Snapshots | Saved connection instances including repeats, group/tab order, per-group selection, focused group, split arrangement and ratios; restore beside existing tabs | Up to 32 saved connections; unsaved quick connections, terminal output and running process state excluded; current profile settings apply |
 | Commands | Nested filtered Command Manager, named Button Bars, folder/color and bounded history | Command strings only; no full button action catalog, session-specific bars or immediate-character mode |
 | Broadcast | Explicit review and confirmation for active/all-live targets | No selected-group/visible targeting; commands use each target's current shell state |
 | Logging | Opt-in raw output into a new file, pause/resume | 128 MiB limit; may include secrets; no plain/append/automatic timestamps/rotation |

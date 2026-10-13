@@ -274,6 +274,16 @@ Version 0.4 [native CI](https://github.com/distractedagain/termforge/actions/run
 
 Separately, the user reported that installed v0.3 opened on macOS and that local-shell and SSH use worked. This is limited user-reported runtime evidence, not a full native test matrix or evidence for v0.4.
 
+## Tab groups and snapshots: TermForge 0.5 preview
+
+UI-04 and SM-07 advance with independently selected tab groups, nested vertical/horizontal splits, pointer/keyboard divider resizing, tab drag between groups, edge-drop splitting, group collapse and reconnection in place. Existing tile commands create one group per connection. The same terminal objects and processes are retained during rearrangement.
+
+Snapshots store repeated saved-session instances, tab/group order, per-group active tabs, focused group and split ratios. Restoring adds the new groups beside current tabs. Failed opens are reported and omitted from the resulting layout; successful connections remain usable. Older snapshots remain readable, imported profile collisions remap every instance, and profile deletion repairs the remaining tree. Unsaved quick connections, terminal output and running process state are excluded.
+
+Local verification passed **115 backend tests and 72 headless interface checks** with no failures or browser console errors. Twelve snapshot tests validate persistence, imports, deletions, bounds and malformed layouts. Eleven pure layout tests cover lifecycle and a deterministic mixed-operation sequence. The headless suite checks real xterm rendering through a synthetic bridge, including duplicate restoration, retained output, per-group focus, resizing after movement, delayed reconnect with close-on-exit, and partial failures. `docs/UI-VERIFICATION.md` records this scope. No Electron window was launched locally.
+
+These rows remain partial: live tab movement across windows, selected-group command targeting, automatic startup restoration, floating managers and complete native reference comparison remain open. Earlier baseline rows and versioned test counts describe their respective releases.
+
 ## Required comparison and completion gates
 
 1. Capture an authorized SecureCRT 9.7 macOS reference set: empty window, connected session, all menus/context menus, each Global/Session Options page, manager docking states, grouped tabs, Command Manager, transfers, script/credential/key dialogs, light/dark, and multiple display scales. Redact user data. Reference screenshots are analysis inputs, not bundled artwork.

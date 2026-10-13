@@ -1,10 +1,13 @@
+import { pruneLayout } from '../app/snapshot-layout.cjs';
+
 const $ = (id) => document.getElementById(id);
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 
 export function createWorkflows(context) {
-  const { api, getState, setState, getConnections, getActiveId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets, setPane, confirmAction, toast, getSelection, setSelection, getLayout, setLayout, renderSessions } = context;
+  const { api, getState, setState, getConnections, getActiveId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets, setPane, confirmAction, toast, getSelection, setSelection, getLayout, setLayout, restoreLayout, renderSessions } = context;
   let manager = 'sessions';
   let selectedCommandId = null;
+  let snapshotBusy = false;
   const collapsed = new Set();
   const state = () => getState();
   const current = () => getConnections().get(getActiveId());
@@ -162,40 +165,88 @@ export function createWorkflows(context) {
     $('snapshot-list').replaceChildren();
     for (const snapshot of state().snapshots || []) {
       const row = make('div', 'snapshot-row');
-      const description = make('div'); description.append(make('strong', '', snapshot.name), make('span', 'field-note', `${snapshot.sessionIds.length} sessions · ${snapshot.layout.tile ? snapshot.layout.orientation : 'tabs'}`));
+      const count = snapshot.instances?.length ?? snapshot.sessionIds.length;
+      const arrangement = snapshot.layout.groups ? `${snapshot.layout.groups.length} tab group${snapshot.layout.groups.length === 1 ? '' : 's'}` : snapshot.layout.tile ? snapshot.layout.orientation : 'tabs';
+      const description = make('div'); description.append(make('strong', '', snapshot.name), make('span', 'field-note', `${count} connection${count === 1 ? '' : 's'} · ${arrangement}`));
       const load = make('button', 'secondary-button', 'Select'); load.addEventListener('click', () => selectSnapshot(snapshot));
       const connect = make('button', 'secondary-button', 'Connect…'); connect.addEventListener('click', () => attempt(() => connectSnapshot(snapshot)));
-      const remove = make('button', 'icon-button', '×'); remove.setAttribute('aria-label', `Delete snapshot ${snapshot.name}`); remove.addEventListener('click', () => attempt(async () => { const accepted = await confirmAction({ title: 'Delete snapshot?', message: `Delete “${snapshot.name}”? Saved session profiles remain available.`, accept: 'Delete' }); if (!accepted) return; const saved = await api.saveSnapshots((state().snapshots || []).filter((entry) => entry.id !== snapshot.id)); setState({ snapshots: saved }); renderSnapshots(); }));
+      const remove = make('button', 'icon-button', '×'); remove.setAttribute('aria-label', `Delete snapshot ${snapshot.name}`); remove.addEventListener('click', () => attempt(() => deleteSnapshot(snapshot)));
       row.append(description, load, connect, remove); $('snapshot-list').append(row);
     }
     if (!$('snapshot-list').children.length) $('snapshot-list').append(make('p', 'field-note', 'No snapshots saved.'));
   }
+  async function deleteSnapshot(snapshot) {
+    if (snapshotBusy) return;
+    snapshotBusy = true;
+    try {
+      const accepted = await confirmAction({ title: 'Delete snapshot?', message: `Delete “${snapshot.name}”? Saved session profiles remain available.`, accept: 'Delete' });
+      if (!accepted) return;
+      const saved = await api.saveSnapshots((state().snapshots || []).filter((entry) => entry.id !== snapshot.id));
+      setState({ snapshots: saved }); renderSnapshots();
+    } finally { snapshotBusy = false; }
+  }
   function selectSnapshot(snapshot) {
     const profiles = state().sessions.filter((profile) => snapshot.sessionIds.includes(profile.id));
-    setSelection(profiles.map((profile) => profile.id)); setLayout(snapshot.layout); renderSessions();
+    setSelection(profiles.map((profile) => profile.id)); renderSessions();
     const missing = snapshot.sessionIds.length - profiles.length;
     $('snapshot-status').textContent = `Selected ${profiles.length} profiles${missing ? `; ${missing} profiles are no longer available` : ''}. No connections were opened.`;
   }
   async function connectSnapshot(snapshot) {
-    const profiles = snapshot.sessionIds.map((id) => state().sessions.find((profile) => profile.id === id)).filter(Boolean);
-    if (!profiles.length) { toast('This snapshot has no available saved sessions.', true); return; }
-    const accepted = await confirmAction({ title: `Connect ${profiles.length} saved sessions?`, message: `Open the saved sessions from “${snapshot.name}”. Current tabs stay open.`, targets: profiles.map((profile) => `${profile.name} · ${profile.protocol.toUpperCase()} · ${profile.host || profile.serial?.path || 'Local shell'}`), accept: 'Connect sessions' });
-    if (!accepted) return;
-    setLayout(snapshot.layout); $('snapshots-dialog').close();
-    for (const profile of profiles) await openConnection(profile);
-    const active = [...getConnections().values()].reverse().find((connection) => connection.profile.id === snapshot.layout.activeSessionId);
-    if (active) activate(active.id);
+    if (snapshotBusy) return;
+    snapshotBusy = true;
+    try {
+      // Old snapshots contain one instance per profile. New ones retain repeats.
+      const instances = snapshot.instances || snapshot.sessionIds.map((sessionId) => ({ id: sessionId, sessionId }));
+      const entries = instances.map((instance) => ({ ...instance, profile: state().sessions.find((profile) => profile.id === instance.sessionId) }));
+      const available = entries.filter((entry) => entry.profile);
+      if (!available.length) { toast('This snapshot has no available saved sessions.', true); return; }
+      const missing = entries.length - available.length;
+      const accepted = await confirmAction({ title: `Connect ${available.length} saved session${available.length === 1 ? '' : 's'}?`, message: `Open the connections from “${snapshot.name}”. Current tabs stay open.${missing ? ` ${missing} connections have unavailable profiles and will be skipped.` : ''}`, targets: available.map(({ profile }) => `${profile.name} · ${profile.protocol.toUpperCase()} · ${profile.host || profile.serial?.path || 'Local shell'}`), accept: 'Connect sessions' });
+      if (!accepted) return;
+      $('snapshots-dialog').close();
+      const previousLayout = getLayout();
+      const opened = new Map();
+      for (const entry of available) {
+        const connection = await openConnection(entry.profile);
+        if (connection) opened.set(entry.id, connection.id);
+      }
+      if (opened.size) {
+        if (snapshot.instances) restoreLayout(snapshot.layout, opened, previousLayout);
+        else {
+          setLayout(snapshot.layout);
+          const active = opened.get(snapshot.layout.activeSessionId);
+          if (active) activate(active);
+        }
+      }
+      const failed = available.length - opened.size;
+      const status = `Opened ${opened.size} of ${instances.length} saved connections${failed ? `; ${failed} failed` : ''}${missing ? `; ${missing} unavailable` : ''}.`;
+      $('snapshot-status').textContent = status;
+      toast(status, Boolean(failed || missing));
+    } finally { snapshotBusy = false; }
   }
   async function saveSnapshot() {
+    if (snapshotBusy) return;
     const name = $('snapshot-name').value.trim(); if (!name) { toast('Give the snapshot a name.', true); return; }
-    const sessionIds = [...new Set([...getConnections().values()].map((connection) => connection.profile.id).filter((id) => state().sessions.some((profile) => profile.id === id)))];
+    const available = new Set(state().sessions.map((profile) => profile.id));
+    const instances = [...getConnections().values()].filter((connection) => available.has(connection.profile.id)).map((connection) => ({ id: connection.id, sessionId: connection.profile.id }));
+    const sessionIds = [...new Set(instances.map((instance) => instance.sessionId))];
     if (!sessionIds.length) { toast('Open at least one saved session before saving a snapshot. Quick connections must be saved first.', true); return; }
-    const existing = (state().snapshots || []).find((entry) => entry.name === name);
-    if (existing && !await confirmAction({ title: 'Replace snapshot?', message: `Replace the saved workspace “${name}”?`, accept: 'Replace' })) return;
-    const snapshot = { ...(existing ? { id: existing.id } : {}), name, sessionIds, layout: { ...getLayout(), activeSessionId: sessionIds.includes(current()?.profile.id) ? current().profile.id : '' } };
+    if (instances.length > 32) { toast('A snapshot can contain at most 32 saved connections.', true); return; }
+    const currentLayout = getLayout();
+    const layout = { tile: currentLayout.tile, orientation: currentLayout.orientation, ...pruneLayout(currentLayout, new Set(instances.map((instance) => instance.id))) };
+    const activeInstance = layout.groups.find((group) => group.id === layout.activeGroupId)?.activeId;
+    layout.activeSessionId = instances.find((instance) => instance.id === activeInstance)?.sessionId || '';
+    const excluded = getConnections().size - instances.length;
+    snapshotBusy = true;
     $('snapshot-save').disabled = true;
-    try { const saved = await api.saveSnapshots([...(state().snapshots || []).filter((entry) => entry !== existing), snapshot]); setState({ snapshots: saved }); renderSnapshots(); $('snapshot-name').value = ''; $('snapshot-status').textContent = `Saved “${name}”. Unsaved quick connections are excluded.`; }
-    finally { $('snapshot-save').disabled = false; }
+    try {
+      const existing = (state().snapshots || []).find((entry) => entry.name === name);
+      if (existing && !await confirmAction({ title: 'Replace snapshot?', message: `Replace the saved workspace “${name}”?`, accept: 'Replace' })) return;
+      const snapshot = { ...(existing ? { id: existing.id } : {}), name, sessionIds, instances, layout };
+      const saved = await api.saveSnapshots([...(state().snapshots || []).filter((entry) => entry !== existing), snapshot]);
+      setState({ snapshots: saved }); renderSnapshots(); $('snapshot-name').value = '';
+      $('snapshot-status').textContent = `Saved “${name}” with ${instances.length} connections.${excluded ? ` ${excluded} unsaved quick connection${excluded === 1 ? ' was' : 's were'} excluded; save a profile to include it.` : ''}`;
+    } finally { snapshotBusy = false; $('snapshot-save').disabled = false; }
   }
   async function perform(action) {
     switch (action) {

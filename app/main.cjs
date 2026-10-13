@@ -95,7 +95,7 @@ function applicationMenu() {
     { label: 'Transfer', submenu: [action('Open SFTP Session', 'sftp'), action('Send ASCII File…', 'send-ascii'), action('Send Break', 'send-break'), action('TFTP Server…', 'tftp-server'), separator, action('Log Session…', 'log'), action('Pause / Resume Log', 'pause-log')] },
     { label: 'Script', submenu: [action('Run Python Script…', 'script-run'), action('Cancel Running Script', 'script-cancel'), separator, action('Record Input…', 'script-record'), action('Script Output', 'script-output')] },
     { label: 'Tools', submenu: [action('Edit Button Bar…', 'snippets'), action('Import / Export…', 'import-export')] },
-    { label: 'Window', submenu: [action('Clone Session', 'clone-session'), action('Snapshots…', 'snapshots'), separator, action('Tile Sessions', 'tile'), action('Tile Horizontally', 'tile-horizontal'), action('Tile Vertically', 'tile-vertical'), action('Tile as Grid', 'tile-grid'), separator, { role: 'minimize' }, { label: 'Close Window', role: 'close', accelerator: 'CommandOrControl+Shift+W' }] },
+    { label: 'Window', submenu: [action('Clone Session', 'clone-session'), action('Snapshots…', 'snapshots'), separator, action('New Vertical Tab Group', 'group-vertical'), action('New Horizontal Tab Group', 'group-horizontal'), action('Move Tab to Next Group', 'group-move-next'), action('Collapse Tab Groups', 'group-collapse'), separator, action('Tile Sessions', 'tile'), action('Tile Horizontally', 'tile-horizontal'), action('Tile Vertically', 'tile-vertical'), action('Tile as Grid', 'tile-grid'), separator, { role: 'minimize' }, { label: 'Close Window', role: 'close', accelerator: 'CommandOrControl+Shift+W' }] },
     { label: 'Help', submenu: [action('TermForge Help', 'help')] }
   ]);
 }
