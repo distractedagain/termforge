@@ -10,7 +10,7 @@ on:
       tag:
         description: Existing tag at the build commit, matching the package version
         required: true
-        default: v0.6.1
+        default: v0.7.0
         type: string
 
 permissions: {}

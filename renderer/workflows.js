@@ -1,3 +1,4 @@
+import { createIcon } from './icons.js';
 import { pruneLayout } from '../app/snapshot-layout.cjs';
 
 const $ = (id) => document.getElementById(id);
@@ -52,7 +53,7 @@ export function createWorkflows(context) {
       const group = make('div', 'session-group');
       const expanded = needle || !collapsed.has(branch.path);
       const heading = make('button', 'folder-heading'); heading.setAttribute('role', 'treeitem'); heading.setAttribute('aria-expanded', String(Boolean(expanded))); heading.setAttribute('aria-level', String(depth));
-      heading.append(make('span', 'tree-chevron', expanded ? '▾' : '▸'), make('span', 'folder-icon'), make('span', 'folder-name', branch.name));
+      heading.append(make('span', 'tree-chevron', expanded ? '▾' : '▸'), createIcon('folder', 'folder-icon'), make('span', 'folder-name', branch.name));
       heading.addEventListener('click', () => { if (collapsed.has(branch.path)) collapsed.delete(branch.path); else collapsed.add(branch.path); renderCommands(); }); group.append(heading);
       if (expanded) {
         const list = make('div', 'tree-children'); list.setAttribute('role', 'group');
@@ -85,7 +86,7 @@ export function createWorkflows(context) {
       button.title = `${connection.protocol.toUpperCase()} · ${connection.exited ? 'Terminal ended' : 'Terminal open'}`;
       button.addEventListener('click', () => activate(connection.id)); button.addEventListener('dblclick', () => activate(connection.id)); rows.push(button);
     }
-    const heading = make('div', 'folder-heading'); heading.append(make('span', 'tree-chevron', '▾'), make('span', 'folder-icon'), make('span', 'folder-name', `Sessions (${getConnections().size})`));
+    const heading = make('div', 'folder-heading'); heading.append(make('span', 'tree-chevron', '▾'), createIcon('folder', 'folder-icon'), make('span', 'folder-name', `Sessions (${getConnections().size})`));
     $('active-manager-list').replaceChildren(heading, ...rows);
     for (const id of ['active-clone', 'active-close', 'active-reconnect']) $(id).disabled = !current();
   }

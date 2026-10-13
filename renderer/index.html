@@ -22,12 +22,13 @@
         <button class="menu-button" data-menu="help" role="menuitem" aria-haspopup="true" aria-expanded="false">Help</button>
       </nav>
       <div class="main-toolbar" id="main-toolbar" role="toolbar" aria-label="Connection tools">
+        <div class="app-brand" aria-label="TermForge"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false"><rect x="2" y="2" width="44" height="44" rx="13" fill="currentColor"/><path d="m13 15 9 9-9 9m12 0h10" stroke="var(--field)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>TermForge</span></div>
         <button id="connect-session" class="tool-button" data-icon="connect" title="Connect selected session (Enter)" aria-label="Connect selected session"></button>
         <button id="disconnect-session" class="tool-button" data-icon="disconnect" title="Disconnect active session" aria-label="Disconnect active session" disabled></button>
         <button id="reconnect-session" class="tool-button" data-icon="reconnect" title="Reconnect active session" aria-label="Reconnect active session" disabled></button>
         <button id="quick-connect" class="tool-button" data-icon="connect" title="Quick Connect" aria-label="Quick Connect"></button>
-        <label class="connect-bar"><input id="connect-address" list="connect-suggestions" placeholder="Enter host" autocomplete="off" aria-label="Connect Bar"><datalist id="connect-suggestions"></datalist></label>
-        <label class="keyword-bar"><input id="keyword-input" placeholder="Enter Keyword" autocomplete="off" aria-label="Highlight keyword"></label>
+        <label class="connect-bar"><input id="connect-address" list="connect-suggestions" placeholder="Connect to a host…" autocomplete="off" aria-label="Connect Bar"><datalist id="connect-suggestions"></datalist></label>
+        <label class="keyword-bar"><input id="keyword-input" placeholder="Highlight text…" autocomplete="off" aria-label="Highlight keyword"></label>
         <button id="keyword-toggle" class="tool-button" data-icon="find" title="Toggle keyword highlighting" aria-label="Toggle keyword highlighting" aria-pressed="true"></button>
         <span class="toolbar-separator"></span>
         <button id="new-session" class="tool-button" data-icon="new" title="New session" aria-label="New session"></button>
@@ -42,7 +43,7 @@
         <button id="session-log" class="tool-button" data-icon="log" title="Log session output" aria-label="Log session output" aria-pressed="false" disabled></button>
         <span class="toolbar-separator"></span>
         <button id="toggle-tile" class="tool-button" data-icon="tile" title="Tile sessions" aria-label="Tile sessions" aria-pressed="false" disabled></button>
-        <button id="local-ai-toggle" class="tool-button" data-icon="ai" title="AI Assistant" aria-label="AI Assistant" aria-pressed="false"></button>
+        <button id="local-ai-toggle" class="tool-button" data-icon="ai" data-icon-label="Assistant" title="AI Assistant" aria-label="AI Assistant" aria-pressed="false"></button>
         <button id="color-schemes-button" class="tool-button" data-icon="palette" title="Color schemes" aria-label="Color schemes"></button>
         <button id="settings-button" class="tool-button" data-icon="settings" title="Global options" aria-label="Global options"></button>
         <button id="help-button" class="tool-button" data-icon="help" title="Help and about TermForge" aria-label="Help and about TermForge"></button>
@@ -50,7 +51,7 @@
       </div>
       <div class="desktop-content">
         <aside id="session-manager" class="sidebar" aria-label="Session Manager">
-          <nav class="dock-tabs" aria-label="Docked managers"><button id="dock-sessions" class="dock-tab selected" aria-pressed="true">Session Manager</button><button id="dock-commands" class="dock-tab" aria-pressed="false">Command Manager</button><button id="dock-active" class="dock-tab" aria-pressed="false">Active Sessions</button></nav>
+          <nav class="dock-tabs" aria-label="Docked managers"><button id="dock-sessions" class="dock-tab selected" data-icon="sessions" data-icon-label="Sessions" aria-label="Session Manager" title="Session Manager" aria-pressed="true">Session Manager</button><button id="dock-commands" class="dock-tab" data-icon="commands" data-icon-label="Commands" aria-label="Command Manager" title="Command Manager" aria-pressed="false">Command Manager</button><button id="dock-active" class="dock-tab" data-icon="active" data-icon-label="Active" aria-label="Active Sessions" title="Active Sessions" aria-pressed="false">Active Sessions</button></nav>
           <div class="sidebar-content">
           <div class="pane-caption"><span id="manager-title">Session Manager</span><button id="close-session-manager" class="caption-button" title="Hide managers" aria-label="Hide managers">×</button></div>
           <section id="sessions-manager-content" class="manager-content">
@@ -68,10 +69,13 @@
           <div class="tab-strip" id="tab-strip" role="tablist" aria-label="Open sessions"></div>
           <section class="terminal-search-bar" id="terminal-search-bar" hidden><label><span>Find:</span><input id="terminal-search-input" type="search" placeholder="Terminal output" autocomplete="off"></label><button id="search-prev" class="secondary-button" aria-label="Previous match">Previous</button><button id="search-next" class="secondary-button" aria-label="Next match">Next</button><label class="check-label"><input id="search-case" type="checkbox"> Match case</label><button id="close-search" class="caption-button" aria-label="Close terminal search">×</button></section>
           <div id="terminal-workspace" class="terminal-workspace" hidden></div>
-          <section class="welcome" id="welcome" aria-label="Disconnected terminal">
-            <div class="disconnected-label">TermForge</div>
-            <div class="empty-terminal-message">No active session.<br>Select a saved session and double-click to connect.</div>
-            <div class="empty-terminal-actions"><button id="welcome-new" class="secondary-button">New session…</button><button id="welcome-local" class="secondary-button">Local shell</button><button id="welcome-import" class="secondary-button">Import sessions…</button></div>
+          <section class="welcome" id="welcome" aria-label="Welcome to TermForge">
+            <div class="welcome-brandmark"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false"><rect x="2" y="2" width="44" height="44" rx="13" fill="currentColor"/><path d="m13 15 9 9-9 9m12 0h10" stroke="var(--field)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <p class="welcome-eyebrow">TERMINAL WORKSPACE</p>
+            <h1>Your next session starts here.</h1>
+            <p class="welcome-description">Connect to a server, open a local shell, or choose a saved session from the sidebar.</p>
+            <div class="empty-terminal-actions"><button id="welcome-new" class="primary-button" data-icon="new" data-icon-label="New connection">New connection</button><button id="welcome-local" class="secondary-button" data-icon="terminal" data-icon-label="Local shell">Local shell</button><button id="welcome-import" class="quiet-button" data-icon="import" data-icon-label="Import sessions">Import sessions</button></div>
+            <div class="welcome-shortcuts" aria-label="Supported connection types"><span>SSH &amp; SFTP</span><span>Serial</span><span>Local shell</span></div>
           </section>
           <div id="command-resizer" class="command-resizer" role="separator" aria-label="Resize Command Window" aria-orientation="horizontal" tabindex="0"></div>
           <section class="command-bar" id="command-bar" aria-label="Command Window"><div class="pane-caption"><span>Command Window</span><select id="command-history" aria-label="Command history"><option value="">Command history</option></select><label class="broadcast-control"><input type="checkbox" id="broadcast-mode"> Send to all active sessions</label><button id="close-command-window" class="caption-button" title="Hide Command Window" aria-label="Hide Command Window">×</button></div><div id="ai-draft-notice" class="ai-draft-notice" hidden><span id="ai-draft-label"></span><button id="ai-draft-discard" class="secondary-button">Discard draft</button></div><div class="command-editor"><textarea id="command-input" rows="2" placeholder="Enter a command here. Press Enter to send; Shift+Enter adds a line." autocomplete="off" spellcheck="false" aria-label="Command to send"></textarea><button id="send-command" class="secondary-button" disabled>Send</button></div></section>

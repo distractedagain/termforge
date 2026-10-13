@@ -1,10 +1,10 @@
 # TermForge
 
-A free, open-source desktop terminal client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, and Python automation. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, using its macOS interface as the visual reference.
+A free, open-source desktop terminal client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, and Python automation. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
 
-![TermForge macOS interface with illustrative demo sessions](docs/images/current-macos-interface.png)
+![TermForge modern dark workspace with illustrative saved sessions](docs/images/modern-welcome-dark.png)
 
-This 0.3 image uses synthetic sessions and output; no device is connected. It was captured in a headless browser, so native macOS window controls are not shown.
+This 0.7 preview uses synthetic saved sessions; no device is connected. It was captured in a headless browser, so native macOS window controls are not shown.
 
 ## Download
 
@@ -26,7 +26,13 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.6.1 — AI Assistant
+## New in 0.7 source — Modern workspace
+
+The 0.7 source introduces TermForge's own slate and teal interface: a horizontal Sessions/Commands/Active switcher, consistent vector icons and app mark, a welcome screen, clearer dialogs and a refined AI Assistant. Light/dark modes and optional Solarized interface matching remain available. Session management, tab groups, commands and explicit AI review retain their existing workflows. See [the modern interface guide](docs/MODERN-INTERFACE.md).
+
+The current source passed **156 backend tests and 97 headless interface checks**, with no failures or browser errors. Coverage includes compact layouts, keyboard focus, reduced motion, palette inheritance and layout persistence across restart. Native 0.7 packaging is pending; the published download above remains v0.6.1.
+
+## AI Assistant added in 0.6.1
 
 Open **View → AI Assistant** to investigate output, explain errors or draft commands. Choose **Ollama (local)** or **Free online models (OpenRouter)**. Online requests use only the free router with zero price caps and no paid fallback; provider quotas and availability apply. Free ChatGPT and Claude chat accounts are not bundled API access.
 
@@ -81,13 +87,13 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 - SSH identity/certificate paths, jump host, requested forwarding, authentication/algorithm controls, compression and keepalive options.
 - JSON configuration import/export, version-1 migration, and a limited importer for plain nonsecret SecureCRT SSH2 session INI fields.
 
-See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, live tabs across multiple windows, and Windows-specific RDP/ActiveX features remain gaps. TermForge is not yet near identical or feature complete.
+See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, live tabs across multiple windows, and Windows-specific RDP/ActiveX features remain gaps. Full feature parity remains in development; the modern interface follows TermForge's own visual design.
 
-## Classic desktop layout
+## Historical interface — v0.3
 
-Version 0.3 develops the SecureCRT 9.7 macOS layout: the native macOS menu, one compact toolbar with Connect/Keyword fields, vertical Session/Command/Active manager selectors, terminal tabs, Command Window, named Button Bar and segmented status bar. Windows and Linux expose in-window menus. Light/dark controls and independent terminal schemes are available. A comprehensive comparison with a running SecureCRT installation remains required.
+Version 0.3 used SecureCRT 9.7 macOS as a visual reference: the native macOS menu, one compact toolbar with Connect/Keyword fields, vertical Session/Command/Active manager selectors, terminal tabs, Command Window, named Button Bar and segmented status bar. Windows and Linux exposed in-window menus. Light/dark controls and independent terminal schemes were available. The 0.7 source replaces that visual direction with an original modern interface; earlier screenshots remain historical evidence.
 
-Click a saved session to select it, then double-click it, press Enter, or choose Connect. Use View to select managers and show/hide panels. Resize the manager and Command Window with their dividers. Button Bar commands populate the Command Window for review; Command Manager Enter/double-click sends through the command workflow.
+The established interaction workflow continues in 0.7: click a saved session to select it, then double-click it, press Enter, or choose Connect. Use View to select managers and show/hide panels. Resize the manager and Command Window with their dividers. Button Bar commands populate the Command Window for review; Command Manager Enter/double-click sends through the command workflow.
 
 ## Run from source
 
@@ -119,7 +125,7 @@ npm run dist
 
 `npm run smoke` opens the desktop app and exercises a real local PTY and a temporary loopback SSH server, including new-host confirmation, password authentication, remote output, and changed-key refusal. It requires a graphical desktop and OpenSSH's `ssh`/`ssh-keygen` commands. The test uses an isolated application profile and known-hosts file and writes its result and screenshot to a temporary directory. It still uses your ordinary local shell environment.
 
-The local 0.6.1 suite passed **156 backend tests and 91 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. Renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
+The local 0.7.0 suite passed **156 backend tests and 97 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. Renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
 
 For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/38324020057) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38324019614) passed at tagged source `0e9ae540293fac90d0c31649705fed6fdb2f2df3`. Both Mac architectures and Linux passed 92 backend tests each; Windows passed 89 with three POSIX-specific skips. Linux passed 63 headless interface checks. Both Mac packages passed strict recursive ad-hoc signature verification. The Windows package job required one retry after interpreter-start and UDP-fixture timeouts; it passed at the same commit without changing code or assertions. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38325248387) validated all thirteen release assets. Anonymous downloads of the checksum manifest and four build records matched the public GitHub asset digests and tagged source.
 

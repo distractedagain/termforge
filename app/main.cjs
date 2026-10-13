@@ -297,8 +297,8 @@ async function boot() {
   });
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 850, minHeight: 600,
-    title: 'TermForge', backgroundColor: '#f0f0f0',
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 12, y: 12 } } : {}),
+    title: 'TermForge', backgroundColor: '#f5f7fa',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 24 } } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false }
   });
   terminals = createTerminalManager({ cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });

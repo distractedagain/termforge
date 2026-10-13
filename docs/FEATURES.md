@@ -1,12 +1,13 @@
 # Feature map
 
-TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. SecureCRT 9.7 macOS is the visual reference; the overall feature goal covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
+TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original modern interface replaces the earlier SecureCRT 9.7 macOS visual reference; the overall feature goal still covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.6.1
+## Current source scope — TermForge 0.7.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
 | Desktop | Electron with native PTYs and socket/device adapters; versioned CI/package evidence below | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
+| Modern interface | Original slate/teal design, horizontal manager switcher, vector icons/app mark, welcome actions and refined dialogs/AI panel; light/dark and optional matching palettes | Headless verification uses synthetic data; packaged interactive behavior remains unverified; see [interface guide](MODERN-INTERFACE.md) |
 | AI Assistant | Local Ollama or OpenRouter free router, explicit editable context, streamed answers, reviewed commands pinned to the original terminal | Free online quotas apply; temporary user API key required online; no bundled ChatGPT/Claude API, autonomous execution, saved chat history or live model verification; see [AI guide](AI-ASSISTANT.md) |
 | Terminal | xterm.js scrollback, selection, resize, search, per-session fonts/schemes/cursor | TERM hints do not create distinct VT/ANSI engines; specialized emulations remain missing |
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
@@ -20,7 +21,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Commands | Nested filtered Command Manager, named Button Bars, folder/color and bounded history | Command strings only; no full button action catalog, session-specific bars or immediate-character mode |
 | Broadcast | Explicit review and confirmation for active/all-live targets | No selected-group/visible targeting; commands use each target's current shell state |
 | Logging | Opt-in raw output into a new file, pause/resume | 128 MiB limit; may include secrets; no plain/append/automatic timestamps/rotation |
-| Appearance | macOS native menu, compact toolbar, vertical managers, categorized settings, Command Window/Bar/status | Exact menu/dialog/default/shortcut equivalence remains unverified |
+| Appearance controls | macOS native menu, connection toolbar, categorized settings, Command Window/Bar/status and terminal/interface color choices | Full option/default/shortcut coverage and native accessibility remain unverified |
 | Keys / highlighting | Session text/menu key mappings, Option/Alt Meta, Backspace/Delete; literal rules and temporary keyword | Limited action types; no regex/bold/reverse or named per-session sets |
 | Python / recording | Installed interpreter with send/wait/read/tab/screen subset, cancel/output and reviewed input recording | No full script compatibility, Dialog/config/file-transfer API or inferred prompt waits; see [API limits](PYTHON-AUTOMATION.md) |
 | TFTP | Explicit restricted octet downloads and opt-in new-file uploads, root/client/bind/port and status | One root, no overwrite, loopback 6969 default, no privileged-port helper; see [TFTP limits](TFTP.md) |
@@ -42,13 +43,17 @@ The presets are Traditional, Monochrome, Solarized Dark, Solarized Light, Forge 
 
 ## Remaining gaps
 
-SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, full credential/key/host-key management, advanced named proxies, X/Y/Zmodem/Kermit, printing, automatic logging/rotation, complete automation compatibility, and SecureFX integration remain missing or incomplete. The macOS layout choice does not remove applicable Windows/Linux capabilities from the overall goal.
+SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, full credential/key/host-key management, advanced named proxies, X/Y/Zmodem/Kermit, printing, automatic logging/rotation, complete automation compatibility, and SecureFX integration remain missing or incomplete. The modern visual direction does not remove applicable platform capabilities from the overall goal.
 
 The limited INI reader imports nonsecret SSH2 connection metadata, not passwords, authentication databases, scripts or complete settings. Review imported hosts, ports, usernames, folders and key paths before connecting; conservative validation may reject unusual values, and Windows key paths can require changes on another platform. SSH config aliases/proxy commands are not inherited.
 
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+The 0.7.0 source passed **156 backend tests and 97 headless interface checks**, with zero failures or browser errors. Checks include compact layouts, keyboard access, reduced motion and layout persistence after restart. Native packaging is pending; packaged interactive behavior remains unverified.
+
+Earlier evidence below applies to its named version.
 
 The 0.6.1 source checks passed **156 backend tests and 91 headless interface checks**, with no failures or console errors. Local AI tests use real isolated HTTP fixtures; online tests simulate HTTPS/SSE. Interface tests exercise consent, exact selected-context sharing, temporary API-key clearing, clipboard focus, streaming/cancellation and reviewed commands pinned to their original terminal. These results do not establish live provider availability or packaged desktop behavior.
 

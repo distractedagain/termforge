@@ -1,0 +1,573 @@
+/* Companion surfaces use the active interface palette, including Solarized. */
+.local-ai-panel {
+  background: var(--panel);
+  border-left-color: var(--border-soft);
+  isolation: isolate;
+}
+
+:root .local-ai-panel .local-ai-header {
+  height: 54px;
+  min-height: 54px;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+}
+
+.local-ai-panel .local-ai-header > span:first-child {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+}
+
+.local-ai-panel .local-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .55px;
+}
+
+.local-ai-panel .caption-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.local-ai-panel .caption-button:hover:enabled {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--border-soft);
+}
+
+.local-ai-panel .local-ai-body {
+  padding: 16px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  line-height: 1.55;
+}
+
+.local-ai-panel .local-ai-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.local-ai-panel .local-ai-body > .local-ai-note:first-child {
+  margin-bottom: 18px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.local-ai-panel .local-ai-field {
+  gap: 7px;
+  margin-bottom: 13px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.local-ai-panel .local-ai-field select,
+.local-ai-panel .local-ai-field textarea,
+.local-ai-panel .local-ai-key-row input,
+.local-ai-panel .local-ai-endpoint input {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--text);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.local-ai-panel .local-ai-field select {
+  height: 34px;
+  padding: 6px 9px;
+}
+
+.local-ai-panel .local-ai-field textarea {
+  min-height: 108px;
+  padding: 10px 11px;
+  line-height: 1.6;
+}
+
+.local-ai-panel textarea::placeholder,
+.local-ai-panel input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.local-ai-panel :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.local-ai-panel .local-ai-endpoint {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.local-ai-panel .local-ai-endpoint label {
+  gap: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.local-ai-panel .local-ai-endpoint input {
+  width: 80px;
+  height: 32px;
+  padding: 5px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.local-ai-panel .local-ai-endpoint .secondary-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  border-color: var(--border-soft);
+  border-radius: 7px;
+  background: var(--field);
+  font-size: 11px;
+}
+
+.local-ai-panel .local-ai-online-settings {
+  margin-bottom: 16px;
+  padding: 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field) 68%, var(--panel));
+}
+
+.local-ai-panel .local-ai-online-settings .local-ai-note {
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.local-ai-panel .local-ai-key-row {
+  align-items: stretch;
+  gap: 6px;
+}
+
+.local-ai-panel .local-ai-key-row input {
+  height: 34px;
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.local-ai-panel .local-ai-key-row button {
+  min-height: 34px;
+  padding: 6px 9px;
+  border-color: var(--border-soft);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.local-ai-panel .local-ai-consent {
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.local-ai-panel .local-ai-consent input {
+  width: 15px;
+  height: 15px;
+  margin-top: 3px;
+}
+
+.local-ai-panel .local-ai-mode-field {
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 17px;
+  margin-top: 17px;
+}
+
+.local-ai-panel .local-ai-attachments {
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.local-ai-panel .local-ai-attachments button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border-color: var(--border-soft);
+  border-radius: 7px;
+  background: var(--panel);
+  font-size: 11px;
+}
+
+.local-ai-panel .local-ai-context-box {
+  padding: 11px;
+  margin-bottom: 14px;
+  border-color: var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--field));
+}
+
+.local-ai-panel .local-ai-context-heading {
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.local-ai-panel .local-ai-context-box textarea {
+  padding: 9px;
+  border-color: var(--border-soft);
+  border-radius: 6px;
+  background: var(--field);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.local-ai-panel .local-ai-context-box .local-ai-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.local-ai-panel .local-ai-controls {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.local-ai-panel .local-ai-controls button {
+  min-height: 34px;
+  padding: 7px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.local-ai-panel .local-ai-controls #local-ai-new {
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.local-ai-panel #local-ai-status {
+  padding-bottom: 15px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.local-ai-panel .local-ai-error {
+  padding: 11px 12px;
+  margin-bottom: 14px;
+  border-color: var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.local-ai-panel .local-ai-request-target {
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.local-ai-panel .local-ai-response-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding-top: 17px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .1px;
+}
+
+.local-ai-panel .local-ai-response {
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.local-ai-panel .local-ai-prose {
+  margin-bottom: 16px;
+}
+
+.local-ai-panel .local-ai-empty {
+  padding: 15px;
+  margin: 0;
+  border: 1px dashed var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field) 45%, var(--panel));
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.local-ai-panel .local-ai-code-block {
+  margin-bottom: 15px;
+  border-color: var(--border-soft);
+  border-radius: 10px;
+  background: var(--field);
+}
+
+.local-ai-panel .local-ai-code-heading {
+  min-height: 41px;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--chrome) 55%, var(--field));
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: .3px;
+}
+
+.local-ai-panel .local-ai-use-command {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-color: var(--border-soft);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0;
+}
+
+.local-ai-panel .local-ai-code {
+  padding: 12px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+.local-ai-panel :is(.local-ai-attachments button, .local-ai-use-command, .local-ai-key-row button, .local-ai-endpoint .secondary-button):hover:enabled {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+
+.local-ai-resizer {
+  width: 4px;
+  border-left-color: transparent;
+  background: var(--panel);
+}
+
+.local-ai-resizer:hover,
+.local-ai-resizer:focus-visible {
+  background: color-mix(in srgb, var(--accent) 50%, var(--panel));
+}
+
+.ai-draft-notice {
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom-color: var(--border-soft);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ai-draft-notice button {
+  min-height: 27px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Scheme cards are previews; their inline ANSI colors remain authoritative. */
+dialog.color-scheme-modal {
+  width: 800px;
+}
+
+.color-scheme-modal .color-scheme-body {
+  grid-template-columns: 292px minmax(0, 1fr);
+  gap: 24px;
+  padding: 20px;
+}
+
+.color-scheme-modal .color-scheme-choices legend {
+  padding-bottom: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.color-scheme-modal .color-scheme-grid {
+  gap: 9px;
+}
+
+.color-scheme-modal .color-scheme-card {
+  gap: 8px;
+  padding: 10px;
+  border-color: var(--border-soft);
+  border-radius: 9px;
+  background: var(--field);
+}
+
+.color-scheme-modal .color-scheme-card:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.color-scheme-modal .color-scheme-card.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--field));
+}
+
+.color-scheme-modal .color-scheme-card-name {
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.color-scheme-modal .color-scheme-thumbnail {
+  gap: 7px;
+  padding: 8px;
+  border-radius: 5px;
+}
+
+.color-scheme-modal .color-scheme-swatches {
+  gap: 2px;
+}
+
+.color-scheme-modal .color-scheme-swatches > span {
+  height: 5px;
+  border-radius: 1px;
+}
+
+.color-scheme-modal .color-scheme-selection-title {
+  margin-bottom: 7px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+}
+
+.color-scheme-modal .color-scheme-description {
+  min-height: 38px;
+  margin-bottom: 15px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.color-scheme-modal .color-scheme-preview-frame,
+.scheme-inline-preview {
+  border-color: var(--border-soft);
+  border-radius: 9px;
+}
+
+.color-scheme-modal .color-scheme-preview-bar,
+.scheme-inline-preview .scheme-preview-caption {
+  padding: 9px 11px;
+  border-bottom-color: var(--border-soft);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.color-scheme-modal .color-scheme-sample-note {
+  margin: 8px 0 20px;
+  font-size: 11px;
+}
+
+.color-scheme-modal .color-scheme-body .color-scheme-match {
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.color-scheme-modal .color-scheme-match input {
+  margin-top: 2px;
+}
+
+.color-scheme-modal .color-scheme-match + .field-note {
+  margin-left: 22px;
+  font-size: 11px;
+}
+
+.color-scheme-modal .color-scheme-scope {
+  padding-top: 13px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.color-scheme-modal .color-scheme-save-status {
+  font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+  .local-ai-panel {
+    border-left-color: var(--border-soft);
+    box-shadow: -12px 0 36px #00000024;
+  }
+
+  :root .local-ai-panel .local-ai-header {
+    height: 48px;
+    min-height: 48px;
+    padding: 10px 13px;
+  }
+
+  .local-ai-panel .local-ai-body {
+    padding: 13px;
+  }
+
+  .local-ai-panel .local-ai-body > .local-ai-note:first-child {
+    margin-bottom: 14px;
+  }
+
+  .local-ai-panel .local-ai-field {
+    margin-bottom: 11px;
+  }
+
+  .local-ai-panel .local-ai-mode-field {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+}
+
+@media (max-width: 740px) {
+  .color-scheme-modal .color-scheme-body {
+    grid-template-columns: 248px minmax(0, 1fr);
+    gap: 14px;
+    padding: 15px;
+  }
+
+  .color-scheme-modal .color-scheme-card {
+    gap: 5px;
+    padding: 7px;
+  }
+
+  .color-scheme-modal .color-scheme-card-name {
+    white-space: normal;
+    line-height: 1.35;
+  }
+}
+
+@media (max-width: 600px) {
+  .color-scheme-modal .color-scheme-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .color-scheme-modal .color-scheme-description {
+    min-height: 0;
+  }
+}

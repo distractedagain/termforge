@@ -18,6 +18,9 @@ import { applyInterfaceColors, applyTerminalColors } from './appearance.js';
 import { createTabGroups } from './tab-groups.js';
 import { createLocalAiUi } from './local-ai.js';
 import './ai-draft.css';
+import { createIcon } from './icons.js';
+import './modern.css';
+import './modern-ai.css';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -79,39 +82,10 @@ const colorPicker = createColorPicker({
     toast('Color scheme saved. Open terminals updated.');
   },
 });
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const iconPaths = {
-  ai: 'M4 3h16v14H9l-5 4V3 M8 7h8 M8 11h6',
-  link: 'M9 14l6-6 M9 7l2-2a4 4 0 0 1 6 6l-2 2 M15 17l-2 2a4 4 0 0 1-6-6l2-2',
-  close: 'M4 4l16 16 M20 4L4 20',
-  switch: 'M4 8h14l-4-4 M18 8v6 M20 16H6l4 4 M6 16v-6',
-  connect: 'M5 6h14v9H5z M9 19h6 M12 15v4 M2 11h6 M5 8l3 3-3 3',
-  disconnect: 'M5 6h14v9H5z M9 19h6 M12 15v4 M2 2l20 20',
-  reconnect: 'M19 8a7 7 0 1 0 0 8 M19 3v5h-5',
-  new: 'M3 7h7l2 2h9v11H3z M3 7V5h8l2 2 M17 10v7 M13.5 13.5h7',
-  terminal: 'M3 4h18v16H3z M6 8l3 3-3 3 M11 15h6',
-  options: 'M5 3h10l4 4v14H5z M15 3v5h4 M8 12h8 M8 16h6',
-  copy: 'M8 7h12v14H8z M16 7V3H4v14h4',
-  paste: 'M7 5H4v16h16V5h-3 M8 3h8v5H8z M7 12h10 M7 16h8',
-  find: 'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0 M14.5 14.5L21 21',
-  transfer: 'M3 5h7l2 2h9v13H3z M5 11h12 M14 8l3 3-3 3 M19 16H7 M10 13l-3 3 3 3',
-  log: 'M5 3h11l3 3v15H5z M8 9h8 M8 13h8 M8 17h5 M15 3v4h4',
-  tile: 'M3 3h8v8H3z M14 3h7v8h-7z M3 14h8v7H3z M14 14h7v7h-7z',
-  palette: 'M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.8h2a4 4 0 0 0 4-4c0-4.1-4-7.5-9-7.5 M7 10h.1 M10 6.5h.1 M15 7h.1 M18 10.5h.1',
-  settings: 'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6',
-  help: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4 M12 16v.1',
-  import: 'M3 7h7l2 2h9v11H3z M3 7V5h8l2 2 M12 10v7 M9 14l3 3 3-3',
-};
-
 function addToolbarIcons() {
   for (const button of document.querySelectorAll('[data-icon]')) {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('class', `tool-icon icon-${button.dataset.icon}`);
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS(SVG_NS, 'path');
-    path.setAttribute('d', iconPaths[button.dataset.icon] || iconPaths.options);
-    svg.append(path); button.replaceChildren(svg);
+    button.replaceChildren(createIcon(button.dataset.icon));
+    if (button.dataset.iconLabel) button.append(make('span', 'tool-label', button.dataset.iconLabel));
   }
 }
 
@@ -140,7 +114,8 @@ function applyPaneVisibility() {
 
 function saveLayout() {
   try {
-    localStorage.setItem('termforge-classic-layout', JSON.stringify({ panes, sidebarWidth: parseInt(document.documentElement.style.getPropertyValue('--sidebar-width')) || 230, commandHeight: parseInt(document.documentElement.style.getPropertyValue('--command-height')) || 100 }));
+    const style = getComputedStyle(document.documentElement);
+    localStorage.setItem('termforge-classic-layout', JSON.stringify({ panes, sidebarWidth: parseInt(style.getPropertyValue('--sidebar-width')) || 280, commandHeight: parseInt(style.getPropertyValue('--command-height')) || 128 }));
   } catch { /* Storage can be unavailable in restricted profiles. */ }
 }
 
@@ -150,14 +125,14 @@ function loadLayout() {
     if (saved && typeof saved === 'object') {
       for (const key of Object.keys(panes)) if (typeof saved.panes?.[key] === 'boolean') panes[key] = saved.panes[key];
       if (Number.isFinite(saved.sidebarWidth)) document.documentElement.style.setProperty('--sidebar-width', `${Math.max(160, Math.min(460, saved.sidebarWidth))}px`);
-      if (Number.isFinite(saved.commandHeight)) document.documentElement.style.setProperty('--command-height', `${Math.max(65, Math.min(300, saved.commandHeight))}px`);
+      if (Number.isFinite(saved.commandHeight)) document.documentElement.style.setProperty('--command-height', `${Math.max(94, Math.min(300, saved.commandHeight))}px`);
     }
   } catch { /* Ignore invalid layout preferences. */ }
   applyPaneVisibility();
 }
 
 function setupSplitters() {
-  for (const [id, variable, axis, minimum, maximum] of [['sidebar-resizer', '--sidebar-width', 'x', 160, 460], ['command-resizer', '--command-height', 'y', 65, 300]]) {
+  for (const [id, variable, axis, minimum, maximum] of [['sidebar-resizer', '--sidebar-width', 'x', 160, 460], ['command-resizer', '--command-height', 'y', 94, 300]]) {
     const handle = $(id);
     const setSize = (value) => {
       const limit = axis === 'x' ? Math.min(maximum, Math.max(minimum, window.innerWidth - 420)) : Math.min(maximum, Math.max(minimum, document.querySelector('.workspace').clientHeight - 140));
@@ -291,7 +266,7 @@ function renderSessions() {
     heading.dataset.treeKey = key; heading.dataset.treeKind = 'folder'; heading.dataset.folderPath = folder.path;
     heading.setAttribute('role', 'treeitem'); heading.setAttribute('aria-expanded', String(!collapsed)); heading.setAttribute('aria-level', String(level));
     heading.tabIndex = focusedTreeKey === key ? 0 : -1;
-    heading.append(make('span', 'tree-chevron', collapsed ? '▸' : '▾'), make('span', 'folder-icon'), make('span', 'folder-name', folder.name), make('span', 'folder-count', String(folder.count)));
+    heading.append(make('span', 'tree-chevron', collapsed ? '▸' : '▾'), createIcon('folder', 'folder-icon'), make('span', 'folder-name', folder.name), make('span', 'folder-count', String(folder.count)));
     heading.addEventListener('click', () => {
       selectedFolderPath = folder.path; selectedSessionId = null; selectedSessionIds.clear(); focusedTreeKey = key;
       if (collapsedFolders.has(folder.path)) collapsedFolders.delete(folder.path); else collapsedFolders.add(folder.path);
@@ -307,7 +282,7 @@ function renderSessions() {
         const connected = [...connections.values()].some((connection) => connection.profile.id === profile.id && !connection.exited);
         const row = make('div', `session-row${connected ? ' connected' : ''}${selectedSessionIds.has(profile.id) ? ' selected' : ''}`);
         row.dataset.sessionId = profile.id;
-        const icon = make('span', 'session-icon', profile.protocol === 'sftp' ? '↔' : ''); icon.setAttribute('aria-hidden', 'true');
+        const icon = createIcon(profile.protocol === 'sftp' ? 'transfer' : 'terminal', 'session-icon');
         const main = make('button', 'session-main'); main.dataset.treeKey = `session:${profile.id}`; main.dataset.treeKind = 'session'; main.dataset.sessionId = profile.id;
         main.setAttribute('role', 'treeitem'); main.setAttribute('aria-level', String(level + 1)); main.setAttribute('aria-selected', String(selectedSessionIds.has(profile.id)));
         main.tabIndex = focusedTreeKey === main.dataset.treeKey ? 0 : -1;
@@ -1572,7 +1547,6 @@ async function init() {
     isMac = state.platform === 'darwin';
     if (isMac && !localStorage.getItem('termforge-classic-layout')) { panes.commandWindow = false; applyPaneVisibility(); }
     document.documentElement.dataset.platform = state.platform;
-    if (isMac) { $('quick-connect').dataset.icon = 'link'; $('disconnect-session').dataset.icon = 'close'; $('reconnect-session').dataset.icon = 'switch'; addToolbarIcons(); }
     $('platform-label').textContent = `${isMac ? 'macOS' : state.platform === 'win32' ? 'Windows' : 'Linux'}`;
     $('version-label').textContent = state.version ? `v${state.version}` : 'OSS';
     $('about-version').textContent = `Version ${state.version || 'development'} · MIT License`;

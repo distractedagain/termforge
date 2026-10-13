@@ -1,12 +1,12 @@
-# SecureCRT 9.7 parity ledger — macOS visual reference
+# SecureCRT 9.7 feature parity ledger
 
-Visual reference selected by the user: **SecureCRT 9.7 on macOS**. TermForge’s overall project goal remains every applicable SecureCRT feature across **macOS, Windows, and Linux**. Choosing the macOS layout does not remove Windows-only or Linux-specific behavior from that goal. This is a development ledger, not a claim that TermForge is equivalent, compatible with every script, or visually near identical.
+TermForge's current direction is an **original modern interface**, as selected by the user for 0.7. This supersedes the earlier request to closely reproduce **SecureCRT 9.7 on macOS** visually. The overall project goal remains every applicable SecureCRT feature across **macOS, Windows, and Linux**. This is a development ledger, not a claim of complete feature or script compatibility. Visual identity is now TermForge's own; historical reference comparisons below retain their original evidence boundaries.
 
 Reference checked October 12, 2026. VanDyke's [macOS product page](https://www.vandyke.com/products/securecrt/mac.html) identifies the 9.7 family; its [release history](https://www.vandyke.com/products/history.php?prod=securecrt) currently lists 9.7.3. The [platform feature grid](https://www.vandyke.com/products/securecrt/features.html) supplies platform applicability. Public documentation is incomplete: exact dialog inventories, defaults, shortcuts, and interaction details still need comparison with an authorized running 9.7 macOS installation. No proprietary code or artwork is used.
 
 ## How to read the ledger
 
-The baseline columns below describe the **published Harbor v0.2.0 source**, commit `4afedc8f4fa479a45b41372c2790d086c2bf4b49`. Changes being developed after that release are recorded separately at the end. They must not silently change release claims.
+The baseline columns below describe the **published Harbor v0.2.0 source**, commit `4afedc8f4fa479a45b41372c2790d086c2bf4b49`. Changes being developed after that release are recorded separately at the end. They must not silently change release claims. Current acceptance gates measure functional coverage, usability and platform behavior; references to visual equivalence in versioned history describe the earlier goal.
 
 - **Implemented** means the narrow Harbor workflow exists and has the indicated evidence. It does not certify all SecureCRT variations or visual equivalence.
 - **Partial** means a subset exists, or it depends on an external program without full UI/control or integration evidence.
@@ -32,7 +32,7 @@ Sources: [macOS overview and screenshots](https://www.vandyke.com/products/secur
 
 | ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
 | --- | --- | --- | --- |
-| UI-01 | macOS window and menus | Partial; E4/E5, native menu plus an in-window menu row | Compare native titlebar, menu ordering, separators, enabled states, toolbar geometry, tabs, status fields, and keyboard focus in light/dark macOS references. |
+| UI-01 | macOS window and menus | Partial; E4/E5, native menu plus an in-window menu row | Verify action coverage, native titlebar/menu integration, enabled states, readable toolbars/tabs/status, keyboard focus and accessible light/dark layouts in TermForge's original design. Exact SecureCRT geometry and styling are no longer acceptance requirements. |
 | UI-02 | Session Manager | Partial; E4, nested tree/filter and selection/open behavior | Match tree controls, context menu, pinned/auto-hide state, four docking edges, floating pane, and saved layout. |
 | UI-03 | Active Sessions Manager | Missing; E5 | List all open sessions with active/count/state indicators; filter, multi-select, activate, disconnect, close, lock, and SFTP actions. |
 | UI-04 | Tab groups and tiling | Partial; E3/E4, one tab strip or automatic tile grid | Independent horizontal/vertical groups with selectable tabs in each group; drag/reorder, resize, and restore grouping without recreating PTYs. |
@@ -187,7 +187,7 @@ Sources: [Python on macOS](https://www.vandyke.com/support/tips/how-to-use-pytho
 
 ## Platform-specific requirements and product integration
 
-The [official platform grid](https://www.vandyke.com/products/securecrt/features.html) and [key-feature footnote](https://www.vandyke.com/products/securecrt/key_features.html) identify these distinctions. The macOS visual reference does not define the project's feature limits. Windows-only capabilities below are missing Windows requirements, and integration with a separate product remains a compatibility gap where applicable. Their absence cannot be treated as completion of the overall goal.
+The [official platform grid](https://www.vandyke.com/products/securecrt/features.html) and [key-feature footnote](https://www.vandyke.com/products/securecrt/key_features.html) identify these distinctions. TermForge's independent visual design does not change the project's feature scope. Windows-only capabilities below are missing Windows requirements, and integration with a separate product remains a compatibility gap where applicable. Their absence cannot be treated as completion of the overall goal.
 
 | Capability | SecureCRT applicability | Harbor v0.2 status | Tracking decision |
 | --- | --- | --- | --- |
@@ -197,8 +197,8 @@ The [official platform grid](https://www.vandyke.com/products/securecrt/features
 | Scratchpad and script editor tabs | Windows | Missing | Separate Windows target; optional portable equivalents can be original features. |
 | ActiveX languages / COM VRALib | Windows | Missing | Separate Windows compatibility scope; macOS automation target is Python. |
 | Graphical keymap editor | Windows | Missing | Separate Windows convenience; macOS mapped-key functionality still required. |
-| Drag/customizable menu and toolbar, file-based UI customization | Windows | Missing | Separate Windows target; macOS layout comparison remains UI-01. |
-| Colored tab backgrounds | Windows | Missing | macOS target uses status icons; do not use Windows colors as macOS reference. |
+| Drag/customizable menu and toolbar, file-based UI customization | Windows | Missing | Separate Windows target; native menu integration and usability remain UI-01. |
+| Colored tab backgrounds | Windows | Missing | Track configurable tab colors separately from status indicators; TermForge's visual design is independent of the historical macOS reference. |
 | Double-width/height font attributes | Windows | Missing | Separate Windows emulation extension. |
 | Environment-variable paths | Windows in feature grid | Missing | Separate Windows option; verify individual macOS log/path behavior from its own documentation. |
 | FIPS 140-2 mode / validated library | Windows | Missing | No Harbor validation claim; selecting algorithms never establishes certification. |
@@ -251,7 +251,7 @@ Each row remains **Partial** for the complete referenced requirement. The narrow
 | AU-01–02 | Installed Python runner; limited `crt` send/wait/read, screen rectangles/coordinates, saved-session connect, tab collection/activate/clone/close, args, Sleep and responsive cancel | N3/N5/N6; `docs/PYTHON-AUTOMATION.md` | One script at a time; no `crt.Dialog`, session configuration object, `Get2`/`IgnoreEscape`, file-transfer API, or full script compatibility. `Session.Connected` means terminal availability, not verified SSH authentication. |
 | AU-03 | Explicit input recording; review/remove events before export; generator emits executable Python with recorded input strings and pauses | N3/N5/N6 | Records any input, including secrets typed while enabled; review is required. No automatic credential detection or reliable prompt-wait inference. Replay equivalence and real SSH interaction remain to test. |
 
-### Major remaining work
+### Major remaining work at the 0.3 checkpoint
 
 - Complete native macOS visual/interaction comparison, independent tab groups/multiple windows, floating/auto-hide docking, comprehensive option defaults and session locking.
 - Credentials, passwords/passphrase lifecycle, key/host-key/token management, SSH capability discovery and integration tests for authentication/certificates/GSSAPI/forwarding/proxies; SSH1 and RLogin remain missing.
@@ -286,10 +286,16 @@ These rows remain partial: live tab movement across windows, selected-group comm
 
 Version 0.5 [native CI](https://github.com/distractedagain/termforge/actions/runs/38328313996), [packaging](https://github.com/distractedagain/termforge/actions/runs/38328332260), and [publication](https://github.com/distractedagain/termforge/actions/runs/38328921919) passed first attempt at `a3697bcbb7c803edfde80d23e5c5769c621671ba`: both Macs and Linux passed 115 tests, Windows passed 112 with three POSIX-only skips, and Linux passed 72 headless checks. Both Mac package signatures passed strict recursive ad-hoc verification. All thirteen public assets were checked against the manifest and public digests; anonymous build-record downloads matched the tagged source. Interactive packaged behavior remains unverified.
 
+## Current visual direction: TermForge 0.7 source
+
+The 0.7 source introduces an original slate/teal workspace, horizontal manager switcher, vector icons and app mark, welcome actions, and refined dialogs and AI Assistant. Light/dark modes and optional matching palettes remain available. Existing session, tab-group, command and explicit AI-review workflows remain in scope; the redesign does not complete missing feature rows. See [the interface guide](MODERN-INTERFACE.md).
+
+The current source passed **156 backend tests**. Final interface verification, native packaging and publication are pending. Visual-equivalence requirements in the historical 0.3–0.5 notes are superseded by the current UI-01 and completion gates below; their recorded results remain unchanged.
+
 ## Required comparison and completion gates
 
-1. Capture an authorized SecureCRT 9.7 macOS reference set: empty window, connected session, all menus/context menus, each Global/Session Options page, manager docking states, grouped tabs, Command Manager, transfers, script/credential/key dialogs, light/dark, and multiple display scales. Redact user data. Reference screenshots are analysis inputs, not bundled artwork.
-2. Inventory each action/default/shortcut and attach it to a row. Compare TermForge using the same synthetic profiles/output and viewport. Check positions, dimensions, typography, spacing, focus, and state changes, not merely named panels.
+1. Inventory remaining SecureCRT 9.7 actions, defaults and shortcuts from public documentation or an authorized running installation, including applicable platform differences. Reference captures support functional analysis; redact user data and do not bundle reference artwork.
+2. Attach each action/default/shortcut to a row. Verify TermForge's original interface with synthetic profiles/output at desktop and compact sizes, in light/dark and matching palettes. Check readable text, reachable controls, keyboard focus, accessibility and state changes. Exact reference positions, dimensions and styling are not completion gates.
 3. Use real isolated servers, loopback sockets, serial emulators, and transfer fixtures for behavior. Cover success, cancellation, rejection, timeout, reconnect, malformed data, and binary fidelity on applicable platforms.
 4. Record original implementation and repeatable evidence for every requested row and its variations on each applicable platform, including the Windows-specific section. Obtain independent terminal/security review before production claims. Mark intentionally unsupported legacy/security combinations visibly rather than hiding the gap.
-5. Publish only accurate version-specific release notes. Until these gates are met, the description remains **an independent terminal application being developed toward SecureCRT 9.7 feature parity across macOS, Windows, and Linux, using macOS as the visual reference**.
+5. Publish only accurate version-specific release notes. Until these gates are met, the description remains **an independent terminal application with an original modern interface, being developed toward SecureCRT 9.7 feature parity across macOS, Windows, and Linux**.
