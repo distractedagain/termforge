@@ -14,6 +14,9 @@ const MAX_HOSTS = 2048;
 const MAX_INPUT = 256 * 1024;
 const MAX_QUEUE = 1024 * 1024;
 const safeFailures = new WeakSet();
+// Authentication identity is main-process state, never renderer-supplied metadata.
+const connectionIdentities = new WeakMap();
+function getConnectionIdentity(client) { return connectionIdentities.get(client) || null; }
 function failure(message, code = 'SSH_FAILED') { const error = Object.assign(new Error(message), { code }); safeFailures.add(error); return error; }
 function cancelled() { return failure('SSH connection cancelled.', 'SSH_CANCELLED'); }
 function text(value, limit = 2048) { return String(value || '').replace(/[\u0000-\u001f\u007f-\u009f]/gu, ' ').slice(0, limit); }
@@ -227,6 +230,8 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
       client.once('ready', () => {
         if (finished || !trusted) return fail(cancelled());
         authenticated = true; credential = null; cleanupTimers();
+        connectionIdentities.set(client, Object.freeze({ host: profile.host.toLowerCase(), port: profile.port,
+          username, ...verifiedIdentity }));
         resolve(client);
       });
       signal?.addEventListener('abort', record.cancel, { once: true });
@@ -324,4 +329,4 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
     closeAll() { for (const connection of [...connections]) connection.cancel(); return { closed: true }; },
   };
 }
-module.exports = { createSecureSsh };
+module.exports = { createSecureSsh, getConnectionIdentity };

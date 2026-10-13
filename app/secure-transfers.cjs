@@ -4,15 +4,20 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const os = require('node:os');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { createRemoteFiles } = require('./remote-files.cjs');
 const { createFolderTransfers } = require('./folder-transfers.cjs');
+const { createTransferRecovery } = require('./transfer-recovery.cjs');
+const { getConnectionIdentity: verifiedConnectionIdentity } = require('./secure-ssh.cjs');
+const { createRemoteEditor } = require('./remote-editor.cjs');
 
 const BLOCK = 64 * 1024;
 const MAX_FILE = 1024 ** 4;
 const MAX_JOBS = 100;
 const NOFOLLOW = fs.constants.O_NOFOLLOW || 0;
 const DONE = new Set(['completed', 'failed', 'cancelled']);
+const RETAINED = new Set(['paused', 'interrupted']);
+const inactive = job => DONE.has(job.status) || RETAINED.has(job.status);
 
 function cancelled() { const error = new Error('Transfer cancelled.'); error.name = 'AbortError'; return error; }
 function check(signal) { if (signal?.aborted) throw cancelled(); }
@@ -43,11 +48,13 @@ function kind(stat) {
 }
 function summary(stat) {
   return { type: kind(stat), size: stat.size, mtime: stat.mtimeMs ?? stat.mtime * 1000,
-    ...(Number.isInteger(stat.mode) ? { permissions: (stat.mode & 0o777).toString(8).padStart(3, '0') } : {}) };
+    ...(Number.isInteger(stat.mode) ? { mode: stat.mode, permissions: (stat.mode & 0o777).toString(8).padStart(3, '0') } : {}),
+    ...(Number.isInteger(stat.uid) ? { uid: stat.uid } : {}), ...(Number.isInteger(stat.gid) ? { gid: stat.gid } : {}) };
 }
 function same(a, b, moved = false) {
   if (!a || !b) return a === b;
   return a.type === b.type && a.size === b.size && a.mtime === b.mtime
+    && ['mode', 'permissions', 'uid', 'gid'].every(key => a[key] === undefined || a[key] === b[key])
     && (a.ino === undefined || (a.ino === b.ino && a.dev === b.dev && (moved || a.ctime === b.ctime)));
 }
 function localSnapshot(stat) { return { ...summary(stat), ino: stat.ino, dev: stat.dev, ctime: stat.ctimeMs }; }
@@ -159,19 +166,49 @@ async function writeChannel(channel, data, signal) {
 
 function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = async () => false, confirmRemoteOperation = async () => false,
   confirmFolderTransfer = async () => false, home = os.homedir(), commitTimeoutMs = 30000, remotePlanLifetimeMs = 60000,
-  folderPlanLifetimeMs = 300000 } = {}) {
+  folderPlanLifetimeMs = 300000, recoveryDirectory, confirmResume = async () => false, confirmDiscardPartial = async () => false,
+  confirmRemoteEdit = async () => false, getConnectionIdentity = verifiedConnectionIdentity } = {}) {
   if (typeof connect !== 'function') throw new TypeError('A verified SSH connection factory is required.');
   if (!Number.isInteger(commitTimeoutMs) || commitTimeoutMs < 1 || commitTimeoutMs > 30000) throw new TypeError('Invalid commit operation timeout.');
   if (!Number.isInteger(remotePlanLifetimeMs) || remotePlanLifetimeMs < 1 || remotePlanLifetimeMs > 60000) throw new TypeError('Invalid remote operation plan lifetime.');
   const sessions = new Map(); const jobs = new Map(); const queue = []; const pendingOpens = new Set();
+  const recovery = recoveryDirectory ? createTransferRecovery(recoveryDirectory) : null;
+  let initialized = !recovery; let initializing; let recoveryError = '';
   let processing = false; let stopped = false;
 
+  function identity(session) {
+    const value = getConnectionIdentity(session.client);
+    if (!value || typeof value.username !== 'string' || !value.username || !value.fingerprint || !value.algorithm
+      || value.host.toLowerCase() !== session.host.toLowerCase() || value.port !== session.port) throw new Error('Authenticated SSH identity is unavailable for resumable transfers.');
+    return createHash('sha256').update(JSON.stringify([value.host.toLowerCase(), value.port, value.username, value.algorithm, value.fingerprint])).digest('hex');
+  }
+  function initializeRecovery() {
+    if (initializing) return initializing;
+    initializing = (async () => {
+      let checkpoints;
+      try { checkpoints = recovery ? await recovery.load() : []; }
+      catch (error) { recoveryError = `Transfer recovery could not be loaded safely. File-transfer changes are disabled: ${plainError(error)}`; initialized = true; return { error: recoveryError }; }
+      for (const checkpoint of checkpoints) {
+        const uncertain = checkpoint.phase !== 'retained';
+        const job = { transferId: checkpoint.transferId, id: '', direction: checkpoint.direction, protocol: 'sftp',
+          localPath: checkpoint.localPath, remotePath: checkpoint.remotePath, status: 'interrupted', resumable: true,
+          bytes: checkpoint.bytes, total: checkpoint.total, checkpoint, controller: new AbortController(),
+          error: uncertain ? 'The final commit outcome is unknown. Inspect the destination and retained files before discarding this record.' : '',
+          warning: 'Retained transfer restored. Connect to the same authenticated server and account to resume.' };
+        job.done = Promise.resolve(); job.resolveDone = () => {}; jobs.set(job.transferId, job);
+      }
+      initialized = true;
+      return { error: '' };
+    })();
+    return initializing;
+  }
+
   function getSession(id) { const session = sessions.get(id); if (!session || session.closed) throw new Error('The file-transfer session is closed.'); return session; }
-  let folderFiles;
-  const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => folderFiles?.busy || [...jobs.values()].some(job => !DONE.has(job.status)),
+  let folderFiles, editor;
+  const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => folderFiles?.busy || editor?.busy || [...jobs.values()].some(job => !inactive(job)),
     call, stat: remoteStat, summary, confirm: confirmRemoteOperation, timeout: commitTimeoutMs, planLifetimeMs: remotePlanLifetimeMs });
   folderFiles = createFolderTransfers({ getSession, assertAvailable: () => remoteFiles.available(),
-    isBusy: () => [...jobs.values()].some(job => !DONE.has(job.status)), call, remoteStat,
+    isBusy: () => editor?.busy || [...jobs.values()].some(job => !inactive(job)), call, remoteStat,
     confirm: confirmFolderTransfer, timeout: commitTimeoutMs, planLifetimeMs: folderPlanLifetimeMs,
     enqueue: plan => {
       const job = { transferId: randomUUID(), ...plan.review, kind: 'folder', status: 'queued', bytes: 0,
@@ -182,15 +219,23 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     },
     copy: async (folder, session, entry) => {
       const child = { id: folder.id, direction: folder.direction, protocol: 'sftp', localPath: entry.localPath,
-        remotePath: entry.remotePath, bytes: 0, total: entry.size, controller: folder.controller, expectedAbsent: true,
+        remotePath: entry.remotePath, bytes: 0, total: entry.size, controller: folder.controller, expectedAbsent: !entry.reviewedReplacement,
         beforeCommit: entry.validate, onProgress: count => progress(folder, count) };
+      if (entry.reviewedReplacement) child.preapprovedDestination = entry.expectedDestination;
       if (folder.direction === 'upload') await upload(child, session); else await download(child, session);
       if (child.warning) folder.warning = child.warning;
     } });
+  editor = createRemoteEditor({ getSession, assertAvailable: () => {
+    assertRecoveryAvailable(); remoteFiles.available(); folderFiles.available();
+    if ([...jobs.values()].some(job => !inactive(job))) throw new Error('Wait for active file transfers before editing a remote file.');
+  }, call, remoteStat, commitRemote, confirm: confirmRemoteEdit, timeout: commitTimeoutMs });
   function view(job) {
     return { transferId: job.transferId, id: job.id, sessionId: job.id, direction: job.direction, protocol: job.protocol,
       localPath: job.localPath, remotePath: job.remotePath, status: job.status, bytes: job.bytes, transferred: job.bytes,
       total: job.total, error: job.error || '', warning: job.warning || '', startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
+      ...(job.resumable ? { resumable: true, resumeAvailable: RETAINED.has(job.status) && job.checkpoint?.phase === 'retained',
+        retainedBytes: job.checkpoint?.bytes || 0, host: job.checkpoint?.host || '', port: job.checkpoint?.port || 22,
+        forgetOnly: Boolean(job.checkpoint && job.checkpoint.phase !== 'retained') } : {}),
       ...(job.kind === 'folder' ? { kind: 'folder', filesTotal: job.filesTotal, filesCompleted: job.filesCompleted,
         directoriesTotal: job.directoriesTotal, directoriesCreated: job.directoriesCreated, currentPath: job.currentPath } : {}) };
   }
@@ -198,6 +243,8 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   function progress(job, count) { job.bytes += count; job.onProgress?.(count); if (Date.now() - (job.lastProgress || 0) >= 100 || job.bytes === job.total) { job.lastProgress = Date.now(); publish(job); } }
 
   async function open(profile, { signal } = {}) {
+    await initializeRecovery();
+    if (recoveryError) throw new Error(recoveryError);
     if (stopped) throw new Error('The transfer manager is stopping.');
     if (sessions.size + pendingOpens.size >= 16) throw new Error('Close a file-transfer connection before opening another.');
     const controller = new AbortController();
@@ -220,7 +267,8 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         session.closed = true; sessions.delete(id);
         remoteFiles.disconnected(id);
         folderFiles.disconnected(id);
-        for (const job of jobs.values()) if (job.id === id && !DONE.has(job.status)) job.controller.abort();
+        editor.disconnected(id);
+        for (const job of jobs.values()) if (job.id === id && !inactive(job)) { job.disconnected = true; job.controller.abort(); }
         try { emit({ type: 'connection', id, status: 'closed' }); } catch {}
       });
       return { id, host: profile.host || profile.hostname || '', port: profile.port || 22, remotePath: currentPath };
@@ -255,6 +303,11 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     if (job.expectedAbsent && stat) throw new Error('A destination item appeared after folder review. Existing items are never replaced by a folder copy.');
     if (stat) readableFile(stat);
     const snapshot = stat ? (local ? localSnapshot(stat) : summary(stat)) : null;
+    if (Object.hasOwn(job, 'preapprovedDestination')) {
+      if (!same(job.preapprovedDestination, snapshot)) throw new Error('The reviewed destination changed before copying. Review the folder again.');
+      if (job.preapprovedDestination?.mode & 0o7000) throw new Error('Reviewed replacements refuse destination files with special permission bits.');
+      return snapshot;
+    }
     if (stat && !(await bounded(confirmOverwrite({ direction: job.direction, source: local ? job.remotePath : job.localPath, destination: filename, signal: job.controller.signal }), job.controller.signal, 10 * 60 * 1000))) throw new Error('Overwrite was declined.');
     check(job.controller.signal);
     return snapshot;
@@ -425,6 +478,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
           await call(sftp, 'write', [handle, buffer, 0, bytesRead, position], signal);
           position += bytesRead; progress(job, bytesRead);
         }
+        if (job.preapprovedDestination) await call(sftp, 'fsetstat', [handle, { mode: parseInt(job.preapprovedDestination.permissions, 8) }], signal);
         await call(sftp, 'close', [handle], signal); handle = null;
       }
       if (!same(localSnapshot(initial), localSnapshot(await source.stat()))) throw new Error('The local source file changed during transfer.');
@@ -466,6 +520,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         await call(sftp, 'close', [source], signal); source = null;
       }
       if (!same(summary(initial), summary(await call(sftp, 'lstat', [job.remotePath], signal)))) throw new Error('The remote source file changed during transfer.');
+      if (job.preapprovedDestination) await target.chmod(parseInt(job.preapprovedDestination.permissions, 8));
       await target.sync(); await target.close(); target = null;
       await job.beforeCommit?.();
       await commitLocal(stage, context, expected, job); committed = true;
@@ -474,6 +529,252 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
       if (target) await quiet(() => target.close());
       if (!committed) await quiet(() => fsp.unlink(stage));
     }
+  }
+
+  // Retained transfers always verify the complete source and the retained
+  // prefix. SFTP metadata alone cannot distinguish files with identical times.
+  async function recoveryParents(filename, remote, session, signal) {
+    const api = remote ? path.posix : path;
+    const parent = api.dirname(filename);
+    const canonical = remote ? await call(session.sftp, 'realpath', [parent], signal) : await fsp.realpath(parent);
+    if (remote && canonical !== parent) throw new Error('Resumable remote paths must have canonical parents without symbolic links.');
+    const root = api.parse(canonical).root; const names = [root];
+    for (const part of canonical.slice(root.length).split(api.sep).filter(Boolean)) names.push(api.join(names.at(-1), part));
+    if (names.length > 256) throw new Error('The transfer path has too many parent directories.');
+    const result = [];
+    for (const name of names) {
+      check(signal);
+      const stat = remote ? await call(session.sftp, 'lstat', [name], signal) : await fsp.lstat(name);
+      if (kind(stat) !== 'directory') throw new Error('Transfer parents must be directories without symbolic links.');
+      result.push({ path: name, type: 'directory', mode: stat.mode, uid: stat.uid, gid: stat.gid,
+        ...(!remote ? { ino: stat.ino, dev: stat.dev } : {}) });
+    }
+    return result;
+  }
+  const equalParents = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const stageIdentity = (stat, remote) => ({ type: kind(stat), mode: stat.mode, uid: stat.uid, gid: stat.gid,
+    ...(!remote ? { ino: stat.ino, dev: stat.dev } : {}) });
+  async function readPart(handle, remote, session, buffer, size, position, signal) {
+    if (remote) return call(session.sftp, 'read', [handle, buffer, 0, size, position], signal);
+    return (await handle.read(buffer, 0, size, position)).bytesRead;
+  }
+  async function hashPart(handle, remote, session, length, signal) {
+    const hash = createHash('sha256'), buffer = Buffer.alloc(BLOCK);
+    for (let position = 0; position < length;) {
+      check(signal); const count = await readPart(handle, remote, session, buffer, Math.min(BLOCK, length - position), position, signal);
+      if (!count) throw new Error('A retained transfer file changed while verifying its contents.');
+      hash.update(buffer.subarray(0, count)); position += count;
+    }
+    return hash;
+  }
+  async function saveCheckpoint(job) {
+    job.checkpoint.updatedAt = Date.now();
+    await recovery.save(job.checkpoint);
+  }
+  async function recoverableCopy(job, session) {
+    const upload = job.direction === 'upload', sourceRemote = !upload, signal = job.controller.signal;
+    let source, target; let checkpoint = job.checkpoint; let prefix;
+    const sourceName = () => upload ? job.localPath : job.remotePath;
+    const snapshot = stat => sourceRemote ? summary(stat) : localSnapshot(stat);
+    const closeSource = async () => { if (!source) return; const item = source; source = null; if (sourceRemote) await quiet(() => call(session.sftp, 'close', [item], undefined, 3000)); else await quiet(() => item.close()); };
+    const closeTarget = async () => { if (!target) return; const item = target; target = null; if (upload) await quiet(() => call(session.sftp, 'close', [item], undefined, 3000)); else await quiet(() => item.close()); };
+    async function currentSource() { return snapshot(readableFile(sourceRemote ? await call(session.sftp, 'lstat', [job.remotePath], signal) : await fsp.lstat(job.localPath))); }
+    async function sourceHandleStat() { return snapshot(readableFile(sourceRemote ? await call(session.sftp, 'fstat', [source], signal) : await source.stat())); }
+    async function validateParents() {
+      const src = await recoveryParents(sourceName(), sourceRemote, session, signal);
+      const dst = await recoveryParents(upload ? job.remotePath : job.localPath, upload, session, signal);
+      if (!equalParents(src, checkpoint.sourceParents) || !equalParents(dst, checkpoint.destinationParents)) throw new Error('A retained transfer parent directory changed.');
+    }
+    try {
+      job.recoveryPhase = 'hashing';
+      if (identity(session) !== (checkpoint?.identity || identity(session))) throw new Error('Resume requires the same authenticated server and account.');
+      const initial = await currentSource();
+      if (checkpoint && !same(checkpoint.sourceSnapshot, initial)) throw new Error('The original source changed. Retained data cannot be resumed.');
+      source = sourceRemote ? await call(session.sftp, 'open', [job.remotePath, 'r'], signal) : await fsp.open(job.localPath, fs.constants.O_RDONLY | NOFOLLOW);
+      if (!same(initial, await sourceHandleStat())) throw new Error('The source changed while opening it.');
+      job.total = initial.size; publish(job);
+      const sourceHash = (await hashPart(source, sourceRemote, session, job.total, signal)).digest('hex');
+      if (!same(initial, await sourceHandleStat()) || !same(initial, await currentSource())) throw new Error('The source changed while computing its transfer fingerprint.');
+      if (checkpoint && checkpoint.sourceHash !== sourceHash) throw new Error('The source contents changed. Retained data cannot be resumed.');
+      if (!checkpoint) {
+        const expected = await destination(job, !upload);
+        job.recoveryPhase = 'setup';
+        const sourceParents = await recoveryParents(sourceName(), sourceRemote, session, signal);
+        const destinationParents = await recoveryParents(upload ? job.remotePath : job.localPath, upload, session, signal);
+        const stageId = randomUUID(); const api = upload ? path.posix : path;
+        checkpoint = { version: 1, transferId: job.transferId, stageId, direction: job.direction, phase: 'retained',
+          identity: identity(session), host: session.host, port: session.port, localPath: job.localPath, remotePath: job.remotePath,
+          stagePath: api.join(destinationParents.at(-1).path, `.termforge-${stageId}.part`),
+          sourceSnapshot: initial, destinationSnapshot: expected, sourceParents, destinationParents,
+          sourceHash, prefixHash: createHash('sha256').digest('hex'), total: job.total, bytes: 0,
+          createdAt: Date.now(), updatedAt: Date.now(), stageIdentity: null };
+        // Persist ownership before creating the stage: crash recovery can then
+        // report a missing stage without leaving an untracked partial file.
+        job.checkpoint = checkpoint; await saveCheckpoint(job);
+        target = upload ? await call(session.sftp, 'open', [checkpoint.stagePath, 'wx+', { mode: 0o600 }], signal)
+          : await fsp.open(checkpoint.stagePath, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW, 0o600);
+        const stat = upload ? await call(session.sftp, 'fstat', [target], signal) : await target.stat();
+        checkpoint.stageIdentity = stageIdentity(stat, upload); await saveCheckpoint(job);
+        prefix = createHash('sha256');
+      } else {
+        if (checkpoint.phase !== 'retained') throw new Error('The previous commit outcome is unknown. Inspect the destination before retrying.');
+        await validateParents();
+        const destinationStat = upload ? await remoteStat(session.sftp, job.remotePath, signal) : await localStat(job.localPath);
+        const destinationSnapshot = destinationStat ? (upload ? summary(destinationStat) : localSnapshot(destinationStat)) : null;
+        if (!same(checkpoint.destinationSnapshot, destinationSnapshot)) throw new Error('The destination changed since the original transfer approval.');
+        const stat = readableFile(upload ? await call(session.sftp, 'lstat', [checkpoint.stagePath], signal) : await fsp.lstat(checkpoint.stagePath));
+        if (!checkpoint.stageIdentity || !equalParents(checkpoint.stageIdentity, stageIdentity(stat, upload)) || stat.size > checkpoint.total) throw new Error('The retained partial file identity or length changed.');
+        target = upload ? await call(session.sftp, 'open', [checkpoint.stagePath, 'r+'], signal)
+          : await fsp.open(checkpoint.stagePath, fs.constants.O_RDWR | NOFOLLOW);
+        const opened = readableFile(upload ? await call(session.sftp, 'fstat', [target], signal) : await target.stat());
+        if (!equalParents(stageIdentity(opened, upload), checkpoint.stageIdentity) || opened.size !== stat.size) throw new Error('The retained partial file changed while opening.');
+        // A dropped ACK may leave additional complete bytes on the server.
+        // Compare the entire actual prefix, never trust an acknowledged offset.
+        const stageHash = (await hashPart(target, upload, session, stat.size, signal)).digest('hex');
+        prefix = await hashPart(source, sourceRemote, session, stat.size, signal);
+        if (stageHash !== prefix.copy().digest('hex')) throw new Error('Retained partial bytes do not match the original source.');
+        checkpoint.bytes = stat.size; checkpoint.prefixHash = stageHash; job.bytes = stat.size; await saveCheckpoint(job);
+      }
+      await validateParents();
+      job.recoveryPhase = 'copying';
+      let lastSaved = checkpoint.bytes;
+      const buffer = Buffer.alloc(BLOCK);
+      for (let position = checkpoint.bytes; position < job.total;) {
+        check(signal);
+        if (job.pauseRequested) break;
+        const count = await readPart(source, sourceRemote, session, buffer, Math.min(BLOCK, job.total - position), position, signal);
+        if (!count) throw new Error('The source changed during the transfer.');
+        if (upload) await call(session.sftp, 'write', [target, buffer, 0, count, position], signal);
+        else await writeFile(target, buffer.subarray(0, count), position);
+        position += count; prefix.update(buffer.subarray(0, count)); checkpoint.bytes = position;
+        checkpoint.prefixHash = prefix.copy().digest('hex'); progress(job, count);
+        if (position - lastSaved >= 1024 * 1024) { if (!upload) await target.sync(); await saveCheckpoint(job); lastSaved = position; }
+      }
+      if (!upload) await target.sync();
+      if (job.pauseRequested) {
+        await closeTarget(); await closeSource(); await saveCheckpoint(job);
+        return 'paused';
+      }
+      check(signal);
+      job.recoveryPhase = 'hashing';
+      if (!same(checkpoint.sourceSnapshot, await sourceHandleStat()) || !same(checkpoint.sourceSnapshot, await currentSource())) throw new Error('The source changed during the transfer.');
+      const completeHash = (await hashPart(target, upload, session, job.total, signal)).digest('hex');
+      if (completeHash !== checkpoint.sourceHash) throw new Error('The completed staging file does not match the original source fingerprint.');
+      const finalStage = readableFile(upload ? await call(session.sftp, 'fstat', [target], signal) : await target.stat());
+      if (finalStage.size !== job.total) throw new Error('The staging file length changed before commit.');
+      await validateParents(); await closeTarget(); await closeSource();
+      const namedStage = readableFile(upload ? await call(session.sftp, 'lstat', [checkpoint.stagePath], signal) : await fsp.lstat(checkpoint.stagePath));
+      if (!equalParents(stageIdentity(namedStage, upload), checkpoint.stageIdentity)
+        || !same(upload ? summary(finalStage) : localSnapshot(finalStage), upload ? summary(namedStage) : localSnapshot(namedStage))) throw new Error('The staging pathname changed before commit.');
+      if (upload) {
+        // SFTP v3 exposes no inode identity. Reopen the named stage and verify
+        // its bytes immediately before RENAME rather than trusting an old handle.
+        const namedHandle = await call(session.sftp, 'open', [checkpoint.stagePath, 'r'], signal);
+        try {
+          if ((await hashPart(namedHandle, true, session, job.total, signal)).digest('hex') !== checkpoint.sourceHash) throw new Error('The remote staging pathname contents changed before commit.');
+        } finally { await quiet(() => call(session.sftp, 'close', [namedHandle], undefined, 3000)); }
+      }
+      job.recoveryPhase = 'committing'; checkpoint.phase = 'committing'; await saveCheckpoint(job);
+      if (upload) await commitRemote(session.sftp, checkpoint.stagePath, job.remotePath, checkpoint.destinationSnapshot, job);
+      else await commitLocal(checkpoint.stagePath, await localContext(job.localPath), checkpoint.destinationSnapshot, job);
+      await recovery.remove(job.transferId); job.checkpoint = null; return 'completed';
+    } catch (error) {
+      if (checkpoint) {
+        if (checkpoint.phase === 'committing') checkpoint.phase = 'indeterminate';
+        // Once cancellation requested, preserve the checkpoint until explicit
+        // verified discard. This also handles writes whose ACK was lost.
+        try { await saveCheckpoint(job); } catch (saveError) { job.warning = `Recovery checkpoint could not be updated: ${plainError(saveError)}`; }
+        error.recoverable = true;
+      }
+      if (error.indeterminate) { session.closed = true; session.client.end(); }
+      throw error;
+    } finally { await closeTarget(); await closeSource(); }
+  }
+
+  function assertRecoveryAvailable(exceptTransferId) {
+    if (!initialized) throw new Error('Transfer recovery is still loading.');
+    if (recoveryError) throw new Error(recoveryError);
+    if ([...jobs.values()].some(job => job.transferId !== exceptTransferId && RETAINED.has(job.status) && job.checkpoint)) throw new Error('Resume or discard retained partial transfers before starting another file operation.');
+  }
+  async function pause(transferId) {
+    const job = jobs.get(transferId);
+    if (!job?.resumable || inactive(job)) return false;
+    if (job.status === 'verifying' || job.status === 'discarding') { job.controller.abort(); await job.done; return false; }
+    if (job.commitStarted) { await job.done; return false; }
+    if (!job.checkpoint || job.recoveryPhase === 'hashing') {
+      job.controller.abort();
+      if (job.status === 'queued') { job.status = 'cancelled'; job.error = 'Transfer stopped before a resumable checkpoint was created. Start it again.'; job.finishedAt = Date.now(); publish(job); job.resolveDone(); }
+      await job.done; return false;
+    }
+    job.pauseRequested = true;
+    if (job.status === 'running') { job.status = 'pausing'; publish(job); }
+    await job.done; return job.status === 'paused';
+  }
+  async function resume({ transferId, id } = {}) {
+    await initializeRecovery(); if (stopped) throw new Error('The transfer manager is stopping.');
+    const job = jobs.get(transferId), session = getSession(id);
+    if (!job?.resumable || !RETAINED.has(job.status) || job.checkpoint?.phase !== 'retained') throw new Error('This transfer has no resumable retained partial file.');
+    // Several queued jobs can be retained by a shutdown. They may be resumed
+    // serially; each revalidates its full source, destination and owned stage.
+    remoteFiles.available(); folderFiles.available();
+    if (editor.busy) throw new Error('Finish the remote edit operation before resuming a transfer.');
+    if ([...jobs.values()].some(item => !inactive(item))) throw new Error('Wait for active transfers before resuming a partial file.');
+    if (job.checkpoint.identity !== identity(session)) throw new Error('Resume requires the original authenticated server and account.');
+    const previous = job.status; job.id = id; job.controller = new AbortController(); job.status = 'verifying'; publish(job);
+    let done; job.done = new Promise(resolve => { done = resolve; }); job.resolveDone = done;
+    try {
+      const accepted = await bounded(confirmResume({ ...view(job), host: session.host, port: session.port,
+        source: job.direction === 'upload' ? job.localPath : job.remotePath,
+        destination: job.direction === 'upload' ? job.remotePath : job.localPath }, { signal: job.controller.signal }), job.controller.signal, 10 * 60 * 1000);
+      check(job.controller.signal); getSession(id);
+      if (!accepted) { job.status = previous; publish(job); return { cancelled: true }; }
+      job.id = id; job.status = 'queued'; job.pauseRequested = false; job.disconnected = false; job.commitStarted = false;
+      job.error = ''; job.warning = ''; job.finishedAt = null;
+      queue.push(job); publish(job); queueMicrotask(() => { void processQueue(); }); return view(job);
+    } catch (error) { job.status = previous; publish(job); throw error; }
+    finally { if (RETAINED.has(job.status)) done(); }
+  }
+  async function discardPartial({ transferId, id } = {}) {
+    await initializeRecovery(); const job = jobs.get(transferId);
+    if (!job?.checkpoint || !RETAINED.has(job.status)) return false;
+    if (stopped) throw new Error('The transfer manager is stopping.');
+    if ([...jobs.values()].some(item => !inactive(item)) || editor.busy || folderFiles.busy) throw new Error('Wait for active file operations before discarding a retained transfer.');
+    remoteFiles.available();
+    const cp = job.checkpoint, upload = cp.direction === 'upload';
+    const previous = job.status;
+    job.controller = new AbortController(); job.status = 'discarding';
+    if (id) job.id = id;
+    if ((!upload || cp.phase !== 'retained') && !sessions.has(job.id)) job.id = '';
+    let done; job.done = new Promise(resolve => { done = resolve; }); job.resolveDone = done; publish(job);
+    try {
+    const forgetOnly = cp.phase !== 'retained';
+    const accepted = await bounded(confirmDiscardPartial({ ...view(job), host: cp.host, port: cp.port, stagePath: cp.stagePath, forgetOnly }, { signal: job.controller.signal }), job.controller.signal, 10 * 60 * 1000);
+    check(job.controller.signal);
+    if (!accepted) return { cancelled: true };
+    if (forgetOnly) {
+      await recovery.remove(transferId); job.checkpoint = null; job.status = 'cancelled'; job.finishedAt = Date.now();
+      job.warning = `Recovery record removed. The uncertain destination and any staging/recovery files were left untouched. Inspect ${cp.stagePath} and ${upload ? cp.remotePath : cp.localPath}.`;
+      publish(job); return { discarded: true, retainedFiles: [cp.stagePath, upload ? cp.remotePath : cp.localPath] };
+    }
+    const session = upload ? getSession(id || job.id) : (sessions.get(id || job.id) || null);
+    if (upload && identity(session) !== cp.identity) throw new Error('Discard requires the original authenticated server and account.');
+    const signal = job.controller.signal;
+    const parents = await recoveryParents(upload ? cp.remotePath : cp.localPath, upload, session, signal);
+    if (!equalParents(parents, cp.destinationParents)) throw new Error('The retained transfer parent changed; no file was removed.');
+    const stat = upload ? await remoteStat(session.sftp, cp.stagePath, signal) : await localStat(cp.stagePath);
+    if (stat) {
+      if (kind(stat) !== 'file' || !equalParents(stageIdentity(stat, upload), cp.stageIdentity) || stat.size !== cp.bytes) throw new Error('The retained partial file changed; inspect it manually. No file was removed.');
+      const handle = upload ? await call(session.sftp, 'open', [cp.stagePath, 'r'], signal) : await fsp.open(cp.stagePath, fs.constants.O_RDONLY | NOFOLLOW);
+      try {
+        if ((await hashPart(handle, upload, session, stat.size, signal)).digest('hex') !== cp.prefixHash) throw new Error('The retained partial contents changed; no file was removed.');
+      } finally { if (upload) await quiet(() => call(session.sftp, 'close', [handle], undefined, 3000)); else await handle.close(); }
+      const latest = upload ? await remoteStat(session.sftp, cp.stagePath, signal) : await localStat(cp.stagePath);
+      if (!latest || !same(upload ? summary(stat) : localSnapshot(stat), upload ? summary(latest) : localSnapshot(latest))) throw new Error('The retained partial changed before cleanup; no file was removed.');
+      check(job.controller.signal);
+      if (upload) await call(session.sftp, 'unlink', [cp.stagePath], undefined, commitTimeoutMs); else await fsp.unlink(cp.stagePath);
+    }
+    check(signal); await recovery.remove(transferId); job.checkpoint = null; job.status = 'cancelled'; job.finishedAt = Date.now(); job.warning = ''; publish(job); return { discarded: true, retainedFiles: [] };
+    } finally { if (job.status === 'discarding') { job.status = previous; publish(job); } done(); }
   }
 
   async function processQueue() {
@@ -487,12 +788,14 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         try {
           check(job.controller.signal);
           const session = getSession(job.id);
-          if (job.kind === 'folder') await folderFiles.run(job, session);
+          let result;
+          if (job.resumable) result = await recoverableCopy(job, session);
+          else if (job.kind === 'folder') await folderFiles.run(job, session);
           else if (job.direction === 'upload') await upload(job, session); else await download(job, session);
           // Completion wins once the atomic commit has succeeded.
-          job.status = 'completed';
+          job.status = result === 'paused' ? 'paused' : 'completed';
         } catch (error) {
-          job.status = job.controller.signal.aborted && !job.commitStarted && !error.indeterminate ? 'cancelled' : 'failed'; job.error = plainError(error);
+          job.status = error.recoverable ? 'interrupted' : job.controller.signal.aborted && !job.commitStarted && !error.indeterminate ? 'cancelled' : 'failed'; job.error = plainError(error);
           if (job.kind === 'folder' && (job.filesCompleted || job.directoriesCreated)) job.warning = `Partial folder copy: ${job.filesCompleted} of ${job.filesTotal} files completed; ${job.directoriesCreated} folders created. Completed files and folders remain at ${job.direction === 'upload' ? job.remotePath : job.localPath}.`;
         }
         job.finishedAt = Date.now(); publish(job); job.resolveDone();
@@ -500,13 +803,20 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     } finally { processing = false; }
   }
   function start(input = {}) {
+    if (stopped) throw new Error('The transfer manager is stopping.');
+    assertRecoveryAvailable();
     const session = getSession(input.id);
     remoteFiles.available(input.id);
     folderFiles.available();
+    if (editor.busy) throw new Error('Finish the remote edit operation before starting a transfer.');
     if (!['upload', 'download'].includes(input.direction)) throw new Error('Choose upload or download.');
     if (!['sftp', 'scp'].includes(input.protocol)) throw new Error('Choose SFTP or SCP.');
     const job = { transferId: randomUUID(), id: session.id, direction: input.direction, protocol: input.protocol,
       localPath: localPath(input.localPath), remotePath: remotePath(input.remotePath), status: 'queued', bytes: 0, total: 0, controller: new AbortController() };
+    if (input.resumable === true) {
+      if (input.protocol !== 'sftp' || !recovery) throw new Error('Resumable transfers require SFTP and a private recovery directory.');
+      identity(session); job.resumable = true;
+    }
     if (!validName(path.posix.basename(job.remotePath)) || !validLocalName(path.basename(job.localPath))) throw new Error('Select an individual regular file with a valid filename for this computer.');
     if (!path.posix.isAbsolute(job.remotePath)) job.remotePath = path.posix.join(session.remotePath, job.remotePath);
     enqueue(job); return view(job);
@@ -521,16 +831,22 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   async function cancel(transferId) {
     const job = jobs.get(transferId); if (!job) return false;
     if (DONE.has(job.status)) return false;
+    if (job.resumable) {
+      if (!inactive(job)) await pause(transferId);
+      if (RETAINED.has(job.status)) return discardPartial({ transferId, id: job.id });
+      return false;
+    }
     job.controller.abort();
     if (job.status === 'queued') { job.status = 'cancelled'; job.finishedAt = Date.now(); publish(job); job.resolveDone(); }
     await job.done; return true;
   }
   async function close(id) {
     const session = sessions.get(id); if (!session) return false;
-    session.closed = true;
+    await editor.closeConnection(id);
     await remoteFiles.close(id);
     await folderFiles.close(id);
-    await Promise.all([...jobs.values()].filter(job => job.id === id && !DONE.has(job.status)).map(job => cancel(job.transferId)));
+    await Promise.all([...jobs.values()].filter(job => job.id === id && !inactive(job)).map(job => job.resumable ? pause(job.transferId) : cancel(job.transferId)));
+    session.closed = true;
     sessions.delete(id); session.sftp.end(); session.client.end(); return true;
   }
   async function closeAll() {
@@ -538,21 +854,26 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     const pending = [...pendingOpens]; for (const item of pending) item.controller.abort();
     // A disconnected session leaves the map before its job's finally cleanup
     // has finished. Await those jobs independently of the live connections.
-    const stoppingJobs = [...jobs.values()].filter(job => !DONE.has(job.status)).map(job => cancel(job.transferId));
-    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs, remoteFiles.closeAll(), folderFiles.closeAll()));
+    const stoppingJobs = [...jobs.values()].filter(job => !inactive(job)).map(job => job.resumable ? pause(job.transferId) : cancel(job.transferId));
+    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs, remoteFiles.closeAll(), folderFiles.closeAll(), editor.closeAll()));
   }
 
-  return { open, close, closeAll, listLocal, listRemote, start, cancel,
-    prepareRemoteOperation: remoteFiles.prepare, applyRemoteOperation: remoteFiles.apply, discardRemoteOperation: remoteFiles.discard,
-    prepareFolderTransfer: folderFiles.prepare,
+  return { open, close, closeAll, listLocal, listRemote, start, cancel, pause, resume, discardPartial, initializeRecovery, assertRecoveryAvailable,
+    prepareRemoteOperation: input => { assertRecoveryAvailable(); return remoteFiles.prepare(input); }, applyRemoteOperation: remoteFiles.apply, discardRemoteOperation: remoteFiles.discard,
+    prepareFolderTransfer: input => { assertRecoveryAvailable(); return folderFiles.prepare(input); },
     startFolderTransfer: async input => { const result = await folderFiles.start(input); return result.cancelled ? result : view(result); },
     discardFolderTransfer: folderFiles.discard,
+    remoteEditOpen: editor.open, remoteEditPrepareSave: editor.prepareSave, remoteEditSave: editor.save,
+    remoteEditDiscardSave: editor.discardSave, remoteEditClose: editor.close,
+    get remoteEditCount() { return editor.count; },
+    get recoveryError() { return recoveryError; },
     listJobs: () => [...jobs.values()].map(view),
     get count() {
       const owned = new Set(sessions.keys());
-      for (const job of jobs.values()) if (!DONE.has(job.status)) owned.add(job.id);
+      for (const job of jobs.values()) if (!inactive(job)) owned.add(job.id);
       for (const id of remoteFiles.activeIds) owned.add(id);
       for (const id of folderFiles.activeIds) owned.add(id);
+      for (const id of editor.activeIds) owned.add(id);
       return owned.size + pendingOpens.size;
     } };
 }

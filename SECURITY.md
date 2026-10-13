@@ -36,3 +36,9 @@ Keep Electron and dependencies current, preserve the lockfile, and investigate d
 Use [GitHub's private vulnerability reporting](https://github.com/distractedagain/termforge/security/advisories/new) to contact the maintainers privately. Private reporting is enabled for this public repository. Report ordinary bugs through Issues, without including credentials or sensitive logs.
 
 Include the version, operating system, reproduction steps, and expected impact. Use a local test host and synthetic data. Do not include real credentials, keys, account configuration, or production logs. Avoid publishing exploit details before the maintainer has had a chance to evaluate them.
+
+## Transfer recovery and remote drafts
+
+Resumable SFTP files retain bounded, private application-data checkpoints containing paths, endpoint metadata and hashes, with no passwords, private keys or file contents. Actual partial contents remain in the destination folder. Resume requires a new explicit approval and the same authenticated server key/account, checks the source and retained bytes, and refuses changed targets. Invalid recovery data disables file-transfer mutation instead of starting unverified recovery. Unknown commit results require inspection; discarding such a record does not delete uncertain server files.
+
+Merge and one-way synchronization previews are single-use, expire and revalidate before mutation. They never delete destination-only entries. Completed children remain after cancellation or failure. Remote text drafts are memory-only, size-bounded and saved only after revision review and native confirmation; they are not protected against application crashes. SFTP v3 metadata and path checks reduce, but cannot eliminate, races with other server processes.

@@ -26,13 +26,21 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.15 — Recovery, merging, synchronization and remote editing
+
+![Reviewed remote text save](docs/images/remote-edit-v0.15.png)
+
+The file workspace adds **pause/resume for individual SFTP files**, including retained checkpoints after restart; **reviewed folder merging** with skip/replace choices; **one-way content synchronization**; and a **remote text editor** with change review and conflict detection. Recovery verifies the authenticated endpoint, original source and partial contents. Native confirmation is required before resuming, discarding retained data, applying folder plans or saving remote edits.
+
+Synchronization retains destination-only files. Folder/SCP resume, destructive mirroring, two-way sync, FTP/FTPS and external editor integration remain future work. See the [file-transfer guide](docs/SECURE-CONNECTIONS.md), [parity map](docs/SECUREFX-PARITY.md) and [0.15 verification record](docs/VERIFICATION-v0.15.0.md). The latest verified download remains linked above until publication completes.
+
 ## New in 0.14 — Reviewed folder transfers
 
 ![Reviewed SFTP folder upload](docs/images/folder-copy-v0.14.png)
 
 The built-in file workspace now supports **SFTP folder upload and download**. Select one folder to inspect its complete tree, review the exact destination and confirm the copy. Nested folders, empty folders and zero-byte files are supported, with aggregate progress and cancellation. Destinations must be new folders; completed output remains after cancellation or failure. See the [folder-copy guide](docs/SECURE-CONNECTIONS.md#reviewed-folder-copies) and [verification record](docs/VERIFICATION-v0.14.0.md).
 
-This is an original implementation within TermForge. SecureFX is not bundled or required. Folder merges, synchronization, resume, remote editing and FTP/FTPS remain outside this release. The [SecureFX workflow parity map](docs/SECUREFX-PARITY.md) tracks these gaps and completion evidence.
+This is an original implementation within TermForge. SecureFX is not bundled or required. At the 0.14 release, folder merges, synchronization, resume, remote editing and FTP/FTPS were outside its scope. The [SecureFX workflow parity map](docs/SECUREFX-PARITY.md) tracks these gaps and completion evidence.
 
 All four platform CI jobs and installer builds passed. Linux also passed 261 interface checks and a real Electron folder-transfer round trip. The public tag, thirteen assets and twelve checksum entries passed anonymous verification; see the [0.14 verification record](docs/VERIFICATION-v0.14.0.md) for exact test counts and limitations.
 

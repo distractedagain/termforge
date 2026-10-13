@@ -1,7 +1,7 @@
 {
   "name": "termforge",
   "productName": "TermForge",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",
@@ -31,7 +31,8 @@
     "test:key-tools-ui": "node scripts/key-tools-ui-check.cjs",
     "test:session-import-ui": "node scripts/session-import-ui-check.cjs",
     "test:remote-files-ui": "node scripts/remote-files-ui-check.cjs",
-    "test:folder-transfers-ui": "node scripts/folder-transfer-ui-check.cjs"
+    "test:folder-transfers-ui": "node scripts/folder-transfer-ui-check.cjs",
+    "test:transfer-workflows-ui": "node scripts/transfer-workflows-ui-check.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

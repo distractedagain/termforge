@@ -13,7 +13,7 @@ const { OPEN_MODE, STATUS_CODE } = utils.sftp;
 async function startFixture(directory, approved, options = {}) {
   const remote = path.join(directory, 'remote'), local = path.join(directory, 'local');
   await fsp.mkdir(remote, { recursive: true }); await fsp.mkdir(local, { recursive: true });
-  const peers = new Set(), authentication = [], windows = [];
+  const peers = new Set(), authentication = [], windows = [], controls = { readDelayMs: 0, writeDelayMs: 0 };
   function remoteFile(value) {
     const parts = path.posix.resolve('/', value).split('/').filter(Boolean);
     const result = path.join(remote, ...parts);
@@ -52,18 +52,19 @@ async function startFixture(directory, approved, options = {}) {
           entries.length ? stream.name(id, entries) : stream.status(id, STATUS_CODE.EOF);
         });
         action('OPEN', async (id, name, flags, attrs) => {
-          let mode = flags & OPEN_MODE.WRITE ? fs.constants.O_WRONLY : fs.constants.O_RDONLY;
+          let mode = flags & OPEN_MODE.WRITE ? flags & OPEN_MODE.READ ? fs.constants.O_RDWR : fs.constants.O_WRONLY : fs.constants.O_RDONLY;
           if (flags & OPEN_MODE.CREAT) mode |= fs.constants.O_CREAT;
           if (flags & OPEN_MODE.EXCL) mode |= fs.constants.O_EXCL;
           if (flags & OPEN_MODE.TRUNC) mode |= fs.constants.O_TRUNC;
           stream.handle(id, remember({ file: await fsp.open(remoteFile(name), mode, attrs.mode || 0o600) }));
         });
-        action('READ', async (id, handle, offset, length) => { const data = Buffer.alloc(Math.min(length, 65536)); const result = await lookup(handle).file.read(data, 0, data.length, offset); result.bytesRead ? stream.data(id, data.subarray(0, result.bytesRead)) : stream.status(id, STATUS_CODE.EOF); });
-        action('WRITE', async (id, handle, offset, data) => { await lookup(handle).file.write(data, 0, data.length, offset); stream.status(id, STATUS_CODE.OK); });
+        action('READ', async (id, handle, offset, length) => { if (controls.readDelayMs) await new Promise(resolve => setTimeout(resolve, controls.readDelayMs)); const data = Buffer.alloc(Math.min(length, 65536)); const result = await lookup(handle).file.read(data, 0, data.length, offset); result.bytesRead ? stream.data(id, data.subarray(0, result.bytesRead)) : stream.status(id, STATUS_CODE.EOF); });
+        action('WRITE', async (id, handle, offset, data) => { if (controls.writeDelayMs) await new Promise(resolve => setTimeout(resolve, controls.writeDelayMs)); let written = 0; const file = lookup(handle).file; while (written < data.length) { const result = await file.write(data, written, data.length - written, offset + written); if (!result.bytesWritten) throw new Error('Fixture write made no progress'); written += result.bytesWritten; } stream.status(id, STATUS_CODE.OK); });
         action('CLOSE', async (id, handle) => { const record = lookup(handle); handles.delete(handle.readUInt32BE()); await record.file?.close(); stream.status(id, STATUS_CODE.OK); });
         action('REMOVE', async (id, name) => { await fsp.unlink(remoteFile(name)); stream.status(id, STATUS_CODE.OK); });
         action('MKDIR', async (id, name, attrs) => { await fsp.mkdir(remoteFile(name), { mode: attrs.mode || 0o755 }); stream.status(id, STATUS_CODE.OK); });
         action('RMDIR', async (id, name) => { await fsp.rmdir(remoteFile(name)); stream.status(id, STATUS_CODE.OK); });
+        action('FSETSTAT', async (id, handle, attrs) => { assert.equal(typeof attrs.mode, 'number'); await lookup(handle).file.chmod(attrs.mode); stream.status(id, STATUS_CODE.OK); });
         action('SETSTAT', async (id, name, attrs) => { assert.equal(typeof attrs.mode, 'number'); await fsp.chmod(remoteFile(name), attrs.mode); stream.status(id, STATUS_CODE.OK); });
         action('RENAME', async (id, from, to) => { await fsp.link(remoteFile(from), remoteFile(to)); await fsp.unlink(remoteFile(from)); stream.status(id, STATUS_CODE.OK); });
         stream.on('close', () => { for (const handle of handles.values()) handle.file?.close().catch(() => {}); handles.clear(); });
@@ -72,7 +73,7 @@ async function startFixture(directory, approved, options = {}) {
   });
   server.listen(options.port || 0, '127.0.0.1'); await once(server, 'listening');
   let stopped = false;
-  return { local, remote, port: server.address().port, authentication, windows,
+  return { local, remote, controls, port: server.address().port, authentication, windows,
     async close() { if (stopped) return; stopped = true; for (const peer of peers) peer.end(); await new Promise(resolve => server.close(resolve)); },
   };
 }
@@ -83,12 +84,12 @@ module.exports = async ({ window, terminals, directory }) => {
   assert.equal(path.dirname(profileDirectory), path.resolve(directory), 'Secure smoke requires a profile inside the isolated smoke directory');
   assert.equal(path.basename(profileDirectory), 'profile', 'Secure smoke cannot use a real application profile');
   const fixtureDirectory = await fsp.mkdtemp(path.join(directory, 'secure-fixture-'));
-  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, folderApprovals = 0, allowFolder = false, fixture, changed;
+  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, folderApprovals = 0, allowFolder = false, resumeApprovals = 0, discardApprovals = 0, editApprovals = 0, allowResume = false, allowDiscard = false, allowEdit = false, fixture, changed;
   const originalDialog = dialog.showMessageBox, originalWrite = terminals.write;
   const writes = [], report = {};
   const secret = { name: 'Native smoke credential', username: 'native-fixture-user', password: 'Native-fixture-password-123!' };
   const evaluate = source => window.webContents.executeJavaScript(`(async () => {
-    const wait = async (predicate, label) => { const deadline = Date.now() + 15000; while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('Native secure smoke timed out: ' + label); };
+    const wait = async (predicate, label, timeoutMs = 15000) => { const deadline = Date.now() + timeoutMs; while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('Native secure smoke timed out: ' + label); };
     ${source}
   })()`);
   const respondToPassword = `
@@ -119,11 +120,14 @@ module.exports = async ({ window, terminals, directory }) => {
       }
       if (options.title === 'Copy reviewed folder') {
         assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
-        assert.match(options.detail, /Files: 2/); assert.match(options.detail, /Folders: 3/); assert.match(options.detail, /Bytes: 140000/);
+        if (options.detail.includes('Mode: copy')) { assert.match(options.detail, /Files: 2/); assert.match(options.detail, /Folders: 3/); assert.match(options.detail, /Bytes: 140000/); } else { assert.match(options.detail, /Mode: (merge|sync)/); assert.match(options.detail, /Destination-only items are retained/); }
         assert.match(options.detail, /Completed files and folders remain/);
         if (allowFolder) folderApprovals++;
         return { response: allowFolder ? 1 : 0 };
       }
+      if (options.title === 'Resume retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Retained bytes: [1-9][0-9]*/); if (allowResume) resumeApprovals++; return { response: allowResume ? 1 : 0 }; }
+      if (options.title === 'Discard retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Partial:/); if (allowDiscard) discardApprovals++; return { response: allowDiscard ? 1 : 0 }; }
+      if (options.title === 'Save remote file') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Path: \/folder-copy\/zero\.txt/); assert.match(options.detail, /Before: [0-9]+ bytes/); assert.match(options.detail, /After: [0-9]+ bytes/); if (allowEdit) editApprovals++; return { response: allowEdit ? 1 : 0 }; }
       if (options.title === 'Delete saved credential') {
         assert.equal(options.message, `Delete “${secret.name}”?`); deletionApprovals++; return { response: 1 };
       }
@@ -268,7 +272,6 @@ module.exports = async ({ window, terminals, directory }) => {
       }
       const disposable = await window.termforge.transferPrepareFolder({id,direction:'upload',localPath:${JSON.stringify(folderSource)},remotePath:'/discarded-folder'});
       if (!await window.termforge.transferDiscardFolder({planId:disposable.planId})) throw new Error('Native folder discard did not release review');
-      await window.termforge.transferClose(id);
     `);
     assert.equal(folderApprovals, 2);
     for (const root of [path.join(fixture.remote, 'folder-copy'), folderDownload]) {
@@ -280,6 +283,108 @@ module.exports = async ({ window, terminals, directory }) => {
     await assert.rejects(fsp.stat(path.join(fixture.remote, 'discarded-folder')), { code: 'ENOENT' });
     report.nativeFolderRoundTrip = true; report.nativeFolderDeclineAndDiscard = true;
     console.log('PASS native reviewed nested folder upload/download, empty folders, approval decline and single-use tokens');
+    await fsp.writeFile(path.join(folderSource, 'zero.txt'), 'source-value');
+    await fsp.writeFile(path.join(folderSource, 'merge-only.txt'), 'added');
+    await fsp.writeFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'old');
+    await fsp.writeFile(path.join(fixture.remote, 'folder-copy', 'target-only.txt'), 'retain this');
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke, id = state.folderConnection;
+      const merge = await window.termforge.transferPrepareFolder({id,direction:'upload',mode:'merge',conflictPolicy:'skip',localPath:${JSON.stringify(folderSource)},remotePath:'/folder-copy'});
+      if (merge.mode !== 'merge' || !merge.entries.some(entry => entry.relativePath === 'merge-only.txt' && entry.action === 'copy') || !merge.entries.some(entry => entry.relativePath === 'zero.txt' && entry.action === 'skip')) throw new Error('Native merge review did not preserve conflict policy');
+      const job = await window.termforge.transferStartFolder({planId:merge.planId});
+      await wait(() => ['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status), 'native folder merge');
+      if (state.jobs[job.transferId].status !== 'completed') throw new Error('Native merge failed: ' + JSON.stringify(state.jobs[job.transferId]));
+    `);
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'utf8'), 'old');
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'merge-only.txt'), 'utf8'), 'added');
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke, id = state.folderConnection;
+      const sync = await window.termforge.transferPrepareFolder({id,direction:'upload',mode:'sync',conflictPolicy:'replace',localPath:${JSON.stringify(folderSource)},remotePath:'/folder-copy'});
+      if (sync.mode !== 'sync' || sync.kept !== 1 || !sync.entries.some(entry => entry.relativePath === 'zero.txt' && entry.action === 'replace') || !sync.entries.some(entry => entry.relativePath === 'nested/payload.bin' && entry.action === 'skip')) throw new Error('Native content synchronization review was incorrect');
+      const job = await window.termforge.transferStartFolder({planId:sync.planId});
+      await wait(() => ['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status), 'native content synchronization');
+      if (state.jobs[job.transferId].status !== 'completed') throw new Error('Native synchronization failed: ' + JSON.stringify(state.jobs[job.transferId]));
+    `);
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'utf8'), 'source-value');
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'target-only.txt'), 'utf8'), 'retain this');
+    assert.equal(folderApprovals, 4); report.nativeFolderMerge = true; report.nativeContentSynchronization = true;
+    console.log('PASS native reviewed folder merge, content synchronization, conflict decisions and retained target-only files');
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      state.edit = await window.termforge.remoteEditOpen({id:state.folderConnection,path:'/folder-copy/zero.txt'});
+      if (state.edit.text !== 'source-value') throw new Error('Native remote editor did not read the SFTP file');
+      const plan = await window.termforge.remoteEditPrepareSave({documentId:state.edit.documentId,text:'edited-value\\n',revision:state.edit.revision});
+      if (plan.before !== 'source-value' || plan.after !== 'edited-value\\n') throw new Error('Native editor review content mismatch');
+      const declined = await window.termforge.remoteEditSave({planId:plan.planId}); if (!declined.cancelled) throw new Error('Native remote edit decline was not honored');
+    `);
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'utf8'), 'source-value');
+    allowEdit = true;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      const plan = await window.termforge.remoteEditPrepareSave({documentId:state.edit.documentId,text:'edited-value\\n',revision:state.edit.revision});
+      const saved = await window.termforge.remoteEditSave({planId:plan.planId});
+      if (!saved.saved || saved.text !== 'edited-value\\n' || !saved.revision || saved.revision === state.edit.revision) throw new Error('Native editor did not acknowledge a new saved revision');
+      let reused = false; try { await window.termforge.remoteEditSave({planId:plan.planId}); reused = true; } catch {}
+      if (reused) throw new Error('Native editor save token was reusable');
+      await window.termforge.remoteEditClose({documentId:state.edit.documentId});
+      state.edit = await window.termforge.remoteEditOpen({id:state.folderConnection,path:'/folder-copy/zero.txt'});
+    `);
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'utf8'), 'edited-value\n');
+    await fsp.writeFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'external-change');
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke; let rejected = false;
+      try { await window.termforge.remoteEditPrepareSave({documentId:state.edit.documentId,text:'stale edit',revision:state.edit.revision}); } catch (error) { rejected = /changed/i.test(error.message); }
+      if (!rejected) throw new Error('Native editor failed to detect the externally changed revision');
+      await window.termforge.remoteEditClose({documentId:state.edit.documentId}); state.edit = null;
+    `);
+    assert.equal(await fsp.readFile(path.join(fixture.remote, 'folder-copy', 'zero.txt'), 'utf8'), 'external-change');
+    assert.equal(editApprovals, 1); report.nativeRemoteEditing = true; report.nativeRemoteEditConflictAndDecline = true;
+    console.log('PASS native remote editor read, reviewed save, decline, single-use token and external-change conflict');
+    const resumeSource = path.join(fixture.local, 'resume-source.bin'), resumeDownload = path.join(fixture.local, 'resume-download.bin');
+    const resumePayload = Buffer.alloc(2 * 1024 * 1024); for (let index = 0; index < resumePayload.length; index++) resumePayload[index] = index % 239;
+    await fsp.writeFile(resumeSource, resumePayload); fixture.controls.writeDelayMs = 15;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      const job = await window.termforge.transferStart({id:state.folderConnection,direction:'upload',protocol:'sftp',resumable:true,localPath:${JSON.stringify(resumeSource)},remotePath:'/resumed.bin'}); state.recoveryId = job.transferId;
+      await wait(() => state.jobs[job.transferId]?.status === 'running' && state.jobs[job.transferId].bytes > 0, 'resumable upload progress');
+      if (!await window.termforge.transferPause(job.transferId)) throw new Error('Native upload pause did not pause');
+      const paused = (await window.termforge.transferListJobs()).find(item => item.transferId === job.transferId);
+      if (paused?.status !== 'paused' || !paused.resumeAvailable || paused.retainedBytes <= 0 || paused.retainedBytes >= paused.total) throw new Error('Native upload did not retain a partial recovery record');
+      const declined = await window.termforge.transferResume({transferId:job.transferId,id:state.folderConnection}); if (!declined.cancelled) throw new Error('Native resume decline was not honored');
+    `);
+    assert.equal((await fsp.readdir(path.join(profileDirectory, 'transfer-recovery'))).filter(name => name.endsWith('.json')).length, 1);
+    await assert.rejects(fsp.stat(path.join(fixture.remote, 'resumed.bin')), { code: 'ENOENT' });
+    allowResume = true;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      await window.termforge.transferResume({transferId:state.recoveryId,id:state.folderConnection});
+      await wait(() => ['completed','failed','cancelled','interrupted'].includes(state.jobs[state.recoveryId]?.status), 'native verified resume', 30000);
+      if (state.jobs[state.recoveryId].status !== 'completed') throw new Error('Native resume failed: ' + JSON.stringify(state.jobs[state.recoveryId]));
+    `);
+    fixture.controls.writeDelayMs = 0;
+    assert.deepEqual(await fsp.readFile(path.join(fixture.remote, 'resumed.bin')), resumePayload);
+    assert.equal((await fsp.readdir(path.join(profileDirectory, 'transfer-recovery'))).filter(name => name.endsWith('.json')).length, 0);
+    fixture.controls.readDelayMs = 10;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      const job = await window.termforge.transferStart({id:state.folderConnection,direction:'download',protocol:'sftp',resumable:true,localPath:${JSON.stringify(resumeDownload)},remotePath:'/resumed.bin'}); state.downloadRecoveryId = job.transferId;
+      await wait(() => state.jobs[job.transferId]?.status === 'running' && state.jobs[job.transferId].bytes > 0, 'resumable download progress');
+      if (!await window.termforge.transferPause(job.transferId)) throw new Error('Native download pause did not pause');
+      await window.termforge.transferClose(state.folderConnection);
+      const declined = await window.termforge.transferDiscardPartial({transferId:job.transferId}); if (!declined.cancelled) throw new Error('Native partial discard decline was not honored');
+    `);
+    fixture.controls.readDelayMs = 0; allowDiscard = true;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      const discarded = await window.termforge.transferDiscardPartial({transferId:state.downloadRecoveryId});
+      if (!discarded.discarded || discarded.retainedFiles.length) throw new Error('Native offline partial discard did not complete');
+    `);
+    assert.equal((await fsp.readdir(path.join(profileDirectory, 'transfer-recovery'))).filter(name => name.endsWith('.json')).length, 0);
+    await assert.rejects(fsp.stat(resumeDownload), { code: 'ENOENT' });
+    assert.ok(!(await fsp.readdir(fixture.local)).some(name => name.startsWith('.termforge-')), 'Native partial cleanup left a local staging file');
+    assert.equal(resumeApprovals, 1); assert.equal(discardApprovals, 1);
+    report.nativeResumableUpload = true; report.nativePausedDownloadDiscard = true; report.nativeRecoveryNativeDecline = true;
+    console.log('PASS native durable pause, verified SFTP resume, native approval decline and offline local partial cleanup');
     const authBeforeCancel = fixture.authentication.length;
     await evaluate(`
       const state = window.__termforgeSecureSmoke;

@@ -9,7 +9,7 @@ const { once, EventEmitter } = require('node:events');
 const { Server, AgentProtocol, utils } = require('ssh2');
 const net = require('node:net');
 const { randomUUID } = require('node:crypto');
-const { createSecureSsh } = require('../app/secure-ssh.cjs');
+const { createSecureSsh, getConnectionIdentity } = require('../app/secure-ssh.cjs');
 const { createTerminalManager } = require('../app/terminals.cjs');
 const { generateEd25519Fixture } = require('../scripts/ssh-key-fixtures.cjs');
 const leadingZeroEd25519 = require('./fixtures/leading-zero-ed25519.cjs');
@@ -74,6 +74,16 @@ test('declining a new host blocks all authentication and vault access', async t 
   const { service } = await fixture(t, { confirmHost: async () => false, getCredential: async () => { vaultReads++; }, requestAuthentication: async () => { prompts++; } });
   await assert.rejects(service.connect(profile(endpoint.port)), error => error.code === 'SSH_HOST_REJECTED');
   assert.equal(vaultReads, 0); assert.equal(prompts, 0); assert.deepEqual(endpoint.methods, []); assert.deepEqual(await service.listHosts(), []);
+});
+
+test('recovery identity reflects the authenticated account and verified key without credential material', async t => {
+  const endpoint = await server(t); const { service } = await fixture(t);
+  const client = await service.connect(profile(endpoint.port, { username: 'ignored-profile-user' }));
+  const identity = getConnectionIdentity(client);
+  assert.equal(identity.username, 'fixture-user'); assert.equal(identity.host, '127.0.0.1'); assert.equal(identity.port, endpoint.port);
+  assert.equal(identity.algorithm, 'ssh-ed25519'); assert.match(identity.fingerprint, /^SHA256:/);
+  assert.equal(Object.isFrozen(identity), true); assert.equal(JSON.stringify(identity).includes('fixture-password'), false);
+  assert.equal(getConnectionIdentity({}), null); client.end();
 });
 
 test('a changed pinned host blocks before vault read or another trust prompt', async t => {

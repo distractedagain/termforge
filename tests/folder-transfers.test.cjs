@@ -36,6 +36,7 @@ async function fixture(t, options = {}) {
       action('LSTAT', async (id, name) => { const patch = await options.onStat?.({ name, local, remote }); stream.attrs(id, { ...attrs(await fsp.lstat(target(name))), ...(patch || {}) }); });
       action('STAT', async (id, name) => stream.attrs(id, attrs(await fsp.stat(target(name)))));
       action('FSTAT', async (id, handle) => stream.attrs(id, attrs(await lookup(handle).file.stat())));
+      action('FSETSTAT', async (id, handle, attributes) => { if (attributes.mode !== undefined) await lookup(handle).file.chmod(attributes.mode & 0o7777); stream.status(id, STATUS_CODE.OK); });
       action('OPENDIR', async (id, name) => stream.handle(id, remember({ directory: target(name), sent: false })));
       action('READDIR', async (id, handle) => {
         const item = lookup(handle); if (item.sent) return stream.status(id, STATUS_CODE.EOF); item.sent = true;
@@ -91,9 +92,9 @@ async function fixture(t, options = {}) {
     }) });
   const connection = await manager.open({ host: '127.0.0.1', port: server.address().port });
   t.after(async () => { await manager.closeAll(); for (const client of clients) client.end(); await new Promise(resolve => server.close(resolve)); await fsp.rm(root, { recursive: true, force: true }); });
-  async function plan(direction = 'upload', name = 'source', destination = 'copy') {
+  async function plan(direction = 'upload', name = 'source', destination = 'copy', operation = {}) {
     return manager.prepareFolderTransfer({ id: connection.id, direction,
-      localPath: path.join(local, direction === 'upload' ? name : destination), remotePath: '/' + (direction === 'upload' ? destination : name) });
+      localPath: path.join(local, direction === 'upload' ? name : destination), remotePath: '/' + (direction === 'upload' ? destination : name), ...operation });
   }
   async function waitJob(id) {
     const deadline = Date.now() + 20000;
@@ -313,4 +314,165 @@ test('closing during the final file commit waits for acknowledgment and reports 
   const job = await f.waitJob(started.transferId); assert.equal(job.status, 'completed', job.error); assert.equal(job.filesCompleted, 1);
   assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'last'), 'utf8'), 'final committed bytes'); assert.equal(f.manager.count, 0);
   const mutations = f.mutations.length; await pause(20); assert.equal(f.mutations.length, mutations);
+});
+
+
+test('merge defaults to skipping existing files and retains destination-only files and folders', async t => {
+  const f = await fixture(t);
+  await fsp.mkdir(path.join(f.local, 'source', 'new-empty'), { recursive: true });
+  await fsp.writeFile(path.join(f.local, 'source', 'existing'), 'source version');
+  await fsp.writeFile(path.join(f.local, 'source', 'new-file'), 'new bytes');
+  await fsp.mkdir(path.join(f.remote, 'copy', 'keep-dir'), { recursive: true });
+  await fsp.writeFile(path.join(f.remote, 'copy', 'existing'), 'destination version');
+  await fsp.writeFile(path.join(f.remote, 'copy', 'keep-dir', 'keep-file'), 'keep bytes');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'merge' });
+  assert.equal(plan.mode, 'merge'); assert.equal(plan.conflictPolicy, 'skip');
+  assert.equal(plan.copied, 1); assert.equal(plan.replaced, 0); assert.equal(plan.skipped, 1); assert.equal(plan.kept, 2);
+  assert.equal(plan.files, 1); assert.equal(plan.sourceFiles, 2); assert.equal(plan.directories, 1); assert.equal(plan.totalBytes, 9);
+  assert.equal(plan.entries.find(entry => entry.relativePath === 'existing').action, 'skip');
+  assert.equal(plan.entries[0].action, 'skip'); assert(!('expected' in plan.entries[1])); assert.deepEqual(f.mutations, []);
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error); assert.equal(result.filesCompleted, 1);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'existing'), 'utf8'), 'destination version');
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'new-file'), 'utf8'), 'new bytes');
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'keep-dir', 'keep-file'), 'utf8'), 'keep bytes');
+  assert.deepEqual(await fsp.readdir(path.join(f.remote, 'copy', 'new-empty')), []);
+});
+
+for (const direction of ['upload', 'download']) test(`reviewed merge replacement works for ${direction} without a second overwrite prompt`, async t => {
+  const f = await fixture(t); const source = path.join(direction === 'upload' ? f.local : f.remote, 'source'); const destination = path.join(direction === 'upload' ? f.remote : f.local, 'copy');
+  await fsp.mkdir(source); await fsp.mkdir(destination);
+  await fsp.writeFile(path.join(source, 'replace'), 'replacement bytes'); await fsp.writeFile(path.join(destination, 'replace'), 'old bytes');
+  await fsp.chmod(path.join(destination, 'replace'), 0o640);
+  await fsp.writeFile(path.join(source, 'new-file'), 'new bytes'); await fsp.writeFile(path.join(destination, 'keep'), 'retained');
+  const plan = await f.plan(direction, 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' });
+  assert.equal(plan.replaced, 1); assert.equal(plan.copied, 1); assert.equal(plan.skipped, 0); assert.equal(plan.kept, 1);
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error); assert.equal(result.filesCompleted, 2);
+  assert.equal(await fsp.readFile(path.join(destination, 'replace'), 'utf8'), 'replacement bytes');
+  if (process.platform !== 'win32') assert.equal((await fsp.stat(path.join(destination, 'replace'))).mode & 0o777, 0o640);
+  assert.equal(await fsp.readFile(path.join(destination, 'keep'), 'utf8'), 'retained');
+  assert((await fsp.readdir(destination)).every(name => !name.startsWith('.termforge-')));
+});
+
+for (const direction of ['upload', 'download']) test(`one-way ${direction} sync compares content and retains destination-only items`, async t => {
+  const f = await fixture(t); const source = path.join(direction === 'upload' ? f.local : f.remote, 'source'); const destination = path.join(direction === 'upload' ? f.remote : f.local, 'copy');
+  await fsp.mkdir(source); await fsp.mkdir(destination);
+  await fsp.writeFile(path.join(source, 'identical'), 'same bytes'); await fsp.writeFile(path.join(destination, 'identical'), 'same bytes');
+  await fsp.writeFile(path.join(source, 'changed'), 'new bytes!'); await fsp.writeFile(path.join(destination, 'changed'), 'old bytes!');
+  await fsp.writeFile(path.join(source, 'added'), 'addition'); await fsp.writeFile(path.join(destination, 'keep'), 'retained');
+  const sameTime = new Date(1700000000000); for (const root of [source, destination]) await fsp.utimes(path.join(root, 'changed'), sameTime, sameTime);
+  const plan = await f.plan(direction, 'source', 'copy', { mode: 'sync' });
+  assert.equal(plan.mode, 'sync'); assert.equal(plan.replaced, 1); assert.equal(plan.copied, 1); assert.equal(plan.skipped, 1); assert.equal(plan.kept, 1);
+  assert.equal(plan.entries.find(entry => entry.relativePath === 'changed').action, 'replace');
+  assert.equal(plan.entries.find(entry => entry.relativePath === 'identical').action, 'skip');
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error); assert.equal(result.total, 18);
+  assert.equal(await fsp.readFile(path.join(destination, 'changed'), 'utf8'), 'new bytes!');
+  assert.equal(await fsp.readFile(path.join(destination, 'keep'), 'utf8'), 'retained');
+  const again = await f.plan(direction, 'source', 'copy', { mode: 'sync' });
+  assert.equal(again.files, 0); assert.equal(again.skipped, 3); assert.equal(again.totalBytes, 0);
+  const before = f.mutations.length; const unchanged = await f.run(again); assert.equal(unchanged.status, 'completed', unchanged.error); assert.equal(f.mutations.length, before);
+});
+
+test('merge and sync reject file-directory conflicts and invalid policies before writes', async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.writeFile(path.join(f.local, 'source', 'conflict'), 'file');
+  await fsp.mkdir(path.join(f.remote, 'copy', 'conflict'), { recursive: true });
+  for (const mode of ['merge', 'sync']) await assert.rejects(f.plan('upload', 'source', 'copy', { mode }), /conflicts with a destination/);
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'mirror' }), /supported folder operation/);
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'newer' }), /supported folder operation/);
+  assert.deepEqual(f.mutations, []);
+});
+
+test('cross-tree case collisions reject merge before writing distinct logical names', async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'Config'), 'source'); await fsp.writeFile(path.join(f.remote, 'copy', 'config'), 'destination');
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'merge' }), /names collide/); assert.deepEqual(f.mutations, []);
+});
+
+test('destination-only symbolic links are rejected in merge and sync inventories', { skip: process.platform === 'win32' && 'Windows symlink creation requires a platform privilege' }, async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.remote, 'keep'), 'target'); await fsp.symlink('../keep', path.join(f.remote, 'copy', 'link'));
+  for (const mode of ['merge', 'sync']) await assert.rejects(f.plan('upload', 'source', 'copy', { mode }), /symbolic links/);
+  assert.deepEqual(f.mutations, []);
+});
+
+test('same-size remote destination content change during approval invalidates sync despite restored mtime', async t => {
+  const f = await fixture(t, { confirm: async (_, __, { remote }) => { const file = path.join(remote, 'copy', 'item'); const before = await fsp.stat(file); await fsp.writeFile(file, 'raced bytes'); await fsp.utimes(file, before.atime, before.mtime); return true; } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'item'), 'newer bytes'); await fsp.writeFile(path.join(f.remote, 'copy', 'item'), 'older bytes');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'sync' });
+  await assert.rejects(f.manager.startFolderTransfer({ planId: plan.planId }), /changed after review/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'item'), 'utf8'), 'raced bytes'); assert.deepEqual(f.mutations, []);
+});
+
+test('same-size remote source content change during approval invalidates download sync despite restored mtime', async t => {
+  const f = await fixture(t, { confirm: async (_, __, { remote }) => { const file = path.join(remote, 'source', 'item'); const before = await fsp.stat(file); await fsp.writeFile(file, 'raced bytes'); await fsp.utimes(file, before.atime, before.mtime); return true; } });
+  await fsp.mkdir(path.join(f.remote, 'source')); await fsp.mkdir(path.join(f.local, 'copy'));
+  await fsp.writeFile(path.join(f.remote, 'source', 'item'), 'newer bytes'); await fsp.writeFile(path.join(f.local, 'copy', 'item'), 'older bytes');
+  const plan = await f.plan('download', 'source', 'copy', { mode: 'sync' });
+  await assert.rejects(f.manager.startFolderTransfer({ planId: plan.planId }), /changed after review/);
+  assert.equal(await fsp.readFile(path.join(f.local, 'copy', 'item'), 'utf8'), 'older bytes'); assert.deepEqual(f.mutations, []);
+});
+
+test('merge replacement checks destination content again after payload transfer', async t => {
+  let changed = false; const f = await fixture(t, { onWrite: async ({ remote }) => { if (changed) return; changed = true; const file = path.join(remote, 'copy', 'item'); const before = await fsp.stat(file); await fsp.writeFile(file, 'raced bytes'); await fsp.utimes(file, before.atime, before.mtime); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'item'), 'newer bytes'); await fsp.writeFile(path.join(f.remote, 'copy', 'item'), 'older bytes');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' }));
+  assert.equal(result.status, 'failed'); assert.match(result.error, /destination.*changed/i);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'item'), 'utf8'), 'raced bytes');
+});
+
+test('partial merge retains completed replacement and unmodified later files after failure', async t => {
+  const f = await fixture(t, { onRename: async ({ to }) => { if (to === '/copy/b-second') throw new Error('Injected second commit refusal'); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  for (const name of ['a-first', 'b-second']) { await fsp.writeFile(path.join(f.local, 'source', name), 'replacement'); await fsp.writeFile(path.join(f.remote, 'copy', name), 'original'); }
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' }));
+  assert.equal(result.status, 'failed'); assert.equal(result.filesCompleted, 1); assert.match(result.warning, /1 of 2 files completed/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'a-first'), 'utf8'), 'replacement');
+  // A refusal of both commit and rollback leaves the old file under a recovery
+  // name; the transfer engine must identify that retained path, never erase it.
+  const second = (await fsp.readdir(path.join(f.remote, 'copy'))).filter(name => name.endsWith('.recovery'));
+  assert.equal(second.length, 1); assert.equal(await fsp.readFile(path.join(f.remote, 'copy', second[0]), 'utf8'), 'original');
+  assert.match(result.error, /Previous destination preserved/);
+});
+
+test('native denial of a replacement plan leaves both trees byte-for-byte unchanged', async t => {
+  const f = await fixture(t, { defaultDeny: true });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'item'), 'source bytes'); await fsp.writeFile(path.join(f.remote, 'copy', 'item'), 'target bytes');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' });
+  assert.equal(plan.replaced, 1); assert.deepEqual(await f.manager.startFolderTransfer({ planId: plan.planId }), { cancelled: true });
+  assert.equal(await fsp.readFile(path.join(f.local, 'source', 'item'), 'utf8'), 'source bytes');
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'item'), 'utf8'), 'target bytes'); assert.deepEqual(f.mutations, []);
+});
+
+test('review expiration interrupts remote content comparison without mutation or leaked reservation', async t => {
+  const f = await fixture(t, { folderPlanLifetimeMs: 100, onRead: async () => { await pause(200); } });
+  await fsp.mkdir(path.join(f.remote, 'source')); await fsp.writeFile(path.join(f.remote, 'source', 'item'), Buffer.alloc(70000, 12));
+  await assert.rejects(f.plan('download', 'source', 'copy', { mode: 'sync' }), /cancelled|expired/);
+  assert.deepEqual(f.mutations, []); assert.equal(f.manager.listJobs().length, 0);
+  assert.equal(f.manager.discardFolderTransfer({ planId: 'expired' }), false);
+  const review = await f.manager.prepareRemoteOperation({ id: f.connection.id, operation: 'mkdir', path: '/', name: 'after-expiry' });
+  assert.equal(f.manager.discardRemoteOperation({ planId: review.planId }), true);
+});
+
+
+test('reviewed replacement refuses destination special permission bits', { skip: process.platform === 'win32' && 'Windows mode bits do not represent setuid' }, async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'item'), 'newer'); await fsp.writeFile(path.join(f.remote, 'copy', 'item'), 'older');
+  await fsp.chmod(path.join(f.remote, 'copy', 'item'), 0o4640);
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' }), /special permission bits/);
+  assert.deepEqual(f.mutations, []);
+});
+
+
+test('merge Replace changed files skips content-identical existing files', async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'same'), 'identical bytes'); await fsp.writeFile(path.join(f.remote, 'copy', 'same'), 'identical bytes');
+  await fsp.writeFile(path.join(f.local, 'source', 'changed'), 'new bytes'); await fsp.writeFile(path.join(f.remote, 'copy', 'changed'), 'old bytes');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'replace' });
+  assert.equal(plan.replaced, 1); assert.equal(plan.skipped, 1); assert.equal(plan.files, 1);
+  assert.equal(plan.entries.find(entry => entry.relativePath === 'same').action, 'skip');
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error);
+  assert.equal(f.mutations.filter(entry => entry[0] === 'rename' && entry[2] === '/copy/same').length, 0);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'same'), 'utf8'), 'identical bytes');
 });

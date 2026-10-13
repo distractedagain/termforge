@@ -124,3 +124,25 @@
 .folder-transfer-size { text-align:right;color:var(--muted); }
 .transfer-current-path { font-family:monospace; }
 @media(max-width:500px) { .folder-transfer-modal .modal-body { padding:14px; }.folder-transfer-modal .modal-footer { padding:12px 14px;gap:7px;flex-wrap:wrap; }#folder-transfer-fields { grid-template-columns:1fr;gap:3px; }#folder-transfer-fields dd+dt { margin-top:7px; }.folder-transfer-entry { gap:6px;padding:8px;grid-template-columns:16px minmax(0,1fr) 58px; } }
+.file-folder-workflows { display:flex;flex-wrap:wrap;gap:10px 18px;align-items:end;padding:0 20px 16px; }
+.file-folder-workflows label { display:grid;gap:5px;color:var(--muted);font-size:11px;min-width:170px; }
+.file-folder-workflows select { max-width:100%;font-size:12px; }
+.file-folder-workflows>p { flex-basis:100%;margin:0;font-size:11px; }
+.file-sync-actions { display:flex;align-items:center;gap:7px;flex-wrap:wrap; }
+.file-sync-actions>span { font-size:11px;color:var(--muted); }
+.file-sync-actions button { font-size:11px;padding:7px 10px; }
+.folder-transfer-action-row { grid-template-columns:16px minmax(0,1fr) 65px 60px; }
+.folder-transfer-action { color:var(--accent);text-align:right;text-transform:capitalize; }
+.remote-edit-modal { width:min(1040px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow-y:auto; }
+.remote-edit-modal [hidden] { display:none; }
+.remote-edit-modal h2 { margin:0;font-size:17px; }
+.remote-edit-body { display:grid;gap:12px;min-width:0; }
+.remote-edit-body p { margin:0; }
+.remote-edit-label,#remote-edit-dirty { font-size:11px;color:var(--muted); }
+#remote-edit-text { width:100%;height:260px;min-height:140px;resize:vertical;tab-size:4;white-space:pre;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--field);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:12px; }
+#remote-edit-review h3 { margin:2px 0 10px;font-size:13px; }
+.remote-edit-comparison { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px; }
+.remote-edit-comparison section { min-width:0;border:1px solid var(--border);border-radius:7px;overflow:hidden; }
+.remote-edit-comparison h4 { padding:9px 12px;background:var(--panel);font-size:11px;margin:0;border-bottom:1px solid var(--border); }
+.remote-edit-comparison pre { max-height:260px;min-height:90px;margin:0;padding:12px;overflow:auto;white-space:pre;font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--field); }
+@media(max-width:650px) { .remote-edit-comparison { grid-template-columns:1fr; }.remote-edit-modal .modal-body { padding:14px; }.remote-edit-modal .modal-footer { flex-wrap:wrap;padding:12px 14px;gap:8px; }.transfer-job { flex-wrap:wrap;gap:9px; }.transfer-job-detail { flex-basis:calc(100% - 100px); }.file-folder-workflows { padding:0 14px 14px; }.file-folder-workflows label { flex:1;min-width:0; }.folder-transfer-action-row { grid-template-columns:16px minmax(0,1fr) 50px 47px; } }

@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 
 const MAX_ENTRIES = 2000;
 const MAX_DEPTH = 32;
@@ -35,8 +35,9 @@ function snapshot(stat, remote) {
 function identity(info) { const { size, mtime, ctime, ...rest } = info; return rest; }
 const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
-// A folder is a reviewed sequence of new-only file commits, not an atomic
+// A folder is a reviewed sequence of guarded file commits, not an atomic
 // directory transaction. Completed files and created folders survive errors.
+// Merge and one-way sync retain every destination-only item; neither deletes.
 function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remoteStat, confirm = async () => false,
   enqueue, copy, timeout = 30000, planLifetimeMs = 300000 }) {
   if (!Number.isInteger(planLifetimeMs) || planLifetimeMs < 1 || planLifetimeMs > 300000) throw new TypeError('Invalid folder review lifetime.');
@@ -69,50 +70,109 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     if (canonical !== filename) throw new Error('A folder parent path changed or contains a symbolic link.');
     return result;
   }
-  async function inspect(plan) {
-    check(plan);
-    const upload = plan.review.direction === 'upload'; const sourceRemote = !upload;
-    const sourceApi = sourceRemote ? path.posix : path; const destinationApi = upload ? path.posix : path;
-    const sourceParents = await parents(plan, sourceApi.dirname(plan.review.sourceRoot), sourceRemote);
-    const destinationParents = await parents(plan, destinationApi.dirname(plan.review.destinationRoot), upload);
-    if (await stat(plan, plan.review.destinationRoot, upload)) throw new Error('The destination folder already exists. Choose a new folder name; merging and replacement are not supported.');
-    const entries = []; const names = new Set(); let files = 0; let directories = 0; let totalBytes = 0;
+  async function digest(plan, filename, remote, expected) {
+    const signal = plan.controller.signal; const hash = createHash('sha256'); const buffer = Buffer.alloc(65536);
+    let handle; let position = 0;
+    try {
+      check(plan, !plan.job);
+      handle = remote ? await call(plan.session.sftp, 'open', [filename, 'r'], signal)
+        : await fsp.open(filename, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const initial = remote ? snapshot(await call(plan.session.sftp, 'fstat', [handle], signal), true) : snapshot(await handle.stat(), false);
+      if (!equal(expected, initial) || initial.type !== 'file') throw new Error('A file changed while its content was being compared.');
+      while (position < expected.size) {
+        check(plan, !plan.job);
+        const length = Math.min(buffer.length, expected.size - position);
+        const count = remote ? await call(plan.session.sftp, 'read', [handle, buffer, 0, length, position], signal)
+          : (await handle.read(buffer, 0, length, position)).bytesRead;
+        if (!Number.isInteger(count) || count < 1 || count > length) throw new Error('A file changed while its content was being compared.');
+        hash.update(buffer.subarray(0, count)); position += count;
+      }
+      const final = remote ? snapshot(await call(plan.session.sftp, 'fstat', [handle], signal), true) : snapshot(await handle.stat(), false);
+      if (!equal(expected, final) || !equal(expected, await stat(plan, filename, remote))) throw new Error('A file changed while its content was being compared.');
+      return hash.digest('hex');
+    } finally {
+      if (handle) {
+        if (remote) { try { await call(plan.session.sftp, 'close', [handle], undefined, timeout); } catch {} }
+        else await handle.close();
+      }
+    }
+  }
+  async function inventory(plan, root, remote, { missing = false, hashes = false } = {}) {
+    const api = remote ? path.posix : path; const entries = []; const names = new Set(); let totalBytes = 0;
     async function walk(filename, relativePath, depth) {
       check(plan);
       if (depth > MAX_DEPTH) throw new Error(`Folder copies support at most ${MAX_DEPTH} nested levels.`);
       if (entries.length >= MAX_ENTRIES) throw new Error(`Folder copies support at most ${MAX_ENTRIES} entries including the root.`);
-      const info = await stat(plan, filename, sourceRemote);
+      const info = await stat(plan, filename, remote);
+      if (!info && missing && !relativePath) return;
       if (!info || !['file', 'directory'].includes(info.type) || (!relativePath && info.type !== 'directory')) throw new Error('Folder copies include only regular files and directories; symbolic links and special files are not followed.');
-      if (info.type === 'file' && (info.size > MAX_BYTES || totalBytes + info.size > MAX_BYTES)) throw new Error('A reviewed folder copy must be no larger than 1 TiB, including all files.');
+      if (info.type === 'file' && (info.size > MAX_BYTES || totalBytes + info.size > MAX_BYTES)) throw new Error('A reviewed folder tree must be no larger than 1 TiB, including all files.');
       const portable = relativePath.normalize('NFC').toLocaleLowerCase('en-US');
       if (names.has(portable)) throw new Error('Folder names collide after case or Unicode normalization. Rename the conflicting entries before copying.');
-      names.add(portable); entries.push({ relativePath, type: info.type, size: info.type === 'file' ? info.size : 0, expected: info });
-      if (info.type === 'file') { files++; totalBytes += info.size; return; }
-      directories++;
-      const children = sourceRemote ? await call(plan.session.sftp, 'readdir', [filename], plan.controller.signal) : await fsp.readdir(filename);
+      names.add(portable);
+      const entry = { relativePath, type: info.type, size: info.type === 'file' ? info.size : 0, expected: info };
+      entries.push(entry);
+      if (info.type === 'file') { totalBytes += info.size; if (hashes) entry.hash = await digest(plan, filename, remote, info); return; }
+      const children = remote ? await call(plan.session.sftp, 'readdir', [filename], plan.controller.signal) : await fsp.readdir(filename);
       if (!Array.isArray(children) || children.length > MAX_ENTRIES - entries.length) throw new Error(`Folder copies support at most ${MAX_ENTRIES} entries including the root.`);
-      const childNames = children.map(child => sourceRemote ? child.filename : child);
-      const seen = new Set();
+      const childNames = children.map(child => remote ? child.filename : child); const seen = new Set();
       for (const name of childNames) {
-        if (!validName(name) || (!upload && !localName(name)) || seen.has(name)) throw new Error('The folder contains an unsafe or duplicate filename.');
+        if (!validName(name) || (!remote && !localName(name)) || (plan.review.direction === 'download' && !localName(name)) || seen.has(name)) throw new Error('The folder contains an unsafe or duplicate filename.');
         seen.add(name);
       }
       childNames.sort();
       for (const name of childNames) {
         const childRelative = relativePath ? `${relativePath}/${name}` : name;
-        const source = sourceApi.join(filename, name); const destination = destinationApi.join(plan.review.destinationRoot, ...childRelative.split('/'));
-        if (source.length > (sourceRemote ? 4096 : 32768) || destination.length > (upload ? 4096 : 32768)) throw new Error('A nested path is too long.');
-        await walk(source, childRelative, depth + 1);
+        const child = api.join(filename, name);
+        const localChild = path.join(plan.review.localPath, ...childRelative.split('/')); const remoteChild = path.posix.join(plan.review.remotePath, childRelative);
+        if (localChild.length > 32768 || remoteChild.length > 4096) throw new Error('A nested path is too long.');
+        await walk(child, childRelative, depth + 1);
       }
-      if (!equal(info, await stat(plan, filename, sourceRemote))) throw new Error('The source folder changed while it was being reviewed. Review it again.');
+      if (!equal(info, await stat(plan, filename, remote))) throw new Error('The source or destination folder changed while it was being reviewed. Review it again.');
     }
-    await walk(plan.review.sourceRoot, '', 0);
+    await walk(root, '', 0); return entries;
+  }
+  async function inspect(plan) {
     check(plan);
-    return { sourceParents, destinationParents, entries, files, directories, totalBytes };
+    const upload = plan.review.direction === 'upload'; const sourceRemote = !upload; const merging = plan.review.mode !== 'copy';
+    const sourceApi = sourceRemote ? path.posix : path; const destinationApi = upload ? path.posix : path;
+    const sourceParents = await parents(plan, sourceApi.dirname(plan.review.sourceRoot), sourceRemote);
+    const destinationParents = await parents(plan, destinationApi.dirname(plan.review.destinationRoot), upload);
+    if (!merging && await stat(plan, plan.review.destinationRoot, upload)) throw new Error('The destination folder already exists. Choose a new folder name or select Merge.');
+    const source = await inventory(plan, plan.review.sourceRoot, sourceRemote, { hashes: merging });
+    const destination = merging ? await inventory(plan, plan.review.destinationRoot, upload, { missing: true, hashes: true }) : [];
+    const destinations = new Map(destination.map(entry => [entry.relativePath, entry]));
+    const portable = new Map();
+    for (const entry of [...source, ...destination]) {
+      const normalized = entry.relativePath.normalize('NFC').toLocaleLowerCase('en-US');
+      if (portable.has(normalized) && portable.get(normalized) !== entry.relativePath) throw new Error('Source and destination names collide after case or Unicode normalization. Rename the conflicting entries before copying.');
+      portable.set(normalized, entry.relativePath);
+    }
+    let copied = 0; let replaced = 0; let skipped = 0; let directories = 0; let totalBytes = 0;
+    const entries = source.map(entry => {
+      const target = destinations.get(entry.relativePath);
+      if (target && target.type !== entry.type) throw new Error('A source file conflicts with a destination directory (or vice versa). Rename or move the conflicting item before reviewing again.');
+      let action;
+      if (entry.type === 'directory') { action = target ? 'skip' : 'mkdir'; if (!target) directories++; }
+      else if (!target) { action = 'copy'; copied++; totalBytes += entry.size; }
+      else if (entry.hash === target.hash || (plan.review.mode === 'merge' && plan.review.conflictPolicy === 'skip')) { action = 'skip'; skipped++; }
+      else {
+        if (target.expected.mode & 0o7000) throw new Error('Replacement refuses destination files with special permission bits. Change those permissions deliberately before reviewing again.');
+        action = 'replace'; replaced++; totalBytes += entry.size;
+      }
+      return { ...entry, action, destinationExpected: target?.expected || null, ...(target?.hash ? { destinationHash: target.hash } : {}) };
+    });
+    const sourceNames = new Set(source.map(entry => entry.relativePath));
+    const kept = destination.filter(entry => !sourceNames.has(entry.relativePath)).length;
+    check(plan);
+    return { sourceParents, destinationParents, entries, destination, files: copied + replaced, directories, totalBytes,
+      copied, replaced, skipped, kept, sourceFiles: source.filter(entry => entry.type === 'file').length,
+      sourceDirectories: source.filter(entry => entry.type === 'directory').length };
   }
   function review(plan) {
-    return { ...plan.review, entries: plan.expected.entries.map(({ expected, ...item }) => ({ ...item })),
-      files: plan.expected.files, directories: plan.expected.directories, totalBytes: plan.expected.totalBytes, expiresAt: plan.expires };
+    const { files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories } = plan.expected;
+    return { ...plan.review, entries: plan.expected.entries.map(({ expected, destinationExpected, hash, destinationHash, ...item }) => ({ ...item })),
+      files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, expiresAt: plan.expires };
   }
   async function prepare(input = {}) {
     available(); assertAvailable();
@@ -120,9 +180,11 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     const session = getSession(input.id);
     if (!['upload', 'download'].includes(input.direction)) throw new Error('Choose upload or download.');
     const localPath = plainPath(input.localPath, false); const remotePath = plainPath(input.remotePath, true);
+    const mode = input.mode ?? 'copy'; const conflictPolicy = input.conflictPolicy ?? 'skip';
+    if (!['copy', 'merge', 'sync'].includes(mode) || !['skip', 'replace'].includes(conflictPolicy)) throw new Error('Choose a supported folder operation and conflict policy.');
     const upload = input.direction === 'upload';
     const plan = { session, controller: new AbortController(), expires: Date.now() + planLifetimeMs, applying: false,
-      review: { planId: randomUUID(), id: input.id, direction: input.direction, protocol: 'sftp', host: session.host, port: session.port,
+      review: { planId: randomUUID(), id: input.id, direction: input.direction, mode, conflictPolicy, protocol: 'sftp', host: session.host, port: session.port,
         localPath, remotePath, sourceRoot: upload ? localPath : remotePath, destinationRoot: upload ? remotePath : localPath } };
     let finishPreparing; plan.preparingDone = new Promise(resolve => { finishPreparing = resolve; });
     active = plan;
@@ -175,13 +237,23 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
         if (!equal(expected.expected, await stat(plan, pathFor(plan.review.sourceRoot, relative, sourceApi), sourceRemote))) throw new Error('The source folder changed during the copy.');
       }
       if (!equal(entry.expected, await stat(plan, source, sourceRemote))) throw new Error('A reviewed source file or folder changed during the copy.');
+      if (entry.hash && entry.hash !== await digest(plan, source, sourceRemote, entry.expected)) throw new Error('The source file content changed after review.');
       for (const relative of new Set(ancestors)) {
-        const filename = pathFor(plan.review.destinationRoot, relative, destinationApi); const expected = created.get(filename);
+        const filename = pathFor(plan.review.destinationRoot, relative, destinationApi);
+        const expected = created.get(filename) || (expectedEntries.get(relative)?.destinationExpected ? identity(expectedEntries.get(relative).destinationExpected) : null);
         if (!expected) continue;
         const info = await stat(plan, filename, upload);
-        if (!info || !equal(expected, identity(info))) throw new Error('A created destination folder changed during the copy.');
+        if (!info || !equal(expected, identity(info))) throw new Error('A destination folder changed during the copy.');
         const canonical = upload ? await call(session.sftp, 'realpath', [filename], plan.controller.signal) : await fsp.realpath(filename);
-        if (canonical !== filename) throw new Error('A created destination folder changed during the copy.');
+        if (canonical !== filename) throw new Error('A destination folder changed during the copy.');
+      }
+      const destination = pathFor(plan.review.destinationRoot, entry.relativePath, destinationApi);
+      const current = await stat(plan, destination, upload);
+      if (entry.type === 'directory') {
+        if (entry.destinationExpected ? !current || !equal(identity(entry.destinationExpected), identity(current)) : Boolean(current)) throw new Error('A destination folder changed or appeared after review.');
+      } else {
+        if (!equal(entry.destinationExpected, current)) throw new Error('The destination file changed or appeared after review.');
+        if (entry.destinationHash && entry.destinationHash !== await digest(plan, destination, upload, entry.destinationExpected)) throw new Error('The destination file content changed after review.');
       }
       check(plan, false);
     }
@@ -189,8 +261,8 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       await validate(entry);
       const destination = pathFor(plan.review.destinationRoot, entry.relativePath, destinationApi);
       job.currentPath = entry.relativePath || sourceApi.basename(plan.review.sourceRoot); job.publish();
-      if (await stat(plan, destination, upload)) throw new Error('A destination item appeared after review. Existing items are never replaced by a folder copy.');
-      if (entry.type === 'directory') {
+      if (entry.action === 'skip') continue;
+      if (entry.action === 'mkdir') {
         if (upload) {
           try { await call(session.sftp, 'mkdir', [destination, { mode: 0o700 }], undefined, timeout); }
           catch (error) {
@@ -208,7 +280,11 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       } else {
         const localPath = pathFor(job.localPath, entry.relativePath, path);
         const remotePath = pathFor(job.remotePath, entry.relativePath, path.posix);
-        await copy(job, session, { localPath, remotePath, size: entry.size, validate: () => validate(entry) });
+        const info = entry.destinationExpected;
+        const expectedDestination = info ? { type: info.type, size: info.size, mtime: info.mtime, mode: info.mode, permissions: (info.mode & 0o777).toString(8).padStart(3, '0'),
+          ...(!upload ? { ino: info.ino, dev: info.dev, ctime: info.ctime } : {}) } : null;
+        await copy(job, session, { localPath, remotePath, size: entry.size, expectedDestination,
+          reviewedReplacement: entry.action === 'replace', validate: () => validate(entry) });
         job.filesCompleted++; job.publish();
       }
     }

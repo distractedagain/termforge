@@ -84,7 +84,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareFolder', 'transferStartFolder', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareFolder', 'transferStartFolder', 'transferResume', 'remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -195,9 +195,14 @@ function registerHandlers() {
   });
   handle('transferStart', input => secureTransfers.start(input));
   handle('transferCancel', id => secureTransfers.cancel(requiredId(id)));
+  handle('transferPause', id => secureTransfers.pause(requiredId(id)));
+  handle('transferResume', input => secureTransfers.resume(input));
+  handle('transferDiscardPartial', input => secureTransfers.discardPartial(input));
+  handle('transferListJobs', () => secureTransfers.listJobs());
   handle('transferPrepareFolder', input => secureTransfers.prepareFolderTransfer(input));
   handle('transferStartFolder', input => secureTransfers.startFolderTransfer(input));
   handle('transferDiscardFolder', input => secureTransfers.discardFolderTransfer(input));
+  for (const name of ['remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'remoteEditDiscardSave', 'remoteEditClose']) handle(name, input => secureTransfers[name](input));
   handle('transferPrepareRemoteOperation', input => secureTransfers.prepareRemoteOperation(input));
   handle('transferApplyRemoteOperation', input => secureTransfers.applyRemoteOperation(input));
   handle('transferDiscardRemoteOperation', input => secureTransfers.discardRemoteOperation(input));
@@ -443,10 +448,17 @@ async function boot() {
   credentials = createCredentialVault({ directory: dataDirectory, safeStorage, confirmUse: ({ name, host, port, fingerprint, signal }) => approveNative({ title: 'Allow saved credential', message: `Use “${name}” with ${host}:${port}?`, detail: `Verified server key: ${fingerprint}\n\nThis allows this credential to authenticate to this host and key on future connections. Only approve servers you trust with these credentials.`, accept: 'Allow credential', signal }) });
   secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
   secureTransfers = createSecureTransfers({
+    recoveryDirectory: path.join(dataDirectory, 'transfer-recovery'),
     connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event),
+    confirmResume: (review, { signal } = {}) => approveNative({ title: 'Resume retained transfer', message: 'Verify and resume this transfer?',
+      detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nRetained bytes: ${review.retainedBytes}\nTotal bytes: ${review.total}\n\nThe source and retained partial file will be verified before continuing. Changed files or a different authenticated server identity will be refused.`, accept: 'Verify and resume', signal }),
+    confirmDiscardPartial: (review, { signal } = {}) => approveNative({ title: 'Discard retained transfer', message: review.forgetOnly ? 'Forget this uncertain transfer checkpoint?' : 'Discard this retained partial file?',
+      detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nPartial: ${review.stagePath}\n\n${review.forgetOnly ? 'The transfer result is uncertain. Files will remain for inspection; only the recovery record will be removed.' : 'The verified partial file and its recovery record will be removed. The source and final destination will be retained.'}`, accept: review.forgetOnly ? 'Forget checkpoint' : 'Discard partial', signal }),
+    confirmRemoteEdit: (review, { signal } = {}) => approveNative({ title: 'Save remote file', message: 'Replace this remote file with the reviewed edits?',
+      detail: `Server: ${review.host}:${review.port}\nPath: ${review.path}\nBefore: ${review.previousBytes} bytes\nAfter: ${review.bytes} bytes\n\nThe remote file is checked against the opened revision before replacement.`, accept: 'Save remote file', signal }),
     confirmFolderTransfer: (review, { signal } = {}) => approveNative({
       title: 'Copy reviewed folder', message: `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
-      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\n\nThe destination must be a new folder. Existing items will not be replaced. Completed files and folders remain if you cancel or a later item fails.`,
+      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\nMode: ${review.mode || 'copy'}\nReplace: ${review.replaced || 0}\nSkip: ${review.skipped || 0}\n\n${!review.mode || review.mode === 'copy' ? 'The destination must be a new folder. Existing items will not be replaced.' : 'Only the reviewed replacements will overwrite existing files. Destination-only items are retained.'} Completed files and folders remain if you cancel or a later item fails.`,
       accept: 'Copy folder', signal
     }),
     confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }),
@@ -457,6 +469,7 @@ async function boot() {
         accept: labels[review.operation], signal });
     }
   });
+  await secureTransfers.initializeRecovery();
   sessionImport = createSessionImport({
     chooseFile: async () => {
       const result = await dialog.showOpenDialog(window, { title: 'Import sessions from CSV or text', properties: ['openFile'], filters: [{ name: 'Session lists', extensions: ['csv', 'tsv', 'txt'] }, { name: 'All files', extensions: ['*'] }] });
@@ -524,11 +537,12 @@ async function boot() {
     const serverState = tftp?.status();
     const serverOwned = serverState && (serverState.state !== 'stopped' || serverState.activeTransfers > 0);
     const transferConnections = secureTransfers?.count || 0;
+    const remoteDocuments = secureTransfers?.remoteEditCount || 0;
     const keyOperations = keyTools?.count || 0;
-    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections && !keyOperations) return;
+    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections && !keyOperations && !remoteDocuments) return;
     event.preventDefault();
     if (shuttingDown) return;
-    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${transferConnections} file-transfer connection(s), ${keyOperations} SSH key operation(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
+    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${remoteDocuments ? 'Any unsaved remote editor buffers will be lost. ' : ''}${terminals.count} terminal(s), ${transferConnections} file-transfer connection(s), ${keyOperations} SSH key operation(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
     if (choice === 1) {
       shuttingDown = true;
       cleanupTerminals().then(() => { quitting = true; app.quit(); }).catch(error => { shuttingDown = false; dialog.showErrorBox('Active work could not stop', error.message); });
