@@ -36,7 +36,9 @@ TermForge now follows the reference menu order and grouping across **File, Edit,
 
 New actions include bulk reconnect/disconnect with target review, separate screen/scrollback clearing, terminal printing with preview and page settings, text/raw logging, independent Receive ASCII capture, Hex View and reviewed binary sends on supported connections. Tools adds encrypted SSH key creation, source-preserving OpenSSH/PEM conversion and a read-only system-agent fingerprint viewer. The connection shortcuts are **Cmd/Ctrl+E** for Connect, **K** for Quick Connect, **T** for Connect in Tab/Tile and **L** for a local shell.
 
-This is partial functional coverage. Legacy Kermit/X/Y/Zmodem, detached/cascading session windows, session locking, master-password configuration and full XML/text import are still unavailable. See the [menu guide](docs/MENUS.md), [release notes](docs/RELEASE-v0.12.0.md) and [verification record](docs/VERIFICATION-v0.12.0.md). Cross-platform release checks are pending; the public download remains v0.11.0.
+This is partial functional coverage. Legacy Kermit/X/Y/Zmodem, detached/cascading session windows, session locking, master-password configuration and full XML/text import are still unavailable. See the [menu guide](docs/MENUS.md), [release notes](docs/RELEASE-v0.12.0.md) and [verification record](docs/VERIFICATION-v0.12.0.md).
+
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38431889410) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38431893367) passed at source `5dad1ad30e16436d3317f73433ceb754bd1c2f25`. Both Macs and Linux each passed 338 backend tests and seven localhost Ansible checks; Windows passed 330 backend tests with eight expected platform-specific skips. Linux passed 198 interface checks and the real Electron smoke, including 15 native menu checks. Both Mac packages passed ad-hoc signature integrity checks. Publication and anonymous asset verification are pending; the public download remains v0.11.0.
 
 ## New in 0.11 — Docked desktop managers
 
