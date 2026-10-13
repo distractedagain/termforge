@@ -2,7 +2,7 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. SecureCRT 9.7 macOS is the visual reference; the overall feature goal covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current preview scope — TermForge 0.3.0
+## Current preview scope — TermForge 0.4.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
@@ -27,11 +27,11 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Jump / tunnels | One OpenSSH jump and loopback-requested local/remote/dynamic forwarding | No gateway session graph/multiple hops; server policy may reject or alter forwarding |
 | Configuration | Version-2 JSON with version-1 schema migration, commands/history/snapshots; limited plain SSH2 INI import | No CSV/text wizard, broad XML compatibility, encrypted-secret recovery or full conflict-policy UI |
 
-## In-development source — 0.4 color schemes
+## Color schemes added in 0.4
 
-| Workflow | Source implementation | Limits |
+| Workflow | Implementation | Limits |
 | --- | --- | --- |
-| Palette selection | Options → Color Schemes and palette toolbar button; seven named presets with ANSI samples | Current published v0.3 download does not include the new picker |
+| Palette selection | Options → Color Schemes and palette toolbar button; seven named presets with ANSI samples | Custom palette editing/import is not included |
 | Terminal palette | Sixteen normal/bright ANSI colors, foreground/background, cursor/accent, active/inactive selection | Programs with explicit RGB colors or their own themes may retain those colors |
 | Global and session colors | Global default plus per-session override or inheritance; saved appearance changes update open matching terminals | Connection settings still take effect on the next connection |
 | Matching interface | Optional toolbars, managers, tabs, dialogs and status colors based on the global default | Per-session palettes do not recolor the interface; operating-system UI remains system controlled |
@@ -55,9 +55,11 @@ On October 12, 2026, the 0.3 feature batch passed **84 local backend tests and 4
 
 A user reported successful launch, local-shell use, and an SSH connection in the installed v0.3 macOS app. This limited manual evidence does not establish a complete native runtime test matrix. Real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability still require integration coverage. Historical Harbor 0.1 macOS Intel checks established real local PTYs and isolated OpenSSH new-host/password/changed-key behavior; Harbor 0.2 passed source/package CI and 20 synthetic interface checks. Those results apply to historical source/packages. A generated installer does not verify every workflow.
 
-The 0.4 source passed **92 backend tests and 63 headless renderer checks**, with no failures or browser console errors. Coverage includes complete palette definitions, strict saved-setting validation, inheritance and persistence, real xterm previews, cancellation and asynchronous save handling, interface matching, and live terminal updates. Headless renderer coverage uses a synthetic application bridge and does not prove packaged native rendering or live remote interoperability. Native CI, packaging, and release verification will be recorded separately.
+The 0.4 source passed **92 backend tests and 63 headless renderer checks**, with no failures or browser console errors. Coverage includes complete palette definitions, strict saved-setting validation, inheritance and persistence, real xterm previews, cancellation and asynchronous save handling, interface matching, and live terminal updates. Headless renderer coverage uses a synthetic application bridge and does not prove packaged native rendering or live remote interoperability.
 
-[TermForge v0.3.0 preview downloads](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) are public; historical v0.2 downloads remain separately available. macOS packages have ad-hoc signatures without Developer ID/notarization; Windows packages are unsigned. Automatic updates and a maintenance service are not included. Source/test and distribution provenance must be verified for each new release.
+For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/38324020057) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38324019614) succeeded at tagged commit `0e9ae540293fac90d0c31649705fed6fdb2f2df3`: both Macs and Linux passed 92 backend tests each; Windows passed 89 with three POSIX-only skips. Linux passed 63 headless checks, and both Mac packages passed strict recursive ad-hoc signature verification. Windows packaging passed on its second attempt at unchanged source after Python-initialization and UDP-fixture timeouts. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38325248387) validated all thirteen assets; anonymously downloaded checksums and build records matched the asset digests and tagged source.
+
+[TermForge v0.4.0 preview downloads](https://github.com/distractedagain/termforge/releases/tag/v0.4.0) are public; v0.3 and historical v0.2 downloads remain separately available. macOS packages have ad-hoc signatures without Developer ID/notarization; Windows packages are unsigned. Automatic updates and a maintenance service are not included. Source/test and distribution provenance must be verified for each new release.
 
 ## Ownership and attribution
 

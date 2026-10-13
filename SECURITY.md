@@ -1,6 +1,6 @@
 # Security
 
-TermForge is in early development. Version 0.3 is a published preview; version 0.4 is being prepared. It has not received an independent security audit and has no established support or security-update service. Each release has its own verification limits.
+TermForge is in early development. Version 0.4 is the current published preview. It has not received an independent security audit and has no established support or security-update service. Each release has its own verification limits.
 
 ## macOS preview approval
 

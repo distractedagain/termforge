@@ -1,6 +1,6 @@
 # Color schemes
 
-The 0.4 source adds a visual palette picker while keeping TermForge's compact desktop layout. The public v0.3 preview predates this picker.
+The [0.4 preview](https://github.com/distractedagain/termforge/releases/tag/v0.4.0) adds a visual palette picker while keeping TermForge's compact desktop layout. Earlier v0.3 downloads predate this picker.
 
 ## Choose a default scheme
 
