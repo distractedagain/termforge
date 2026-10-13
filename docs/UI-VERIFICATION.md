@@ -1,5 +1,23 @@
 # TermForge interface verification
 
+## TermForge 0.9 credentials and file transfer
+
+The local source passed **251/251 backend tests**, **97/97 existing interface checks**, **20/20 secure-connection interface checks** and **13/13 project-editor checks**, with no failures or browser errors. The Linux job in [final-source CI](https://github.com/distractedagain/termforge/actions/runs/38407745105) passed these suites at `90f81ac7e2620f837b344b287cc68816df6bca2f`, plus seven real localhost Ansible checks. Native Electron ran only under Linux CI's Xvfb, never on the development laptop.
+
+The new headless UI suite exercises named-credential creation/replacement/deletion, secret-field clearing, unavailable-storage controls, ordered authentication, private prompt cancellation, session editing and startup preferences. It also verifies two-pane navigation, multiple-file selection, SFTP/SCP queue requests, progress/cancellation, disconnect handling and compact/light layouts. Its credentials, servers and transfer events are synthetic. The backend tests separately use real loopback SSH/SFTP servers and the system SCP program. Injected hard-link failures verify that unsupported local filesystems leave an existing download destination in place.
+
+The final Linux native Electron smoke uses actual main/preload IPC and an isolated loopback server. It verifies:
+
+- Managed SSH shell communication, host verification before authentication and changed-key refusal.
+- Real masked authentication forms, clearing after response/cancellation, and no password writes through the terminal input path.
+- A 140,000-byte SFTP upload/download round trip with exact data checks.
+- Refusal to save credentials when Electron selects the insecure Linux `basic_text` backend.
+- Existing clipboard completion, YAML/JSON saves, PTY and OpenSSH checks; ten JSON-worker messages, no worker errors or CSP violations, and both PNG captures.
+
+Host-trust, credential-approval and folder-picker responses are stubbed for the isolated fixture. Native storage evidence verifies **refusal of insecure storage**, not successful encryption/decryption with macOS Keychain, Windows DPAPI or a secure Linux keyring. Those positive platform integrations remain unverified; injected providers establish only application logic. This smoke uses the source app, not an installed release package. Windows-server SCP shell compatibility, real WSL, live AI inference and external-device interoperability are not established.
+
+See [0.9 release notes](RELEASE-v0.9.0.md) for the final cross-platform build and publication record, and [credential and transfer limits](SECURE-CONNECTIONS.md) for supported filesystems, authentication and server requirements.
+
 ## TermForge 0.8 project workspace — source verification
 
 The existing **97/97 headless interface checks** and **13/13 project interface checks** passed with no browser console/page errors. The local backend suite passed **200/200 tests**, with no failures or skips. Linux CI also passed all three suites at source `c2d00e3c9284a6c304f821cf2698a50f46dce847`. No interactive release-package or real WSL result is claimed by this report.
