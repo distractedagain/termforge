@@ -32,7 +32,7 @@ This is an original implementation informed by [SecureCRT's public product descr
 
 FTP, explicit FTPS and implicit FTPS now support reviewed folder upload/download and merging, plus durable file/folder pause and resume after reconnecting or restarting. Recovery verifies the source, retained bytes, completed children and endpoint/account; FTPS also checks the certificate identity.
 
-SFTP **Two-way** can remember named folder pairs and their common content baseline. Later reviews infer one-sided changes and deletions; concurrent edits and deletion conflicts need explicit choices. Deletions are listed before native confirmation, skipped conflicts retain their history, and partial runs do not advance the baseline. Saved pairs can load their folders or forget their baseline without deleting files.
+SFTP **Two-way** can remember named folder pairs and their common content baseline. Later reviews infer one-sided changes and deletions; concurrent edits and deletion conflicts need explicit choices. Deletions are listed before native confirmation, skipped conflicts retain their history, and interrupted copies preserve their previous baseline. Saved pairs can load their folders or forget their baseline without deleting files.
 
 Version 0.17 is undergoing release verification; the download above remains the verified 0.16 release until publication. See [0.17 release notes](docs/RELEASE-v0.17.0.md), [verification](docs/VERIFICATION-v0.17.0.md) and [workflow limits](docs/SECURE-CONNECTIONS.md). Saved synchronization remains SFTP-only and explicit; whole-queue persistence, automatic reconnect, FTP sync and metadata replication remain future work.
 

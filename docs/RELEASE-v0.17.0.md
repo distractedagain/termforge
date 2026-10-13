@@ -15,7 +15,7 @@ Choose **Two-way**, keep **Remember changes between runs** enabled, and name the
 
 Later reviews infer additions, edits and deletions relative to that baseline. A change on one side is planned for the other; concurrent differing edits and deletion-versus-edit conflicts require an explicit local/remote/skip choice. Exact permanent deletions appear in both the review and native confirmation. Skipped conflicts retain their previous common ancestor, so they remain conflicts on the next run. File/directory type changes require manual reconciliation.
 
-Saved pairs can reload their folders after reconnecting to the same authenticated SSH server/account. Forgetting a baseline requires confirmation and preserves both trees. Revisions and an exclusive storage lease reject stale or concurrent updates. Failed, cancelled or partially applied runs do not advance the baseline.
+Saved pairs can reload their folders after reconnecting to the same authenticated SSH server/account. Forgetting a baseline requires confirmation and preserves both trees. Revisions and an exclusive storage lease reject stale or concurrent updates. Transfer failures, cancellations and partial copies before the verified baseline commit preserve the old baseline. An error or crash during the final storage flush or lease release can occur after the new revision was saved; inspect the saved history in that case.
 
 ## Limits
 
