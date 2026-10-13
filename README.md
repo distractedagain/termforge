@@ -8,9 +8,9 @@ This 0.3 image uses synthetic sessions and output; no device is connected. It wa
 
 ## Download
 
-[Download the TermForge v0.4.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.4.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+[Download the TermForge v0.5.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.5.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
 
-[Earlier TermForge v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [historical Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) downloads remain available. They do not include the new 0.4 color picker; v0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
+[Earlier TermForge v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [historical Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) downloads remain available. They do not include the new 0.5 tab groups and detailed snapshots; v0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
 
@@ -26,13 +26,15 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.5 source — tab groups and workspace snapshots
+## New in 0.5 — tab groups and workspace snapshots
 
-The current source adds independent tab groups with adjustable splits, tab movement, and per-group selected terminals. Use **Window → New Vertical Tab Group**, **New Horizontal Tab Group**, or **Collapse Tab Groups**. Existing tile commands remain available.
+The 0.5 preview adds independent tab groups with adjustable splits, tab movement, and per-group selected terminals. Use **Window → New Vertical Tab Group**, **New Horizontal Tab Group**, or **Collapse Tab Groups**. Existing tile commands remain available.
 
 Snapshots now preserve repeated saved-session connections, tab order, each group's selected tab, focused group and split sizes. Restore adds the saved arrangement beside current tabs and reports partial failures. Older snapshots remain readable; unsaved quick connections must be saved as profiles first. See [Tab Groups and Snapshots](docs/TAB-GROUPS.md).
 
 The 0.5 source passed **115 backend tests and 72 headless interface checks**, with no failures or browser console errors. Tests cover live tab movement, keyboard/pointer resizing, duplicate-session restoration, partial failures, and reconnecting with close-on-exit enabled. Packaged interactive runtime testing remains pending.
+
+Version 0.5 [native CI](https://github.com/distractedagain/termforge/actions/runs/38328313996), [packaging](https://github.com/distractedagain/termforge/actions/runs/38328332260), and [publication](https://github.com/distractedagain/termforge/actions/runs/38328921919) passed on the first attempt at tagged source `a3697bcbb7c803edfde80d23e5c5769c621671ba`. Both Macs and Linux passed 115 backend tests each; Windows passed 112 with three POSIX-only skips. Linux passed 72 headless checks. All thirteen public release assets were verified against the checksum manifest and public asset digests, and the anonymously downloaded build records matched the tagged source.
 
 ![Independent tab groups using Solarized Dark](docs/images/tab-groups-solarized-dark.png)
 

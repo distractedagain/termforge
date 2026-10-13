@@ -284,6 +284,8 @@ Local verification passed **115 backend tests and 72 headless interface checks**
 
 These rows remain partial: live tab movement across windows, selected-group command targeting, automatic startup restoration, floating managers and complete native reference comparison remain open. Earlier baseline rows and versioned test counts describe their respective releases.
 
+Version 0.5 [native CI](https://github.com/distractedagain/termforge/actions/runs/38328313996), [packaging](https://github.com/distractedagain/termforge/actions/runs/38328332260), and [publication](https://github.com/distractedagain/termforge/actions/runs/38328921919) passed first attempt at `a3697bcbb7c803edfde80d23e5c5769c621671ba`: both Macs and Linux passed 115 tests, Windows passed 112 with three POSIX-only skips, and Linux passed 72 headless checks. Both Mac package signatures passed strict recursive ad-hoc verification. All thirteen public assets were checked against the manifest and public digests; anonymous build-record downloads matched the tagged source. Interactive packaged behavior remains unverified.
+
 ## Required comparison and completion gates
 
 1. Capture an authorized SecureCRT 9.7 macOS reference set: empty window, connected session, all menus/context menus, each Global/Session Options page, manager docking states, grouped tabs, Command Manager, transfers, script/credential/key dialogs, light/dark, and multiple display scales. Redact user data. Reference screenshots are analysis inputs, not bundled artwork.
