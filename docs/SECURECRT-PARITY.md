@@ -325,3 +325,9 @@ Local and version-specific platform evidence belongs in [0.13 verification](VERI
 3. Use real isolated servers, loopback sockets, serial emulators, and transfer fixtures for behavior. Cover success, cancellation, rejection, timeout, reconnect, malformed data, and binary fidelity on applicable platforms.
 4. Record original implementation and repeatable evidence for every requested row and its variations on each applicable platform, including the Windows-specific section. Obtain independent terminal/security review before production claims. Mark intentionally unsupported legacy/security combinations visibly rather than hiding the gap.
 5. Publish only accurate version-specific release notes. Until these gates are met, the description remains **an independent terminal application with an original modern interface, being developed toward SecureCRT 9.7 feature parity across macOS, Windows, and Linux**.
+
+## TermForge 0.15 file workspace update
+
+FT-08 advances with independently implemented durable individual-file SFTP pause/resume, reviewed folder merge policies, one-way content synchronization and bounded UTF-8 remote editing. Recovery binds the authenticated server/account and verifies the source and partial contents. Folder plans expose copy/replace/skip/create actions and keep destination-only entries. Remote edits use explicit review, native save approval and content-revision checks.
+
+Still partial: no shared terminal transport, folder/SCP resume, automatic reconnect, FTP/FTPS/HTTPS/S3/WebDAV, destructive mirroring, two-way synchronization, external editor, drag/drop or complete metadata replication. See the [SecureFX parity map](SECUREFX-PARITY.md), [workflow guide](SECURE-CONNECTIONS.md) and [0.15 verification record](VERIFICATION-v0.15.0.md). The earlier versioned rows above retain their historical scope.
