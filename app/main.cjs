@@ -23,6 +23,7 @@ const { createNativeMenu } = require('./native-menu.cjs');
 const { createDesktopActions } = require('./desktop-actions.cjs');
 const { createKeyTools } = require('./key-tools.cjs');
 const { createSessionImport } = require('./session-import.cjs');
+const { claimApplicationInstance } = require('./single-instance.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 // Keep the established OS credential identity and profile through the branding change.
@@ -191,8 +192,11 @@ function registerHandlers() {
     if (!['ssh', 'sftp'].includes(profile.protocol)) throw new Error('File transfers require an SSH session.');
     return secureTransfers.open(validateSession({ ...profile, ssh: { ...profile.ssh, backend: 'managed' } }));
   });
-  const assertFtpIdle = () => { if (ftpTransfers.activeCount) throw new Error('Wait for the active FTP/FTPS operation before starting another file operation.'); };
+  const assertFtpIdle = () => ftpTransfers.assertExternalAvailable();
   const transferEngine = id => ftpTransfers.owns(id) ? ftpTransfers : secureTransfers;
+  const jobEngine = id => ftpTransfers.ownsJob(id) ? ftpTransfers : secureTransfers;
+  const folderEngine = id => ftpTransfers.ownsPlan(id) ? ftpTransfers : secureTransfers;
+  const assertOtherEngineIdle = engine => engine === ftpTransfers ? secureTransfers.assertExternalAvailable() : assertFtpIdle();
   handle('ftpOpen', input => ftpTransfers.open(input));
   handle('transferClose', id => transferEngine(requiredId(id)).close(id));
   handle('transferListRemote', input => transferEngine(input?.id).listRemote(input));
@@ -201,15 +205,25 @@ function registerHandlers() {
     const result = await dialog.showOpenDialog(window, { title: 'Choose local transfer folder', properties: ['openDirectory'], defaultPath: app.getPath('home') });
     return result.canceled ? null : { path: result.filePaths[0] };
   });
-  handle('transferStart', input => { const engine = transferEngine(input?.id); if (engine === ftpTransfers) secureTransfers.assertExternalAvailable(); else assertFtpIdle(); return engine.start(input); });
-  handle('transferCancel', id => { requiredId(id); return (ftpTransfers.ownsJob(id) ? ftpTransfers : secureTransfers).cancel(id); });
-  handle('transferPause', id => secureTransfers.pause(requiredId(id)));
-  handle('transferResume', input => { assertFtpIdle(); return secureTransfers.resume(input); });
-  handle('transferDiscardPartial', input => secureTransfers.discardPartial(input));
+  handle('transferStart', input => { const engine = transferEngine(input?.id); assertOtherEngineIdle(engine); return engine.start(input); });
+  handle('transferCancel', id => jobEngine(requiredId(id)).cancel(id));
+  handle('transferPause', id => jobEngine(requiredId(id)).pause(id));
+  handle('transferResume', input => { const engine = jobEngine(requiredId(input?.transferId)); assertOtherEngineIdle(engine); return engine.resume(input); });
+  handle('transferDiscardPartial', input => jobEngine(requiredId(input?.transferId)).discardPartial(input));
   handle('transferListJobs', () => [...secureTransfers.listJobs(), ...ftpTransfers.listJobs()]);
-  handle('transferPrepareFolder', input => { assertFtpIdle(); return secureTransfers.prepareFolderTransfer(input); });
-  handle('transferStartFolder', input => secureTransfers.startFolderTransfer(input));
-  handle('transferDiscardFolder', input => secureTransfers.discardFolderTransfer(input));
+  handle('transferPrepareFolder', input => { const engine = transferEngine(input?.id); assertOtherEngineIdle(engine); return engine.prepareFolderTransfer(input); });
+  handle('transferStartFolder', input => folderEngine(requiredId(input?.planId)).startFolderTransfer(input));
+  handle('transferDiscardFolder', input => folderEngine(requiredId(input?.planId)).discardFolderTransfer(input));
+  handle('transferListSyncPairs', input => secureTransfers.listSyncPairs(input));
+  handle('transferForgetSyncPair', async input => {
+    assertFtpIdle();
+    const pair = (await secureTransfers.listSyncPairs(input)).find(item => item.pairId === input?.pairId && item.revision === input?.revision);
+    if (!pair) throw new Error('This synchronization baseline changed. Refresh the saved pairs before forgetting it.');
+    if (!await approveNative({ title: 'Forget synchronization baseline', message: `Forget the saved baseline for “${pair.name}”?`,
+      detail: `Local folder: ${pair.localPath}\nRemote folder: ${pair.remotePath}\n\nFiles on both sides remain untouched. A new synchronization will compare these folders without their previous history.`, accept: 'Forget baseline' })) return { forgotten: false };
+    assertFtpIdle();
+    return { forgotten: await secureTransfers.forgetSyncPair(input) };
+  });
   for (const name of ['remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'remoteEditDiscardSave', 'remoteEditClose']) handle(name, input => { if (['remoteEditOpen','remoteEditPrepareSave'].includes(name)) assertFtpIdle(); return secureTransfers[name](input); });
   handle('transferPrepareRemoteOperation', input => { assertFtpIdle(); return secureTransfers.prepareRemoteOperation(input); });
   handle('transferApplyRemoteOperation', input => secureTransfers.applyRemoteOperation(input));
@@ -455,8 +469,18 @@ async function boot() {
   authPrompts = createAuthPrompts({ send });
   credentials = createCredentialVault({ directory: dataDirectory, safeStorage, confirmUse: ({ name, host, port, fingerprint, signal }) => approveNative({ title: 'Allow saved credential', message: `Use “${name}” with ${host}:${port}?`, detail: `Verified server key: ${fingerprint}\n\nThis allows this credential to authenticate to this host and key on future connections. Only approve servers you trust with these credentials.`, accept: 'Allow credential', signal }) });
   secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
+  const approveFolderTransfer = (review, { signal } = {}) => {
+    const deletions = Number(review.deletedFiles || 0) + Number(review.deletedDirectories || 0);
+    return approveNative({
+      title: review.mode === 'mirror' ? 'Apply reviewed mirror' : review.mode === 'two-way' ? 'Apply reviewed two-way synchronization' : 'Copy reviewed folder',
+      message: deletions ? 'Apply these changes, including permanent deletions?' : review.mode === 'two-way' ? 'Apply the reviewed changes on both sides?' : `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
+      detail: `Server: ${review.host}:${review.port}\nProtocol: ${String(review.protocol || 'sftp').toUpperCase()}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\nMode: ${review.mode || 'copy'}\nReplace: ${review.replaced || 0}\nSkip: ${review.skipped || 0}\nDelete files: ${review.deletedFiles || 0}\nDelete folders: ${review.deletedDirectories || 0}${review.syncPair ? `\nSaved pair: ${review.syncPair.name}\nBaseline revision: ${review.syncPair.revision}` : ''}\n\n${deletions ? 'Entries listed for deletion will be permanently deleted. There is no undo. ' : ''}${review.mode === 'two-way' ? 'Both local and remote folders may change according to the exact reviewed actions. ' : review.mode === 'copy' ? 'The destination must be a new folder. ' : ''}Only the reviewed copies, replacements and deletions will be applied. Completed changes remain if you cancel or a later item fails.`,
+      accept: deletions ? 'Apply changes and deletions' : review.mode === 'two-way' ? 'Apply both directions' : 'Copy folder', signal
+    });
+  };
   secureTransfers = createSecureTransfers({
     recoveryDirectory: path.join(dataDirectory, 'transfer-recovery'),
+    syncDirectory: path.join(dataDirectory, 'sync-baselines'),
     connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event),
     confirmResume: (review, { signal } = {}) => approveNative({ title: 'Resume retained transfer', message: 'Verify and resume this transfer?',
       detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nRetained bytes: ${review.retainedBytes}\nTotal bytes: ${review.total}\n\nThe source and retained partial file will be verified before continuing. Changed files or a different authenticated server identity will be refused.`, accept: 'Verify and resume', signal }),
@@ -464,11 +488,7 @@ async function boot() {
       detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nPartial: ${review.stagePath}\n\n${review.kind === 'folder' ? 'Completed files, folders and the current partial copy remain; only the recovery record will be removed.' : review.forgetOnly ? 'The transfer result is uncertain. Files will remain for inspection; only the recovery record will be removed.' : 'The verified partial file and its recovery record will be removed. The source and final destination will be retained.'}`, accept: review.forgetOnly ? 'Forget checkpoint' : 'Discard partial', signal }),
     confirmRemoteEdit: (review, { signal } = {}) => approveNative({ title: 'Save remote file', message: 'Replace this remote file with the reviewed edits?',
       detail: `Server: ${review.host}:${review.port}\nPath: ${review.path}\nBefore: ${review.previousBytes} bytes\nAfter: ${review.bytes} bytes\n\nThe remote file is checked against the opened revision before replacement.`, accept: 'Save remote file', signal }),
-    confirmFolderTransfer: (review, { signal } = {}) => approveNative({
-      title: review.mode === 'mirror' ? 'Apply reviewed mirror' : review.mode === 'two-way' ? 'Apply reviewed two-way synchronization' : 'Copy reviewed folder', message: review.mode === 'mirror' ? 'Apply this mirror, including permanent deletions?' : review.mode === 'two-way' ? 'Apply the reviewed changes on both sides?' : `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
-      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\nMode: ${review.mode || 'copy'}\nReplace: ${review.replaced || 0}\nSkip: ${review.skipped || 0}\nDelete files: ${review.deletedFiles || 0}\nDelete folders: ${review.deletedDirectories || 0}\n\n${review.mode === 'mirror' ? 'Target-only entries listed in the review will be permanently deleted. ' : review.mode === 'two-way' ? 'Both local and remote folders may change according to your per-file choices. ' : ''}${!review.mode || review.mode === 'copy' ? 'The destination must be a new folder. Existing items will not be replaced.' : review.mode === 'mirror' ? 'Only the reviewed copies, replacements and deletions will be applied.' : 'Only the reviewed replacements will overwrite existing files. Destination-only items are retained.'} Completed files and folders remain if you cancel or a later item fails.`,
-      accept: review.mode === 'mirror' ? 'Apply mirror and deletions' : review.mode === 'two-way' ? 'Apply both directions' : 'Copy folder', signal
-    }),
+    confirmFolderTransfer: approveFolderTransfer,
     confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }),
     confirmRemoteOperation: (review, { signal } = {}) => {
       const labels = { mkdir: 'Create remote folder', rename: 'Rename remote item', delete: 'Delete remote item', chmod: 'Change remote permissions' };
@@ -479,10 +499,17 @@ async function boot() {
   });
   await secureTransfers.initializeRecovery();
   ftpTransfers = createFtpTransfers({
+    recoveryDirectory: path.join(dataDirectory, 'transfer-recovery'),
+    confirmFolderTransfer: approveFolderTransfer,
+    confirmResume: (review, { signal } = {}) => approveNative({ title: 'Resume retained transfer', message: 'Verify and resume this FTP/FTPS transfer?',
+      detail: `Server: ${review.host}:${review.port}\nProtocol: ${String(review.protocol).toUpperCase()}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nRetained bytes: ${review.retainedBytesVerified === false ? 'Verify on server before resuming' : review.retainedBytes}\n\nThe source, completed files and partial contents will be verified before continuing. Resume requires the same server, protocol and account; FTPS also checks the original certificate identity.`, accept: 'Verify and resume', signal }),
+    confirmDiscardPartial: (review, { signal } = {}) => approveNative({ title: 'Discard retained transfer', message: 'Forget this FTP/FTPS recovery checkpoint?',
+      detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\n\nOnly the recovery record will be removed. Completed files, partial copies and backups remain untouched for inspection.`, accept: 'Forget checkpoint', signal }),
     emit: event => send('transferEvent', event), requestAuthentication: input => authPrompts.request(input),
     confirmPlaintext: (review) => approveNative({ title: 'Connect using unencrypted FTP', message: `Allow plaintext FTP to ${review.host}:${review.port}?`, detail: 'FTP sends your username, password and files without encryption. Use FTPS when the server supports it. This approval applies only to this connection.', accept: 'Use plaintext FTP', signal: review.signal }),
     confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nFTP server rename operations are not atomic conditional replacements. The prior remote file may be retained as a backup for inspection.`, accept: 'Replace file', signal })
   });
+  await ftpTransfers.initializeRecovery();
   sessionImport = createSessionImport({
     chooseFile: async () => {
       const result = await dialog.showOpenDialog(window, { title: 'Import sessions from CSV or text', properties: ['openFile'], filters: [{ name: 'Session lists', extensions: ['csv', 'tsv', 'txt'] }, { name: 'All files', extensions: ['*'] }] });
@@ -580,9 +607,13 @@ async function boot() {
   }
 }
 
-app.whenReady().then(boot).catch((error) => {
-  dialog.showErrorBox('ForgeCRT could not start', error.message);
-  app.exit(1);
-});
+// Recovery checkpoints belong to one running application process. A second
+// launch focuses the owner instead of racing it over retained transfer data.
+if (claimApplicationInstance(app, () => window)) {
+  app.whenReady().then(boot).catch((error) => {
+    dialog.showErrorBox('ForgeCRT could not start', error.message);
+    app.exit(1);
+  });
+}
 app.on('window-all-closed', () => app.quit());
 app.on('will-quit', () => { cleanupTerminals().catch(error => console.error('Cleanup failed:', error.message)); });

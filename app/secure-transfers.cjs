@@ -168,7 +168,7 @@ async function writeChannel(channel, data, signal) {
 
 function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = async () => false, confirmRemoteOperation = async () => false,
   confirmFolderTransfer = async () => false, home = os.homedir(), commitTimeoutMs = 30000, remotePlanLifetimeMs = 60000,
-  folderPlanLifetimeMs = 300000, recoveryDirectory, confirmResume = async () => false, confirmDiscardPartial = async () => false,
+  folderPlanLifetimeMs = 300000, recoveryDirectory, syncDirectory, confirmResume = async () => false, confirmDiscardPartial = async () => false,
   confirmRemoteEdit = async () => false, getConnectionIdentity = verifiedConnectionIdentity } = {}) {
   if (typeof connect !== 'function') throw new TypeError('A verified SSH connection factory is required.');
   if (!Number.isInteger(commitTimeoutMs) || commitTimeoutMs < 1 || commitTimeoutMs > 30000) throw new TypeError('Invalid commit operation timeout.');
@@ -210,7 +210,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   let folderFiles, editor;
   const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => folderFiles?.busy || editor?.busy || [...jobs.values()].some(job => !inactive(job)),
     call, stat: remoteStat, summary, confirm: confirmRemoteOperation, timeout: commitTimeoutMs, planLifetimeMs: remotePlanLifetimeMs });
-  folderFiles = createFolderTransfers({ getSession, assertAvailable: () => remoteFiles.available(),
+  folderFiles = createFolderTransfers({ getSession, syncDirectory, identityFor: identity, assertAvailable: () => remoteFiles.available(),
     isBusy: () => editor?.busy || [...jobs.values()].some(job => !inactive(job)), call, remoteStat,
     confirm: confirmFolderTransfer, timeout: commitTimeoutMs, planLifetimeMs: folderPlanLifetimeMs,
     enqueue: plan => {
@@ -255,6 +255,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         retainedBytes: job.kind === 'folder' ? (job.checkpoint?.completed.reduce((n,e)=>n+e.size,0)||0)+(job.checkpoint?.child?.bytes||0) : job.checkpoint?.bytes || 0, host: job.checkpoint?.host || '', port: job.checkpoint?.port || 22,
         forgetOnly: Boolean(job.checkpoint && (job.checkpoint.phase !== 'retained' || job.kind === 'folder')) } : {}),
       ...(job.kind === 'folder' ? { kind: 'folder', filesTotal: job.filesTotal, filesCompleted: job.filesCompleted,
+        persistentSync: Boolean(job.persistentSync), syncPair: job.syncPair, baselineUsed: Boolean(job.baselineUsed), baselineUpdated: Boolean(job.baselineUpdated),
         mode:job.mode || job.checkpoint?.mode || 'copy', deletedFilesTotal:job.deletedFilesTotal||job.folderPlan?.expected.deletedFiles||0, deletedDirectoriesTotal:job.deletedDirectoriesTotal||job.folderPlan?.expected.deletedDirectories||0, directoriesTotal: job.directoriesTotal, directoriesCreated: job.directoriesCreated, deletedFiles:job.deletedFiles||0, deletedDirectories:job.deletedDirectories||0, currentPath: job.currentPath } : {}) };
   }
   function publish(job) { if (job.internalChild || !job.transferId) return; try { emit({ type: 'transfer', ...view(job) }); } catch {} }
@@ -921,6 +922,8 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     prepareFolderTransfer: input => { assertRecoveryAvailable(); return folderFiles.prepare(input); },
     startFolderTransfer: async input => { const result = await folderFiles.start(input); return result.cancelled ? result : view(result); },
     discardFolderTransfer: folderFiles.discard,
+    listSyncPairs: input => { assertRecoveryAvailable(); return folderFiles.listSyncPairs(input); },
+    forgetSyncPair: input => { assertRecoveryAvailable(); return folderFiles.forgetSyncPair(input); },
     remoteEditOpen: editor.open, remoteEditPrepareSave: editor.prepareSave, remoteEditSave: editor.save,
     remoteEditDiscardSave: editor.discardSave, remoteEditClose: editor.close,
     get remoteEditCount() { return editor.count; },

@@ -2,7 +2,8 @@
 
 // FTP has no portable conditional rename or authenticated file identity. This
 // adapter stages files, reviews replacements, rechecks metadata, and retains
-// backups. It deliberately does not offer SSH recovery/synchronization APIs.
+// backups. Reviewed folder copies and content-verified recovery are separate
+// workflows; FTP server metadata cannot provide remote no-follow guarantees.
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -12,10 +13,11 @@ const net = require('node:net');
 const { randomUUID } = require('node:crypto');
 const { Transform, Writable } = require('node:stream');
 const { Client } = require('basic-ftp');
+const { createFtpWorkflows } = require('./ftp-workflows.cjs');
 
 const MAX_FILE = 1024 ** 4;
 const MAX_ENTRIES = 10000;
-const FINISHED = new Set(['completed', 'failed', 'cancelled']);
+const FINISHED = new Set(['completed', 'failed', 'cancelled', 'paused', 'interrupted']);
 const NOFOLLOW = fs.constants.O_NOFOLLOW || 0;
 function cancelled() { return Object.assign(new Error('FTP operation cancelled.'), { name: 'AbortError' }); }
 function check(signal) { if (signal?.aborted) throw cancelled(); }
@@ -70,16 +72,19 @@ function bounded(promise, signal, timeout = 120000, onAbort = () => {}) {
 }
 
 function createFtpTransfers({ emit = () => {}, requestAuthentication = async () => null, confirmPlaintext = async () => false,
-  confirmOverwrite = async () => false, home = os.homedir(), timeoutMs = 30000, tlsCa, ClientClass = Client } = {}) {
+  confirmOverwrite = async () => false, home = os.homedir(), timeoutMs = 30000, tlsCa, ClientClass = Client,
+  recoveryDirectory, confirmResume, confirmDiscardPartial, confirmFolderTransfer } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Invalid FTP timeout.');
   const sessions = new Map(); const jobs = new Map(); const pending = new Set(); const browsing = new Set(); const queue = [];
   let stopped = false; let processing = false;
   const send = value => { try { emit(value); } catch {} };
   const get = id => { const session = sessions.get(id); if (!session || session.closed || session.client.closed) throw new Error('The FTP connection is closed. Reconnect before continuing.'); return session; };
   const jobView = job => ({ transferId: job.transferId, id: job.id, sessionId: job.id, host: job.host, port: job.port, protocol: job.protocol, direction: job.direction,
-    localPath: job.localPath, remotePath: job.remotePath, status: job.status, bytes: job.bytes, transferred: job.bytes, total: job.total, error: job.error || '', warning: job.warning || '', resumable: false,
+    localPath: job.localPath, remotePath: job.remotePath, status: job.status, bytes: job.bytes, transferred: job.bytes, total: job.total, error: job.error || '', warning: job.warning || '', ...workflows.decorate(job),
     startedAt: job.startedAt || null, finishedAt: job.finishedAt || null });
   const publish = job => send({ type: 'transfer', ...jobView(job) });
+  const workflows = createFtpWorkflows({jobs,get,publish,jobView,enqueue,listing,parents,remoteStat,localParent,localPath,remotePath,cleanError,bounded,confirmOverwrite,
+    hasBrowsing:()=>browsing.size>0,stopped:()=>stopped},{recoveryDirectory,confirmResume,confirmDiscardPartial,confirmFolderTransfer});
   function disconnected(session) {
     if (session.closed) return;
     session.closed = true; sessions.delete(session.id);
@@ -87,6 +92,8 @@ function createFtpTransfers({ emit = () => {}, requestAuthentication = async () 
     send({ type: 'connection', id: session.id, status: 'closed' });
   }
   async function open(input, { signal: outside } = {}) {
+    if (stopped) throw new Error('The FTP manager is stopping.');
+    await workflows.initializeRecovery();
     if (stopped) throw new Error('The FTP manager is stopping.');
     if (sessions.size + pending.size >= 16) throw new Error('Close a file-transfer connection before opening another.');
     const profile = profileInput(input); const controller = new AbortController();
@@ -116,10 +123,12 @@ function createFtpTransfers({ emit = () => {}, requestAuthentication = async () 
       if (secure) { await bounded(client.send('PBSZ 0'), signal, timeoutMs, () => client.close()); await bounded(client.send('PROT P'), signal, timeoutMs, () => client.close()); }
       const currentPath = remotePath(await bounded(client.pwd(), signal, timeoutMs, () => client.close()));
       check(signal); if (stopped) throw cancelled();
-      const id = randomUUID(); const session = { ...profile, id, client, closed: false, busy: false };
+      const certificateIdentity = secure ? client.ftp.socket.getPeerCertificate()?.fingerprint256 : '';
+      if (secure && !certificateIdentity) throw new Error('FTPS peer certificate identity is unavailable.');
+      const id = randomUUID(); const session = { ...profile, id, client, certificateIdentity, closed: false, busy: false };
       sessions.set(id, session); client.ftp.socket.once('close', () => disconnected(session));
       return { id, host: profile.host, port: profile.port, protocol: profile.protocol, remotePath: currentPath,
-        capabilities: { folders: false, remoteEditing: false, remoteOperations: false, resume: false } };
+        capabilities: workflows.capabilities() };
     } catch (error) { client?.close(); const message = cleanError(error); throw new Error(password ? message.split(password).join('[redacted]') : message); }
     finally { password = undefined; controller.abort(); pending.delete(record); resolveDone(); }
   }
@@ -147,7 +156,7 @@ function createFtpTransfers({ emit = () => {}, requestAuthentication = async () 
   async function remoteStat(session, filename) { return (await listing(session, path.posix.dirname(filename))).find(item => item.name === path.posix.basename(filename)) || null; }
   async function listRemote({ id, path: requested = '/' } = {}) {
     const session = get(id); requested = remotePath(requested);
-    if (session.busy || [...jobs.values()].some(job => job.id === id && !FINISHED.has(job.status))) throw new Error('Wait for the active FTP operation before browsing.');
+    if (workflows.busy || session.busy || [...jobs.values()].some(job => job.id === id && !FINISHED.has(job.status))) throw new Error('Wait for the active FTP operation before browsing.');
     session.busy = true; let finishBrowse; const ownership = {id, done:new Promise(resolve => { finishBrowse = resolve; })}; browsing.add(ownership);
     try { if (requested !== '/') await parents(session, `${requested}/__listing__`); return { path: requested, entries: await listing(session, requested) }; }
     catch (error) { if (session.client.closed) disconnected(session); throw new Error(cleanError(error)); }
@@ -162,16 +171,22 @@ function createFtpTransfers({ emit = () => {}, requestAuthentication = async () 
   }
   function start(input) {
     if (stopped) throw new Error('The FTP manager is stopping.');
+    workflows.assertAvailable();
     const session = get(input?.id);
     if (session.busy) throw new Error('Wait for FTP browsing to finish before transferring.');
     if (!['upload', 'download'].includes(input.direction) || input.protocol && input.protocol !== session.protocol) throw new Error('Invalid FTP transfer request.');
-    if (input.resumable) throw new Error('FTP recovery is not yet supported.');
+    if (input.resumable && !recoveryDirectory) throw new Error('FTP recovery directory is not configured.');
     if ([...jobs.values()].filter(job => !FINISHED.has(job.status)).length >= 100) throw new Error('The FTP transfer queue is full.');
-    while (jobs.size >= 100) { const oldest = [...jobs.values()].find(job => FINISHED.has(job.status)); if (!oldest) break; jobs.delete(oldest.transferId); }
+    while (jobs.size >= 100) { const oldest = [...jobs.values()].find(job => FINISHED.has(job.status) && !job.checkpoint); if (!oldest) break; jobs.delete(oldest.transferId); }
     const job = { transferId: randomUUID(), id: session.id, host: session.host, port: session.port, protocol: session.protocol, direction: input.direction,
-      localPath: localPath(input.localPath), remotePath: remotePath(input.remotePath), bytes: 0, total: 0, status: 'queued', controller: new AbortController() };
+      localPath: localPath(input.localPath), remotePath: remotePath(input.remotePath), bytes: 0, total: 0, status: 'queued', kind:'file', resumable:Boolean(input.resumable), advanced:Boolean(input.resumable), controller: new AbortController() };
     if (job.remotePath === '/') throw new Error('Choose an FTP filename.');
-    job.done = new Promise(resolve => { job.resolveDone = resolve; }); jobs.set(job.transferId, job); queue.push(job); publish(job); void pump(); return jobView(job);
+    enqueue(job); return jobView(job);
+  }
+  function enqueue(job) {
+    if (stopped) throw new Error('The FTP manager is stopping.');
+    if (!jobs.has(job.transferId) && jobs.size >= 100) { const old=[...jobs.values()].find(j=>FINISHED.has(j.status)&&!j.checkpoint); if(old)jobs.delete(old.transferId);else throw new Error('The FTP transfer queue is full.'); }
+    job.done=new Promise(resolve=>{job.resolveDone=resolve;});jobs.set(job.transferId,job);queue.push(job);publish(job);queueMicrotask(()=>void pump());
   }
   async function target(job, session) {
     const value = job.direction === 'upload' ? await remoteStat(session, job.remotePath) : await localStat(job.localPath);
@@ -242,16 +257,19 @@ function createFtpTransfers({ emit = () => {}, requestAuthentication = async () 
     try {
       while (queue.length) {
         const job = queue.shift();
-        try { check(job.controller.signal); const session = get(job.id); job.status = 'running'; job.startedAt = Date.now(); publish(job); await run(job, session); job.status = 'completed'; }
-        catch (error) { job.status = job.controller.signal.aborted && !job.commitStarted ? 'cancelled' : 'failed'; job.error = cleanError(error); }
+        try { check(job.controller.signal); workflows.assertRunnable(job.transferId); const session = get(job.id); job.status = 'running'; job.startedAt = Date.now(); publish(job); await (job.advanced ? workflows.run(job, session) : run(job, session)); job.status = 'completed'; }
+        catch (error) { if (!['paused','interrupted'].includes(job.status)) job.status = job.controller.signal.aborted && !job.commitStarted ? 'cancelled' : 'failed'; job.error = cleanError(error); }
         finally { job.finishedAt = Date.now(); publish(job); job.resolveDone(); const session = sessions.get(job.id); if (session?.client.closed) disconnected(session); }
       }
     } finally { processing = false; }
   }
-  async function cancel(transferId) { const job = jobs.get(transferId); if (!job) throw new Error('Unknown FTP transfer.'); if (!FINISHED.has(job.status)) job.controller.abort(); await job.done; return jobView(job); }
-  async function close(id) { const session = sessions.get(id); if (session) { session.client.close(); disconnected(session); } await Promise.all([...jobs.values()].filter(job => job.id === id).map(job => job.done).concat([...browsing].filter(owner => owner.id === id).map(owner => owner.done))); return true; }
-  async function closeAll() { stopped = true; for (const request of pending) request.controller.abort(); await Promise.all([...sessions.keys()].map(close)); await Promise.all([...pending].map(request => request.done)); await Promise.all([...jobs.values()].map(job => job.done).concat([...browsing].map(owner => owner.done))); }
-  return { open, listLocal, listRemote, start, cancel, close, closeAll, listJobs: () => [...jobs.values()].map(jobView), ownsJob: id => jobs.has(id), owns: id => sessions.has(id) || [...jobs.values()].some(job => job.id === id || job.transferId === id),
-    get count() { return new Set([...sessions.keys(), ...[...jobs.values()].filter(job => !FINISHED.has(job.status)).map(job => job.id), ...[...browsing].map(owner => owner.id)]).size + pending.size; }, get activeCount() { return [...jobs.values()].filter(job => !FINISHED.has(job.status)).length; }, get connectionIds() { return [...sessions.keys()]; } };
+  async function cancel(transferId) { const job = jobs.get(transferId); if (!job) throw new Error('Unknown FTP transfer.'); if(job.resumable) { if(!FINISHED.has(job.status))await workflows.pause(transferId);if(job.checkpoint)return workflows.discardPartial({transferId,id:job.id});return jobView(job); } if (!FINISHED.has(job.status)) job.controller.abort(); await job.done; return jobView(job); }
+  async function close(id) { await workflows.close(id); const session = sessions.get(id); if (session) { session.client.close(); disconnected(session); } await Promise.all([...jobs.values()].filter(job => job.id === id).map(job => job.done).concat([...browsing].filter(owner => owner.id === id).map(owner => owner.done))); return true; }
+  async function closeAll() { stopped = true; await workflows.closeAll(); for (const request of pending) request.controller.abort(); await Promise.all([...sessions.keys()].map(close)); await Promise.all([...pending].map(request => request.done)); await Promise.all([...jobs.values()].map(job => job.done).concat([...browsing].map(owner => owner.done))); }
+  return { initializeRecovery:workflows.initializeRecovery,assertExternalAvailable:workflows.assertExternalAvailable,ownsPlan:workflows.ownsPlan,
+    prepareFolderTransfer:workflows.prepareFolderTransfer,startFolderTransfer:workflows.startFolderTransfer,discardFolderTransfer:workflows.discardFolderTransfer,
+    pause:workflows.pause,resume:workflows.resume,discardPartial:workflows.discardPartial,listRecovery:()=>[...jobs.values()].filter(j=>j.checkpoint).map(jobView),get recoveryError(){return workflows.recoveryError;},
+    open, listLocal, listRemote, start, cancel, close, closeAll, listJobs: () => [...jobs.values()].map(jobView), ownsJob: id => jobs.has(id), owns: id => sessions.has(id) || [...jobs.values()].some(job => job.id === id || job.transferId === id),
+    get count() { return new Set([...sessions.keys(), ...workflows.ownedIds, ...[...jobs.values()].filter(job => !FINISHED.has(job.status)).map(job => job.id), ...[...browsing].map(owner => owner.id)]).size + pending.size; }, get activeCount() { return workflows.busy + browsing.size + [...jobs.values()].filter(job => !FINISHED.has(job.status)).length; }, get connectionIds() { return [...sessions.keys()]; } };
 }
 module.exports = { createFtpTransfers };

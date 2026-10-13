@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
+const { createSyncBaselines, binding, cleanName } = require('./sync-baselines.cjs');
 
 const MAX_ENTRIES = 2000;
 const MAX_DEPTH = 32;
@@ -34,15 +35,41 @@ function snapshot(stat, remote) {
 }
 function identity(info) { const { size, mtime, ctime, ...rest } = info; return rest; }
 const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const depthOf = relativePath => relativePath ? relativePath.split('/').length : 0;
 
 // A folder is a reviewed sequence of guarded file commits, not an atomic
 // directory transaction. Completed files and created folders survive errors.
 // Merge and one-way sync retain destination-only items. Mirror deletes only
 // explicitly reviewed target-only regular files and then empty directories.
 function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remoteStat, confirm = async () => false,
-  enqueue, copy, timeout = 30000, planLifetimeMs = 300000 }) {
+  enqueue, copy, timeout = 30000, planLifetimeMs = 300000, syncDirectory, identityFor }) {
   if (!Number.isInteger(planLifetimeMs) || planLifetimeMs < 1 || planLifetimeMs > 300000) throw new TypeError('Invalid folder review lifetime.');
   let active = null;
+  const baselines = syncDirectory ? createSyncBaselines(syncDirectory) : null;
+  const common = entry => entry ? { relativePath: entry.relativePath, type: entry.type, size: entry.type === 'file' ? entry.size : 0,
+    ...(entry.type === 'file' ? { hash: entry.hash } : {}) } : null;
+  const contentEqual = (a, b) => equal(common(a), common(b));
+  const inside = (name, root) => root === '' || name === root || name.startsWith(root + '/');
+  function syncIdentity(session) {
+    const result = identityFor?.(session);
+    if (!/^[a-f0-9]{64}$/.test(result)) throw new Error('Authenticated SSH identity is required for saved synchronization pairs.');
+    return result;
+  }
+  const pairSummary = record => ({ pairId: record.pairId, name: record.name, revision: record.revision,
+    lastSyncedAt: record.lastSyncedAt, localPath: record.localPath, remotePath: record.remotePath });
+  async function listSyncPairs({ id } = {}) {
+    if (!baselines) throw new Error('Saved synchronization storage is unavailable.');
+    const identity = syncIdentity(getSession(id));
+    return (await baselines.load()).filter(record => record.identity === identity).map(pairSummary);
+  }
+  async function forgetSyncPair({ id, pairId, revision } = {}) {
+    available(); assertAvailable(); if (isBusy()) throw new Error('Wait for transfers before forgetting a synchronization baseline.');
+    if (!baselines) throw new Error('Saved synchronization storage is unavailable.');
+    const identity = syncIdentity(getSession(id));
+    const record = (await baselines.load()).find(item => item.pairId === pairId && item.identity === identity && item.revision === revision);
+    if (!record) throw new Error('The saved synchronization pair changed or belongs to another authenticated connection.');
+    return baselines.forget(record);
+  }
   function available() {
     if (active && !active.applying && Date.now() >= active.expires) { active.controller.abort(); if (active.preparingFinished) release(active); }
     if (active) throw new Error('Finish or cancel the reviewed folder copy before starting another transfer or file operation.');
@@ -101,7 +128,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
   async function inventory(plan, root, remote, { missing = false, hashes = false } = {}) {
     const api = remote ? path.posix : path; const entries = []; const names = new Set(); let totalBytes = 0;
     async function walk(filename, relativePath, depth) {
-      check(plan);
+      check(plan, !plan.job);
       if (depth > MAX_DEPTH) throw new Error(`Folder copies support at most ${MAX_DEPTH} nested levels.`);
       if (entries.length >= MAX_ENTRIES) throw new Error(`Folder copies support at most ${MAX_ENTRIES} entries including the root.`);
       const info = await stat(plan, filename, remote);
@@ -168,7 +195,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     const destinationOnly = destination.filter(entry => !sourceNames.has(entry.relativePath));
     let deletedFiles = 0; let deletedDirectories = 0;
     if (plan.review.mode === 'mirror') {
-      for (const entry of destinationOnly.sort((a, b) => b.relativePath.split('/').length - a.relativePath.split('/').length || a.relativePath.localeCompare(b.relativePath))) {
+      for (const entry of destinationOnly.sort((a, b) => depthOf(b.relativePath) - depthOf(a.relativePath) || a.relativePath.localeCompare(b.relativePath))) {
         if (entry.type === 'file') deletedFiles++; else deletedDirectories++;
         entries.push({ ...entry, action: entry.type === 'file' ? 'delete-file' : 'delete-directory', direction: plan.review.direction,
           destinationExpected: entry.expected, destinationHash: entry.hash });
@@ -186,7 +213,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     const remoteParents = await parents(plan, path.posix.dirname(plan.review.remotePath), true);
     const local = await inventory(plan, plan.review.localPath, false, { missing: true, hashes: true });
     const remote = await inventory(plan, plan.review.remotePath, true, { missing: true, hashes: true });
-    if (!local.length && !remote.length) throw new Error('At least one two-way folder must already exist.');
+    if (!local.length && !remote.length && !plan.syncRecord?.revision) throw new Error('At least one two-way folder must already exist.');
     const locals = new Map(local.map(entry => [entry.relativePath, entry]));
     const remotes = new Map(remote.map(entry => [entry.relativePath, entry]));
     const portable = new Map();
@@ -195,6 +222,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       if (portable.has(normalized) && portable.get(normalized) !== entry.relativePath) throw new Error('Source and destination names collide after case or Unicode normalization.');
       portable.set(normalized, entry.relativePath);
     }
+    if (plan.syncRecord) return inspectPersistent(plan, { localParents, remoteParents, local, remote, locals, remotes });
     const names = [...new Set([...locals.keys(), ...remotes.keys()])].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
     if (names.length > MAX_ENTRIES) throw new Error(`Two-way folder reviews support at most ${MAX_ENTRIES} combined entries.`);
     const entries = []; let copied = 0; let replaced = 0; let skipped = 0; let directories = 0; let totalBytes = 0; let conflicts = 0; let unresolved = 0;
@@ -228,6 +256,102 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       copied, replaced, skipped, kept: 0, deletedFiles: 0, deletedDirectories: 0, conflicts, unresolved,
       sourceFiles: entries.filter(entry => entry.type === 'file').length, sourceDirectories: entries.filter(entry => entry.type === 'directory').length };
   }
+  function inspectPersistent(plan, state) {
+    const { localParents, remoteParents, local, remote, locals, remotes } = state;
+    const baseline = new Map(plan.syncRecord.entries.map(entry => [entry.relativePath, entry]));
+    const names = [...new Set([...locals.keys(), ...remotes.keys(), ...baseline.keys()])].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+    if (names.length > MAX_ENTRIES) throw new Error(`Saved synchronization reviews support at most ${MAX_ENTRIES} combined entries.`);
+    const entries = [], covered = [], used = new Set(); let conflicts = 0, unresolved = 0;
+    function add(relativePath, side, metadata = {}) {
+      const source = (side === 'local' ? locals : remotes).get(relativePath);
+      const target = (side === 'local' ? remotes : locals).get(relativePath);
+      if (!source && !target) return;
+      const direction = side === 'local' ? 'upload' : 'download'; let action;
+      if (!source) action = target.type === 'file' ? 'delete-file' : 'delete-directory';
+      else if (source.type === 'directory') action = target ? 'skip' : 'mkdir';
+      else action = !target ? 'copy' : contentEqual(source, target) ? 'skip' : 'replace';
+      if (action === 'replace' && (target.expected.mode & 0o7000)) throw new Error('Replacement refuses destination files with special permission bits.');
+      entries.push({ ...(source || target), action, direction, destinationExpected: target?.expected || null,
+        ...(target?.hash ? { destinationHash: target.hash } : {}), ...metadata });
+    }
+    function conflict(relativePath, reason, subtree = false, typeChange = false) {
+      const left = locals.get(relativePath), right = remotes.get(relativePath); const choice = plan.resolutionMap.get(relativePath);
+      conflicts++; if (choice) used.add(relativePath); else unresolved++;
+      if (typeChange && choice && choice !== 'skip') throw new Error('File/directory type changes require manual reconciliation; only Skip is available.');
+      const metadata = { conflict: true, conflictReason: reason, resolution: choice || null, localPresent: Boolean(left), remotePresent: Boolean(right),
+        localSize: left?.size ?? null, remoteSize: right?.size ?? null, subtree, allowedResolutions: typeChange ? ['skip'] : ['local', 'remote', 'skip'] };
+      if (subtree) covered.push(relativePath);
+      if (!choice || choice === 'skip') {
+        entries.push({ ...(left || right), ...metadata, action: choice ? 'skip' : 'conflict', direction: left ? 'upload' : 'download',
+          destinationExpected: left ? right?.expected || null : left?.expected || null,
+          retainedConflict: true, localExpected: left?.expected || null, remoteExpected: right?.expected || null,
+          localHash: left?.hash, remoteHash: right?.hash });
+      } else {
+        const selectedNames = subtree ? names.filter(name => inside(name, relativePath)) : [relativePath];
+        for (const name of selectedNames) add(name, choice, name === relativePath ? metadata : {});
+      }
+    }
+    for (const relativePath of names) {
+      if (covered.some(root => inside(relativePath, root))) continue;
+      const left = locals.get(relativePath), right = remotes.get(relativePath), before = baseline.get(relativePath);
+      if (!left && !right) continue;
+      if (contentEqual(left, right)) { add(relativePath, 'local'); continue; }
+      if (left && right && left.type !== right.type) { conflict(relativePath, 'type-change', true, true); continue; }
+      // A deleted directory is one decision for the entire subtree. New or
+      // changed descendants on its surviving side turn deletion into conflict.
+      if (before?.type === 'directory' && (!left || !right)) {
+        const present = left || right;
+        if (present.type !== 'directory') { conflict(relativePath, 'type-change', true, true); continue; }
+        const existing = left ? locals : remotes;
+        const changed = names.some(name => inside(name, relativePath) && existing.has(name) && !contentEqual(existing.get(name), baseline.get(name)));
+        if (changed) { conflict(relativePath, 'deletion-versus-edit', true); continue; }
+        covered.push(relativePath);
+        for (const name of names.filter(name => inside(name, relativePath))) add(name, left ? 'remote' : 'local');
+        continue;
+      }
+      if (before && ((left && left.type !== before.type) || (right && right.type !== before.type))) { conflict(relativePath, 'type-change', true, true); continue; }
+      if (!before) {
+        if (!left || !right) add(relativePath, left ? 'local' : 'remote');
+        else conflict(relativePath, 'initial-divergence');
+      } else if (contentEqual(left, before)) add(relativePath, 'remote');
+      else if (contentEqual(right, before)) add(relativePath, 'local');
+      else conflict(relativePath, !left || !right ? 'deletion-versus-edit' : 'both-edited');
+    }
+    if ([...plan.resolutionMap.keys()].some(name => !used.has(name))) throw new Error('A two-way resolution no longer refers to a conflict. Review the changed trees again.');
+    // Preserve creation ordering; apply reviewed deletions deepest first.
+    const deletions = entries.filter(entry => entry.action.startsWith('delete-')).sort((a, b) => depthOf(b.relativePath) - depthOf(a.relativePath) || a.relativePath.localeCompare(b.relativePath));
+    const ordered = [...entries.filter(entry => !entry.action.startsWith('delete-')), ...deletions];
+    const count = action => entries.filter(entry => entry.action === action).length;
+    const totalBytes = entries.filter(entry => ['copy', 'replace'].includes(entry.action)).reduce((total, entry) => total + entry.size, 0);
+    if (totalBytes > MAX_BYTES) throw new Error('A reviewed folder transfer must be no larger than 1 TiB.');
+    return { localParents, remoteParents, local, remote, entries: ordered, files: count('copy') + count('replace'), directories: count('mkdir'), totalBytes,
+      copied: count('copy'), replaced: count('replace'), skipped: count('skip'), kept: 0, deletedFiles: count('delete-file'), deletedDirectories: count('delete-directory'), conflicts, unresolved,
+      sourceFiles: entries.filter(entry => entry.type === 'file').length, sourceDirectories: entries.filter(entry => entry.type === 'directory').length };
+  }
+  async function finishSync(plan) {
+    check(plan, false);
+    if (syncIdentity(plan.session) !== plan.syncRecord.identity) throw new Error('Authenticated synchronization identity changed. The baseline was not advanced.');
+    if (!equal(plan.expected.localParents, await parents(plan, path.dirname(plan.review.localPath), false))
+      || !equal(plan.expected.remoteParents, await parents(plan, path.posix.dirname(plan.review.remotePath), true))) throw new Error('A synchronization root parent changed. The baseline was not advanced.');
+    const predicted = { local: new Map(plan.expected.local.map(entry => [entry.relativePath, common(entry)])), remote: new Map(plan.expected.remote.map(entry => [entry.relativePath, common(entry)])) };
+    for (const entry of plan.expected.entries) {
+      const target = entry.direction === 'upload' ? predicted.remote : predicted.local;
+      if (entry.action.startsWith('delete-')) target.delete(entry.relativePath);
+      else if (['copy', 'replace', 'mkdir'].includes(entry.action)) target.set(entry.relativePath, common(entry));
+    }
+    const actualLocal = await inventory(plan, plan.review.localPath, false, { missing: true, hashes: true });
+    const actualRemote = await inventory(plan, plan.review.remotePath, true, { missing: true, hashes: true });
+    const sorted = values => [...values].map(common).sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+    if (!equal(sorted(predicted.local.values()), sorted(actualLocal)) || !equal(sorted(predicted.remote.values()), sorted(actualRemote))) throw new Error('A synchronization tree changed during final verification. Completed changes remain; the baseline was not advanced.');
+    const retained = plan.expected.entries.filter(entry => entry.retainedConflict).map(entry => ({ root: entry.relativePath, subtree: entry.subtree }));
+    const preserve = name => retained.some(item => item.subtree ? inside(name, item.root) : name === item.root);
+    const next = new Map(plan.syncRecord.entries.filter(entry => preserve(entry.relativePath)).map(entry => [entry.relativePath, entry]));
+    for (const [name, left] of predicted.local) if (!preserve(name) && contentEqual(left, predicted.remote.get(name))) next.set(name, left);
+    check(plan, false);
+    const updated = await plan.syncLease.commit([...next.values()].sort((a, b) => a.relativePath.localeCompare(b.relativePath)));
+    plan.review.syncPair = { ...pairSummary(updated), isNew: false };
+    plan.job.syncPair = plan.review.syncPair; plan.job.baselineUpdated = true;
+  }
   async function runAdvanced(job, session) {
     const plan = job.folderPlan; const twoWay = plan.review.mode === 'two-way';
     const localTree = twoWay ? plan.expected.local : job.direction === 'upload' ? plan.expected.entries.filter(e => !e.action.startsWith('delete-')) : plan.expected.destination;
@@ -254,6 +378,16 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     }
     async function validate(entry) {
       check(plan, false); const deleting = entry.action.startsWith('delete-'); const destinationRemote = (entry.direction || job.direction) === 'upload';
+      if (entry.retainedConflict) {
+        for (const remote of [false, true]) {
+          const expected = remote ? entry.remoteExpected : entry.localExpected;
+          const current = await stat(plan, pathFor(entry.relativePath, remote), remote);
+          if (expected?.type === 'directory' ? !current || !equal(identity(expected), identity(current)) : !equal(expected, current)) throw new Error('A skipped synchronization conflict changed after review.');
+          const hash = remote ? entry.remoteHash : entry.localHash;
+          if (hash && hash !== await digest(plan, pathFor(entry.relativePath, remote), remote, expected)) throw new Error('A skipped synchronization conflict changed after review.');
+        }
+        return;
+      }
       // Probe source absence first: this may traverse many remote ancestors.
       // The destination snapshot and content hash must be the final checks
       // before deletion so edits made during those probes are retained.
@@ -278,10 +412,11 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     }
     async function guardParentsMissing(relativePath, remote) {
       const api = remote ? path.posix : path; const root = remote ? job.remotePath : job.localPath;
-      const outside = remote === (job.direction === 'upload') ? plan.expected.destinationParents : plan.expected.sourceParents;
+      const outside = twoWay ? remote ? plan.expected.remoteParents : plan.expected.localParents
+        : remote === (job.direction === 'upload') ? plan.expected.destinationParents : plan.expected.sourceParents;
       if (!equal(outside, await parents(plan, api.dirname(root), remote))) throw new Error('A mirror source parent changed.');
       const known = remote ? remoteMap : localMap; let missing = false; const parts = relativePath.split('/');
-      const chain = ['']; for (const part of parts) chain.push(chain.at(-1) ? `${chain.at(-1)}/${part}` : part);
+      const chain = ['']; for (const part of parts.filter(Boolean)) chain.push(chain.at(-1) ? `${chain.at(-1)}/${part}` : part);
       for (const relative of chain) {
         if (missing) break;
         const info = await stat(plan, pathFor(relative, remote), remote); const expected = known.get(relative);
@@ -333,11 +468,27 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       }
       job.publish();
     }
+    // Directory identities must survive the operation even when their content
+    // is identical; external root/ancestor substitution is not a new baseline.
+    if (plan.syncRecord) {
+      for (const remote of [false, true]) {
+        const known = remote ? remoteMap : localMap; const added = remote ? created.remote : created.local;
+        const deleted = new Set(plan.expected.entries.filter(entry => entry.action === 'delete-directory' && (entry.direction === 'upload') === remote).map(entry => entry.relativePath));
+        for (const [name, entry] of known) if (entry.type === 'directory' && !deleted.has(name)) {
+          const current = await stat(plan, pathFor(name, remote), remote);
+          if (current?.type !== 'directory' || !equal(identity(entry.expected), identity(current))) throw new Error('A synchronization directory changed. The baseline was not advanced.');
+        }
+        for (const [name, expected] of added) {
+          const current = await stat(plan, pathFor(name, remote), remote);
+          if (current?.type !== 'directory' || !equal(expected, identity(current))) throw new Error('A created synchronization directory changed. The baseline was not advanced.');
+        }
+      }
+    }
     job.currentPath = ''; job.publish();
   }
   function review(plan) {
     const { files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, deletedFiles = 0, deletedDirectories = 0, conflicts = 0, unresolved = 0 } = plan.expected;
-    return { ...plan.review, entries: plan.expected.entries.map(({ expected, destinationExpected, hash, destinationHash, ...item }) => ({ ...item })),
+    return { ...plan.review, entries: plan.expected.entries.map(({ expected, destinationExpected, hash, destinationHash, localExpected, remoteExpected, localHash, remoteHash, retainedConflict, ...item }) => ({ ...item })),
       files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, deletedFiles, deletedDirectories, conflicts, unresolved, expiresAt: plan.expires };
   }
   async function prepare(input = {}) {
@@ -350,11 +501,14 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     if (!['copy', 'merge', 'sync', 'two-way', 'mirror'].includes(mode) || !['skip', 'replace'].includes(conflictPolicy)) throw new Error('Choose a supported folder operation and conflict policy.');
     if (input.resumable !== undefined && typeof input.resumable !== 'boolean') throw new Error('Choose a valid folder recovery option.');
     if (input.resumable && ['two-way', 'mirror'].includes(mode)) throw new Error('Resumable folder operations currently support copy, merge, and one-way synchronization.');
+    if ((input.persistentSync !== undefined && typeof input.persistentSync !== 'boolean') || (mode !== 'two-way' && (input.persistentSync || input.syncPairId || input.pairName))) throw new Error('Saved synchronization pairs require two-way synchronization.');
+    if (input.syncPairId && !input.persistentSync) throw new Error('Select saved synchronization to use a pair.');
+    if (input.persistentSync && !baselines) throw new Error('Saved synchronization storage is unavailable.');
     const resolutions = input.resolutions ?? [];
     if (!Array.isArray(resolutions) || resolutions.length > MAX_ENTRIES || (mode !== 'two-way' && resolutions.length)) throw new Error('Choose valid per-file two-way resolutions.');
     const resolutionMap = new Map();
     for (const choice of resolutions) {
-      if (!choice || typeof choice.relativePath !== 'string' || !choice.relativePath || !choice.relativePath.split('/').every(localName)
+      if (!choice || typeof choice.relativePath !== 'string' || (!choice.relativePath && !input.persistentSync) || (choice.relativePath && !choice.relativePath.split('/').every(localName))
         || !['local', 'remote', 'skip'].includes(choice.source) || resolutionMap.has(choice.relativePath)) throw new Error('Choose a unique local, remote, or skip resolution for each conflicting file.');
       resolutionMap.set(choice.relativePath, choice.source);
     }
@@ -365,7 +519,19 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     let finishPreparing; plan.preparingDone = new Promise(resolve => { finishPreparing = resolve; });
     active = plan;
     plan.timer = setTimeout(() => { if (!plan.applying) { plan.controller.abort(); if (plan.preparingFinished) release(plan); } }, planLifetimeMs); plan.timer.unref?.();
-    try { plan.expected = await inspect(plan); return review(plan); } catch (error) { release(plan); throw error; }
+    try {
+      if (input.persistentSync) {
+        const identity = syncIdentity(session); const records = await baselines.load();
+        const reference = { identity, localPath, remotePath };
+        const previous = input.syncPairId ? records.find(record => record.pairId === input.syncPairId) : records.find(record => binding(record) === binding(reference));
+        if ((input.syncPairId && !previous) || (previous && binding(previous) !== binding(reference))) throw new Error('The saved pair belongs to different folders or another authenticated SSH connection.');
+        plan.syncRecord = previous || { ...reference, pairId: randomUUID(), name: cleanName(input.pairName || path.basename(localPath)), revision: 0, lastSyncedAt: null, entries: [] };
+        if (input.pairName !== undefined) plan.syncRecord = { ...plan.syncRecord, name: cleanName(input.pairName) };
+        plan.review.persistentSync = true; plan.review.baselineUsed = Boolean(previous);
+        plan.review.syncPair = { ...pairSummary(plan.syncRecord), isNew: !previous };
+      }
+      plan.expected = await inspect(plan); return review(plan);
+    } catch (error) { release(plan); throw error; }
     finally { plan.preparingFinished = true; finishPreparing(); }
   }
   async function start({ planId } = {}) {
@@ -385,12 +551,15 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       });
       if (!accepted) { release(plan); return { cancelled: true }; }
       check(plan);
+      if (plan.syncRecord) plan.syncLease = await baselines.begin(plan.syncRecord);
       if (!equal(plan.expected, await inspect(plan))) throw new Error('The source tree or destination parent changed after review. Review the folder again.');
       check(plan);
       const job = enqueue(plan);
-      plan.job = job; job.done.finally(() => release(plan));
+      plan.job = job;
+      plan.releaseDone = job.done.finally(async () => { try { await plan.syncLease?.release(); } finally { release(plan); } });
+      plan.releaseDone.catch(() => {});
       return job;
-    } catch (error) { release(plan); throw error; }
+    } catch (error) { await plan.syncLease?.release(); release(plan); throw error; }
     finally { resolveDone(); }
   }
   function discard({ planId } = {}) {
@@ -399,7 +568,11 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
   }
   async function run(job, session) {
     const plan = job.folderPlan;
-    if (['two-way', 'mirror'].includes(plan.review.mode)) return runAdvanced(job, session);
+    if (['two-way', 'mirror'].includes(plan.review.mode)) {
+      try { await runAdvanced(job, session); if (plan.syncRecord) await finishSync(plan); }
+      finally { await plan.syncLease?.release(); }
+      return;
+    }
     const upload = job.direction === 'upload'; const sourceRemote = !upload;
     const sourceApi = sourceRemote ? path.posix : path; const destinationApi = upload ? path.posix : path;
     const created = new Map(); const expectedEntries = new Map(plan.expected.entries.map(entry => [entry.relativePath, entry]));
@@ -472,10 +645,10 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
   function disconnected(id) { if (active?.review.id === id) { active.controller.abort(); if (!active.applying && active.preparingFinished) release(active); } }
   async function close(id) {
     const plan = active?.review.id === id ? active : null; if (!plan) return;
-    disconnected(id); await plan.preparingDone; if (plan.done) await plan.done; if (!plan.job) release(plan);
+    disconnected(id); await plan.preparingDone; if (plan.done) await plan.done; if (plan.releaseDone) await plan.releaseDone; if (!plan.job) release(plan);
   }
   async function closeAll() { if (active) await close(active.review.id); }
-  return { prepare, start, discard, available, run, close, closeAll, disconnected,
+  return { prepare, start, discard, available, run, close, closeAll, disconnected, listSyncPairs, forgetSyncPair,
     get busy() { return Boolean(active); }, get activeIds() { return active ? [active.review.id] : []; } };
 }
 

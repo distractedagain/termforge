@@ -2,7 +2,7 @@
 
 ForgeCRT is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original workspace includes a separate native Quick Connect window and docked manager layout informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current release scope — ForgeCRT 0.16.0
+## Current implementation scope — ForgeCRT 0.17.0
 
 | Workflow | ForgeCRT implementation | Limits |
 | --- | --- | --- |
@@ -20,8 +20,8 @@ ForgeCRT is an independently written, MIT-licensed terminal client. It uses publ
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Managed ssh2 transport with verified host pins, ordered key/agent/password/interactive authentication and masked prompts; existing system OpenSSH option | Managed transport excludes jumps, forwarding, certificates, GSSAPI and X11; OpenSSH keeps its separate host database |
 | Credentials | Named OS-encrypted username/password entries, metadata-only UI, host/port/fingerprint grants, reference-based profiles | Refuses insecure/unavailable Linux backend; no separate vault lock, master password, portable backup or proprietary-secret import; see [security/storage guide](SECURE-CONNECTIONS.md) |
-| SFTP / SCP / ASCII | Two-pane local/remote file browser, queued regular-file SFTP and actual SCP payloads, reviewed SFTP folder copy/merge, one-way/additive two-way sync and mirror, durable SFTP file/folder and hybrid SCP recovery, bounded remote text editing and reviewed file overwrites; existing interactive SFTP and ASCII text send retained | SCP mode requires SFTP for browsing/staging and resumed suffixes; no native SCP offset/folder payloads, two-way baseline/deletion propagation, drag/drop or external editor integration; remote race/cleanup limits documented |
-| FTP / FTPS | Separate passive FTP, explicit FTPS and implicit FTPS connections; browse and queued individual upload/download; native plaintext approval and strict control/data TLS validation | No insecure TLS bypass, fallback, folder operations, synchronization, resume, remote edit or saved FTP passwords; replacement backups and uncertain stages retained |
+| SFTP / SCP / ASCII | Two-pane local/remote file browser, queued regular-file SFTP and actual SCP payloads, reviewed SFTP folder copy/merge, one-way, saved-baseline two-way sync and mirror, durable SFTP file/folder and hybrid SCP recovery, bounded remote text editing and reviewed file overwrites; existing interactive SFTP and ASCII text send retained | SCP mode requires SFTP for browsing/staging and resumed suffixes; no native SCP offset/folder payloads, two-way/mirror resume, drag/drop or external editor integration; remote race/cleanup limits documented |
+| FTP / FTPS | Separate passive FTP, explicit FTPS and implicit FTPS connections; browse, individual and reviewed folder copy/merge, durable file/folder recovery; native plaintext approval and strict control/data TLS validation | No insecure TLS bypass, fallback, synchronization, remote edit or saved FTP passwords; replacement backups and uncertain stages retained |
 | Remote file management | Reviewed SFTP folder creation, new-only rename, regular-file/empty-directory deletion, mode 000–777 editing and permissions display | No symbolic links, recursive deletion or special permission bits; remote path races and uncertain outcomes are documented |
 | Telnet / Raw TCP | Original adapters; Telnet option/NAWS/terminal-type/echo handling and break | UTF-8 text stream; real loopback tests, no external-device interoperability coverage |
 | Serial | Device enumeration, baud/data/stop/parity/flow options, streaming/break, asynchronous close/retry and byte-aware Hex View | Mock/injected adapter tests; no physical hardware/device interoperability verification |
@@ -63,6 +63,8 @@ The limited INI reader imports nonsecret SSH2 connection metadata, not passwords
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+Version 0.17.0 adds FTP/FTPS folder copy/merge and durable file/folder recovery, plus persistent SFTP two-way synchronization baselines and reviewed deletion propagation. Verification is in progress; see [0.17 evidence](VERIFICATION-v0.17.0.md). The latest verified public release remains 0.16.0 until those gates complete.
 
 Version 0.16.0 adopts the ForgeCRT name and adds durable SFTP folder recovery, hybrid SCP/SFTP recovery, explicit two-way synchronization, reviewed mirroring and FTP/FTPS individual-file transfers. All four source CI jobs and installer builds passed at `cab6f7edc9d6cddf20381f822b2dc3da95f17026`. Both Macs and Linux passed 550 backend tests each; Windows passed 532 with 18 expected skips. Linux passed 300 interface checks and native Electron transfer, branding and storage-identity checks. [ForgeCRT v0.16.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.16.0); anonymous verification confirmed its source tag, thirteen assets and twelve checksum entries. See [0.16 verification](VERIFICATION-v0.16.0.md) for completed checks and explicit installed-app/credential-storage limits.
 

@@ -19,6 +19,7 @@ Thumbs.db
 .idea/
 # Deliberately public loopback TLS fixtures; see their README.
 !tests/fixtures/ftp-tls/localhost-cert.pem
+!tests/fixtures/ftp-tls/localhost-rotated-cert.pem
 !tests/fixtures/ftp-tls/localhost-key.pem
 !tests/fixtures/ftp-tls/wrong-cert.pem
 !tests/fixtures/ftp-tls/wrong-key.pem

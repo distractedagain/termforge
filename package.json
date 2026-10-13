@@ -1,7 +1,7 @@
 {
   "name": "termforge",
   "productName": "ForgeCRT",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",
@@ -33,7 +33,8 @@
     "test:remote-files-ui": "node scripts/remote-files-ui-check.cjs",
     "test:folder-transfers-ui": "node scripts/folder-transfer-ui-check.cjs",
     "test:transfer-workflows-ui": "node scripts/transfer-workflows-ui-check.cjs",
-    "test:advanced-transfers-ui": "node scripts/advanced-transfers-ui-check.cjs"
+    "test:advanced-transfers-ui": "node scripts/advanced-transfers-ui-check.cjs",
+    "test:persistent-transfers-ui": "node scripts/persistent-transfers-ui-check.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

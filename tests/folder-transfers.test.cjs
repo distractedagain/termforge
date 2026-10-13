@@ -81,6 +81,8 @@ async function fixture(t, options = {}) {
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const manager = createSecureTransfers({ home: local, commitTimeoutMs: options.commitTimeoutMs || 30000,
+    syncDirectory: options.persistent ? path.join(root, 'sync') : undefined,
+    getConnectionIdentity: () => ({ host: '127.0.0.1', port: server.address().port, username: options.account?.() || 'fixture', algorithm: 'ssh-ed25519', fingerprint: options.fingerprint?.() || 'test-fixture-key' }),
     folderPlanLifetimeMs: options.folderPlanLifetimeMs || 300000,
     emit: event => events.push(event),
     confirmOverwrite: async () => { throw new Error('Folder copies must never request overwrite permission.'); },
@@ -103,7 +105,7 @@ async function fixture(t, options = {}) {
     throw new Error('Folder job did not finish.');
   }
   async function run(prepared) { return waitJob((await manager.startFolderTransfer({ planId: prepared.planId })).transferId); }
-  return { local, remote, manager, connection, plan, run, waitJob, mutations, events, approvals,
+  return { local, remote, root, manager, connection, plan, run, waitJob, mutations, events, approvals,
     disconnect: () => { for (const client of clients) client.end(); } };
 }
 
@@ -685,4 +687,172 @@ test('mirror rechecks deletion target after the remote source-absence probe and 
   assert.match(result.error, /destination file (?:content )?changed/);
   assert.equal(result.deletedFiles, 0);
   assert.equal(await fsp.readFile(path.join(f.local, 'copy', 'extra'), 'utf8'), 'edited!!');
+});
+
+async function persistentFixture(t, options = {}) {
+  const f = await fixture(t, { ...options, persistent: true });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  const localFile = name => path.join(f.local, 'source', name), remoteFile = name => path.join(f.remote, 'copy', name);
+  const review = input => f.plan('upload', 'source', 'copy', { mode: 'two-way', persistentSync: true, ...input });
+  async function initialize(files = { file: 'original' }) {
+    for (const [name, value] of Object.entries(files)) {
+      await fsp.mkdir(path.dirname(localFile(name)), { recursive: true }); await fsp.mkdir(path.dirname(remoteFile(name)), { recursive: true });
+      await fsp.writeFile(localFile(name), value); await fsp.writeFile(remoteFile(name), value);
+    }
+    const result = await f.run(await review({ pairName: 'Fixture pair' })); assert.equal(result.status, 'completed', result.error);
+    const pairs = await f.manager.listSyncPairs({ id: f.connection.id }); assert.equal(pairs.length, 1); assert.equal(pairs[0].revision, 1);
+    return pairs[0];
+  }
+  return { ...f, localFile, remoteFile, review, initialize, pairs: () => f.manager.listSyncPairs({ id: f.connection.id }) };
+}
+
+test('persistent sync saves only after apply and infers edits across consecutive verified generations', async t => {
+  const f = await persistentFixture(t); await f.initialize();
+  await fsp.writeFile(f.localFile('file'), 'local edit');
+  let review = await f.review(); assert.equal(review.baselineUsed, true); assert.equal(review.conflicts, 0); assert.equal(review.replaced, 1);
+  assert.equal(review.entries.find(e => e.relativePath === 'file').direction, 'upload');
+  let result = await f.run(review); assert.equal(result.status, 'completed', result.error); assert.equal(await fsp.readFile(f.remoteFile('file'), 'utf8'), 'local edit');
+  await fsp.writeFile(f.remoteFile('file'), 'remote edit');
+  review = await f.review(); assert.equal(review.entries.find(e => e.relativePath === 'file').direction, 'download');
+  result = await f.run(review); assert.equal(result.status, 'completed', result.error); assert.equal(await fsp.readFile(f.localFile('file'), 'utf8'), 'remote edit');
+  assert.equal((await f.pairs())[0].revision, 3);
+});
+
+test('persistent sync treats first-run differing content as explicit conflict and discard creates no pair', async t => {
+  const f = await persistentFixture(t); await fsp.writeFile(f.localFile('file'), 'local'); await fsp.writeFile(f.remoteFile('file'), 'remote');
+  const review = await f.review(); assert.equal(review.baselineUsed, false); assert.equal(review.syncPair.isNew, true); assert.equal(review.unresolved, 1);
+  assert.equal(review.entries.find(e => e.relativePath === 'file').conflictReason, 'initial-divergence');
+  await f.manager.discardFolderTransfer({ planId: review.planId }); assert.deepEqual(await f.pairs(), []);
+});
+
+test('persistent sync keeps skipped both-edited conflict on the old common ancestor', async t => {
+  const f = await persistentFixture(t); await f.initialize(); await fsp.writeFile(f.localFile('file'), 'local edit'); await fsp.writeFile(f.remoteFile('file'), 'remote edit');
+  let review = await f.review({ resolutions: [{ relativePath: 'file', source: 'skip' }] }); assert.equal(review.conflicts, 1); assert.equal(review.unresolved, 0);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  await fsp.writeFile(f.localFile('file'), 'another edit');
+  review = await f.review(); assert.equal(review.unresolved, 1); assert.equal(review.entries.find(e => e.relativePath === 'file').conflictReason, 'both-edited');
+  await f.manager.discardFolderTransfer({ planId: review.planId });
+  assert.equal(await fsp.readFile(f.remoteFile('file'), 'utf8'), 'remote edit');
+});
+
+test('persistent sync propagates reviewed one-sided file deletions in both directions', async t => {
+  const f = await persistentFixture(t); await f.initialize({ one: '1', two: '2' });
+  await fsp.unlink(f.localFile('one')); await fsp.unlink(f.remoteFile('two'));
+  const review = await f.review(); assert.equal(review.deletedFiles, 2); assert.equal(review.conflicts, 0);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error); assert.equal(result.deletedFiles, 2);
+  await assert.rejects(fsp.stat(f.localFile('two')), { code: 'ENOENT' }); await assert.rejects(fsp.stat(f.remoteFile('one')), { code: 'ENOENT' });
+  assert.equal((await f.pairs())[0].revision, 2);
+});
+
+test('persistent deletion-versus-edit conflict can preserve content or explicitly choose absence', async t => {
+  const f = await persistentFixture(t); await f.initialize({ keep: '1', remove: '2' });
+  await fsp.unlink(f.localFile('keep')); await fsp.writeFile(f.remoteFile('keep'), 'edited');
+  await fsp.unlink(f.remoteFile('remove')); await fsp.writeFile(f.localFile('remove'), 'edited');
+  let review = await f.review(); assert.equal(review.unresolved, 2); await f.manager.discardFolderTransfer({ planId: review.planId });
+  review = await f.review({ resolutions: [{ relativePath: 'keep', source: 'remote' }, { relativePath: 'remove', source: 'remote' }] });
+  assert.equal(review.copied, 1); assert.equal(review.deletedFiles, 1);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  assert.equal(await fsp.readFile(f.localFile('keep'), 'utf8'), 'edited'); await assert.rejects(fsp.stat(f.localFile('remove')), { code: 'ENOENT' });
+});
+
+test('persistent deleted directory groups changed and new descendants into one reviewed conflict', async t => {
+  const f = await persistentFixture(t); await f.initialize({ 'nested/old': 'original' });
+  await fsp.rm(f.localFile('nested'), { recursive: true }); await fsp.writeFile(f.remoteFile('nested/new'), 'new content');
+  let review = await f.review(); assert.equal(review.conflicts, 1); const conflict = review.entries.find(e => e.conflict);
+  assert.equal(conflict.relativePath, 'nested'); assert.equal(conflict.subtree, true); assert.equal(conflict.conflictReason, 'deletion-versus-edit');
+  await f.manager.discardFolderTransfer({ planId: review.planId });
+  review = await f.review({ resolutions: [{ relativePath: 'nested', source: 'local' }] }); assert.equal(review.deletedFiles, 2); assert.equal(review.deletedDirectories, 1);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  await assert.rejects(fsp.stat(f.remoteFile('nested')), { code: 'ENOENT' });
+});
+
+test('persistent unmodified directory deletion is postorder and a skipped subtree remains unresolved', async t => {
+  const f = await persistentFixture(t); await f.initialize({ 'gone/sub/file': 'same', 'conflict/file': 'same' });
+  await fsp.rm(f.localFile('gone'), { recursive: true }); await fsp.rm(f.localFile('conflict'), { recursive: true }); await fsp.writeFile(f.remoteFile('conflict/file'), 'changed');
+  let review = await f.review({ resolutions: [{ relativePath: 'conflict', source: 'skip' }] });
+  assert.equal(review.deletedFiles, 1); assert.equal(review.deletedDirectories, 2);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  assert.equal(await fsp.readFile(f.remoteFile('conflict/file'), 'utf8'), 'changed');
+  review = await f.review(); assert.equal(review.conflicts, 1); assert.equal(review.entries.find(e => e.conflict).relativePath, 'conflict');
+  await f.manager.discardFolderTransfer({ planId: review.planId });
+});
+
+test('persistent file-directory type changes require manual reconciliation and keep their old baseline', async t => {
+  const f = await persistentFixture(t); await f.initialize(); await fsp.unlink(f.localFile('file')); await fsp.mkdir(f.localFile('file')); await fsp.writeFile(f.localFile('file/child'), 'child');
+  let review = await f.review(); const conflict = review.entries.find(e => e.conflict); assert.equal(conflict.conflictReason, 'type-change'); assert.deepEqual(conflict.allowedResolutions, ['skip']);
+  await f.manager.discardFolderTransfer({ planId: review.planId });
+  await assert.rejects(f.review({ resolutions: [{ relativePath: 'file', source: 'local' }] }), /manual reconciliation/);
+  review = await f.review({ resolutions: [{ relativePath: 'file', source: 'skip' }] });
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  review = await f.review(); assert.equal(review.unresolved, 1); await f.manager.discardFolderTransfer({ planId: review.planId });
+});
+
+test('persistent review is invalidated by changed files and declined confirmation never saves a baseline', async t => {
+  let accept = false; const f = await persistentFixture(t, { confirm: async () => accept });
+  await fsp.writeFile(f.localFile('file'), 'before');
+  let review = await f.review(); assert.deepEqual(await f.manager.startFolderTransfer({ planId: review.planId }), { cancelled: true }); assert.deepEqual(await f.pairs(), []);
+  accept = true; review = await f.review(); await fsp.writeFile(f.localFile('file'), 'after');
+  await assert.rejects(f.manager.startFolderTransfer({ planId: review.planId }), /changed after review/); assert.deepEqual(await f.pairs(), []);
+});
+
+test('persistent final verification refuses an unrelated concurrent addition and leaves baseline unchanged', async t => {
+  let armed = false; const f = await persistentFixture(t, { onWrite: async ({ remote }) => { if (!armed) return; armed = false; await fsp.writeFile(path.join(remote, 'copy', 'unreviewed'), 'external'); } });
+  await f.initialize(); await fsp.writeFile(f.localFile('file'), 'changed'); armed = true;
+  const result = await f.run(await f.review()); assert.equal(result.status, 'failed'); assert.match(result.error, /final verification/);
+  assert.equal((await f.pairs())[0].revision, 1); assert.equal(await fsp.readFile(f.remoteFile('unreviewed'), 'utf8'), 'external');
+});
+
+test('persistent pair binding rejects another account, host key, roots, and stale generation after forget', async t => {
+  let account = 'fixture', fingerprint = 'key'; const f = await persistentFixture(t, { account: () => account, fingerprint: () => fingerprint });
+  const saved = await f.initialize(); account = 'different'; assert.deepEqual(await f.pairs(), []);
+  await assert.rejects(f.review({ syncPairId: saved.pairId }), /another authenticated/); account = 'fixture'; fingerprint = 'different'; assert.deepEqual(await f.pairs(), []);
+  fingerprint = 'key'; await assert.rejects(f.review({ syncPairId: saved.pairId, remotePath: '/elsewhere' }), /different folders/);
+  assert.equal(await f.manager.forgetSyncPair({ id: f.connection.id, pairId: saved.pairId, revision: saved.revision }), true);
+  assert.deepEqual(await f.pairs(), []); assert.equal(await fsp.readFile(f.localFile('file'), 'utf8'), 'original');
+  const review = await f.review(); assert.equal(review.baselineUsed, false); assert.notEqual(review.syncPair.pairId, saved.pairId); await f.manager.discardFolderTransfer({ planId: review.planId });
+});
+
+test('persistent baseline generation changed by another instance refuses launch before mutation', async t => {
+  const { createSyncBaselines } = require('../app/sync-baselines.cjs'); const f = await persistentFixture(t); await f.initialize();
+  await fsp.writeFile(f.localFile('file'), 'pending'); const review = await f.review(); const mutationCount = f.mutations.length;
+  const store = createSyncBaselines(path.join(f.root, 'sync')); const [record] = await store.load(); const held = await store.begin(record); await held.commit(record.entries); await held.release();
+  await assert.rejects(f.manager.startFolderTransfer({ planId: review.planId }), /baseline changed/);
+  assert.equal(f.mutations.length, mutationCount); assert.equal(await fsp.readFile(f.remoteFile('file'), 'utf8'), 'original');
+});
+
+test('persistent cancelled payload releases lease and never advances baseline', async t => {
+  let armed = false; let enter; const entered = new Promise(resolve => { enter = resolve; }); let unblock; const blocked = new Promise(resolve => { unblock = resolve; });
+  const f = await persistentFixture(t, { onWrite: async () => { if (!armed) return; armed = false; enter(); await blocked; } }); await f.initialize();
+  await fsp.writeFile(f.localFile('file'), Buffer.alloc(256 * 1024, 1)); armed = true;
+  const job = await f.manager.startFolderTransfer({ planId: (await f.review()).planId }); await entered;
+  const cancel = f.manager.cancel(job.transferId); unblock(); await cancel;
+  const result = await f.waitJob(job.transferId); assert.equal(result.status, 'cancelled'); assert.equal((await f.pairs())[0].revision, 1);
+  await assert.rejects(fsp.stat(path.join(f.root, 'sync', 'pairs.lock')), { code: 'ENOENT' });
+  const review = await f.review(); assert.equal(review.replaced, 1); await f.manager.discardFolderTransfer({ planId: review.planId });
+});
+
+test('persistent missing root conflict can explicitly preserve a surviving changed subtree', async t => {
+  const f = await persistentFixture(t); await f.initialize({ 'nested/file': 'original' }); await fsp.rm(path.join(f.local, 'source'), { recursive: true });
+  await fsp.writeFile(f.remoteFile('nested/file'), 'remote changed');
+  let review = await f.review(); assert.equal(review.entries.find(e => e.conflict).relativePath, ''); await f.manager.discardFolderTransfer({ planId: review.planId });
+  review = await f.review({ resolutions: [{ relativePath: '', source: 'remote' }] }); assert.equal(review.directories, 2); assert.equal(review.copied, 1);
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error); assert.equal(await fsp.readFile(f.localFile('nested/file'), 'utf8'), 'remote changed');
+});
+
+test('persistent deletion confirmation refuses a destination edit performed after the absence probe', async t => {
+  let armed = false; const f = await persistentFixture(t, { onStat: async ({ name, local }) => {
+    if (!armed || name !== '/copy/file') return; armed = false; await fsp.writeFile(path.join(local, 'source', 'file'), 'concurrent edit');
+  } }); await f.initialize(); await fsp.unlink(f.remoteFile('file')); const review = await f.review(); assert.equal(review.deletedFiles, 1);
+  // The destination check after the missing-source probe must catch this edit.
+  armed = true; const result = await f.run(review); assert.equal(result.status, 'failed'); assert.match(result.error, /changed/);
+  assert.equal(await fsp.readFile(f.localFile('file'), 'utf8'), 'concurrent edit'); assert.equal((await f.pairs())[0].revision, 1);
+});
+
+test('persistent root deletion removes nested contents before the named root and saves an empty baseline', async t => {
+  const f = await persistentFixture(t); await f.initialize({ 'nested/file': 'original' }); await fsp.rm(path.join(f.local, 'source'), { recursive: true });
+  const review = await f.review(); assert.equal(review.deletedFiles, 1); assert.equal(review.deletedDirectories, 2); assert.equal(review.entries.at(-1).relativePath, '');
+  const result = await f.run(review); assert.equal(result.status, 'completed', result.error);
+  await assert.rejects(fsp.stat(path.join(f.remote, 'copy')), { code: 'ENOENT' });
+  const next = await f.review(); assert.equal(next.baselineUsed, true); assert.equal(next.files, 0); assert.equal(next.conflicts, 0);
+  const repeated = await f.run(next); assert.equal(repeated.status, 'completed', repeated.error);
 });

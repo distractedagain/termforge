@@ -5,6 +5,9 @@ fixtures. They protect no real account, service, or production endpoint.
 
 `localhost` is trusted only by the isolated tests (or the native smoke launcher's
 `NODE_EXTRA_CA_CERTS` environment). `wrong` exercises certificate rejection on
-control and data connections. Application verification remains enabled.
+control and data connections. `localhost-rotated-cert.pem` uses the public
+`wrong-key.pem` test key with a valid localhost SAN and a distinct subject; it
+verifies that an otherwise trusted certificate rotation blocks old recovery.
+Application verification remains enabled.
 
 Certificates expire October 10, 2036. Do not use these keys outside tests.

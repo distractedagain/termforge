@@ -84,7 +84,7 @@ module.exports = async ({ window, terminals, directory }) => {
   assert.equal(path.dirname(profileDirectory), path.resolve(directory), 'Secure smoke requires a profile inside the isolated smoke directory');
   assert.equal(path.basename(profileDirectory), 'profile', 'Secure smoke cannot use a real application profile');
   const fixtureDirectory = await fsp.mkdtemp(path.join(directory, 'secure-fixture-'));
-  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, folderApprovals = 0, allowFolder = false, resumeApprovals = 0, discardApprovals = 0, editApprovals = 0, allowResume = false, allowDiscard = false, allowEdit = false, fixture, changed;
+  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, folderApprovals = 0, allowFolder = false, resumeApprovals = 0, discardApprovals = 0, editApprovals = 0, allowResume = false, allowDiscard = false, allowEdit = false, allowForgetPair = false, forgottenPairs = 0, fixture, changed;
   const originalDialog = dialog.showMessageBox, originalWrite = terminals.write;
   const writes = [], report = {};
   const secret = { name: 'Native smoke credential', username: 'native-fixture-user', password: 'Native-fixture-password-123!' };
@@ -120,19 +120,29 @@ module.exports = async ({ window, terminals, directory }) => {
       }
       if (options.title === 'Copy reviewed folder') {
         assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
-        if (options.detail.includes('Mode: copy')) { assert.match(options.detail, /Files: 2/); assert.match(options.detail, /Folders: 3/); assert.match(options.detail, /Bytes: 140000/); } else { assert.match(options.detail, /Mode: (merge|sync)/); assert.match(options.detail, /Destination-only items are retained/); }
-        assert.match(options.detail, /Completed files and folders remain/);
+        if (options.detail.includes('Mode: copy')) { assert.match(options.detail, /Files: 2/); assert.match(options.detail, /Folders: 3/); assert.match(options.detail, /Bytes: 140000/); } else { assert.match(options.detail, /Mode: (merge|sync)/); assert.match(options.detail, /Only the reviewed copies, replacements and deletions will be applied/); }
+        assert.match(options.detail, /Completed changes remain/);
         if (allowFolder) folderApprovals++;
         return { response: allowFolder ? 1 : 0 };
       }
       if (['Apply reviewed mirror','Apply reviewed two-way synchronization'].includes(options.title)) {
         assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
         if(options.title==='Apply reviewed mirror'){assert.match(options.detail,/permanently deleted/);assert.match(options.detail,/Delete files: 1/);assert.match(options.detail,/Delete folders: 1/);}
-        else assert.match(options.detail,/Both local and remote folders may change/);
+        else {
+          assert.match(options.detail,/Both local and remote folders may change/);
+          if (options.detail.includes('Saved pair: Native persistent sync') && options.detail.includes('Delete files: 1')) {
+            assert.match(options.detail,/permanently deleted/); assert.match(options.detail,/There is no undo/);
+            assert.equal(options.buttons[1],'Apply changes and deletions');
+          }
+        }
         if(allowFolder)folderApprovals++;return {response:allowFolder?1:0};
       }
       if (options.title === 'Resume retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Retained bytes: [1-9][0-9]*/); if (allowResume) resumeApprovals++; return { response: allowResume ? 1 : 0 }; }
       if (options.title === 'Discard retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Partial:/); if (allowDiscard) discardApprovals++; return { response: allowDiscard ? 1 : 0 }; }
+      if (options.title === 'Forget synchronization baseline') {
+        assert.match(options.detail, /Files on both sides remain untouched/); assert.match(options.detail, /persistent-sync/);
+        if (allowForgetPair) forgottenPairs++; return { response: allowForgetPair ? 1 : 0 };
+      }
       if (options.title === 'Save remote file') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Path: \/folder-copy\/zero\.txt/); assert.match(options.detail, /Before: [0-9]+ bytes/); assert.match(options.detail, /After: [0-9]+ bytes/); if (allowEdit) editApprovals++; return { response: allowEdit ? 1 : 0 }; }
       if (options.title === 'Delete saved credential') {
         assert.equal(options.message, `Delete “${secret.name}”?`); deletionApprovals++; return { response: 1 };
@@ -424,6 +434,100 @@ module.exports = async ({ window, terminals, directory }) => {
     assert.equal(await fsp.readFile(path.join(syncRemote,'local.txt'),'utf8'),'updated source');await assert.rejects(fsp.stat(path.join(syncRemote,'remove')),{code:'ENOENT'});
     report.nativeTwoWaySynchronization=true;report.nativeTwoWayExplicitConflict=true;report.nativeMirror=true;report.nativeMirrorNativeDecline=true;
     console.log('PASS native two-way direction choices and reviewed mirror deletions with decline');
+    const persistentLocal=path.join(fixture.local,'persistent-sync'),persistentRemote=path.join(fixture.remote,'persistent-sync');
+    await fsp.mkdir(persistentLocal);await fsp.mkdir(persistentRemote);
+    await Promise.all([persistentLocal,persistentRemote].flatMap(root=>[fsp.writeFile(path.join(root,'file.txt'),'common baseline'),fsp.writeFile(path.join(root,'obsolete.txt'),'reviewed deletion target')]));
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke;
+      if((await window.termforge.transferListSyncPairs({id:state.folderConnection})).length)throw new Error('Isolated native sync history must begin empty');
+      const input={id:state.folderConnection,direction:'upload',mode:'two-way',persistentSync:true,pairName:'Native persistent sync',localPath:${JSON.stringify(persistentLocal)},remotePath:'/persistent-sync'};
+      const review=await window.termforge.transferPrepareFolder(input);
+      if(!review.syncPair?.isNew||review.baselineUsed||review.files!==0)throw new Error('First converged sync must explicitly initialize a new baseline');
+      state.syncPairId=review.syncPair.pairId;
+      const job=await window.termforge.transferStartFolder({planId:review.planId});
+      await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'initialize persistent sync');
+      if(state.jobs[job.transferId].status!=='completed')throw new Error('Persistent sync initialization failed: '+JSON.stringify(state.jobs[job.transferId]));
+      const pairs=await window.termforge.transferListSyncPairs({id:state.folderConnection});
+      if(pairs.length!==1||pairs[0].pairId!==state.syncPairId||!pairs[0].lastSyncedAt)throw new Error('Committed baseline missing from saved pairs');
+      state.syncRevision=pairs[0].revision;
+      await window.termforge.transferClose(state.folderConnection);
+      const connecting=window.termforge.transferOpen({profile:${JSON.stringify(profile)}});
+      ${respondToPassword}
+      const connection=await connecting;state.folderConnection=connection.id;state.transferIds.push(connection.id);
+      const restored=await window.termforge.transferListSyncPairs({id:connection.id});
+      if(restored.length!==1||restored[0].pairId!==state.syncPairId||restored[0].revision!==state.syncRevision)throw new Error('Reconnect lost or advanced the persistent baseline');
+    `);
+    for(const [side,content,direction] of [['local','changed locally','upload'],['remote','changed remotely','download']]) {
+      await fsp.writeFile(path.join(side==='local'?persistentLocal:persistentRemote,'file.txt'),content);
+      await evaluate(`
+        const state=window.__termforgeSecureSmoke;
+        const review=await window.termforge.transferPrepareFolder({id:state.folderConnection,direction:'upload',mode:'two-way',persistentSync:true,syncPairId:state.syncPairId,localPath:${JSON.stringify(persistentLocal)},remotePath:'/persistent-sync'});
+        const entry=review.entries.find(item=>item.relativePath==='file.txt');
+        if(!review.baselineUsed||review.unresolved!==0||review.files!==1||entry?.action!=='replace'||entry.direction!==${JSON.stringify(direction)})throw new Error('Baseline did not infer the one-sided change: '+JSON.stringify(review));
+        const job=await window.termforge.transferStartFolder({planId:review.planId});
+        await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'apply persistent ${direction}');
+        if(state.jobs[job.transferId].status!=='completed'||state.jobs[job.transferId].filesCompleted!==1)throw new Error('Persistent direction failed: '+JSON.stringify(state.jobs[job.transferId]));
+        const pairs=await window.termforge.transferListSyncPairs({id:state.folderConnection});
+        if(pairs.length!==1||pairs[0].revision<=state.syncRevision)throw new Error('Verified sync did not advance baseline revision');
+        state.syncRevision=pairs[0].revision;
+      `);
+      for(const root of [persistentLocal,persistentRemote])assert.equal(await fsp.readFile(path.join(root,'file.txt'),'utf8'),content);
+    }
+    await fsp.unlink(path.join(persistentLocal,'obsolete.txt'));allowFolder=false;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke;
+      const input={id:state.folderConnection,direction:'upload',mode:'two-way',persistentSync:true,syncPairId:state.syncPairId,localPath:${JSON.stringify(persistentLocal)},remotePath:'/persistent-sync'};
+      const review=await window.termforge.transferPrepareFolder(input),deletions=review.entries.filter(entry=>entry.action.startsWith('delete-'));
+      if(!review.baselineUsed||review.unresolved!==0||review.files!==0||review.deletedFiles!==1||review.deletedDirectories!==0||deletions.length!==1||deletions[0].relativePath!=='obsolete.txt'||deletions[0].direction!=='upload')throw new Error('Persistent deletion review did not identify exactly the removed local file: '+JSON.stringify(review));
+      const result=await window.termforge.transferStartFolder({planId:review.planId});if(!result.cancelled)throw new Error('Persistent deletion native decline was ignored');
+      const pair=(await window.termforge.transferListSyncPairs({id:state.folderConnection}))[0];
+      if(pair.revision!==state.syncRevision)throw new Error('Declined persistent deletion advanced the baseline');
+    `);
+    assert.equal(await fsp.readFile(path.join(persistentRemote,'obsolete.txt'),'utf8'),'reviewed deletion target');
+    assert.equal(await fsp.readFile(path.join(persistentRemote,'file.txt'),'utf8'),'changed remotely');
+    allowFolder=true;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke;
+      const review=await window.termforge.transferPrepareFolder({id:state.folderConnection,direction:'upload',mode:'two-way',persistentSync:true,syncPairId:state.syncPairId,localPath:${JSON.stringify(persistentLocal)},remotePath:'/persistent-sync'});
+      if(review.deletedFiles!==1||review.deletedDirectories!==0||review.files!==0||review.unresolved!==0)throw new Error('Persistent deletion changed after decline');
+      const job=await window.termforge.transferStartFolder({planId:review.planId});
+      await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'apply persistent deletion');
+      const result=state.jobs[job.transferId];if(result.status!=='completed'||result.deletedFiles!==1||result.deletedDirectories!==0||result.filesCompleted!==0)throw new Error('Approved persistent deletion failed: '+JSON.stringify(result));
+      const pair=(await window.termforge.transferListSyncPairs({id:state.folderConnection}))[0];
+      if(pair.revision<=state.syncRevision)throw new Error('Verified persistent deletion did not advance baseline');state.syncRevision=pair.revision;
+    `);
+    for(const root of [persistentLocal,persistentRemote]) {
+      assert.deepEqual(await fsp.readdir(root),['file.txt']);
+      assert.equal(await fsp.readFile(path.join(root,'file.txt'),'utf8'),'changed remotely');
+    }
+    report.nativePersistentDeletionReview=true;
+    await fsp.writeFile(path.join(persistentLocal,'file.txt'),'local divergent edit');await fsp.writeFile(path.join(persistentRemote,'file.txt'),'remote divergent edit');
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke,input={id:state.folderConnection,direction:'upload',mode:'two-way',persistentSync:true,syncPairId:state.syncPairId,localPath:${JSON.stringify(persistentLocal)},remotePath:'/persistent-sync'};
+      const unresolved=await window.termforge.transferPrepareFolder(input);
+      if(unresolved.unresolved!==1||!unresolved.entries.find(item=>item.relativePath==='file.txt')?.conflictReason)throw new Error('Concurrent baseline changes did not require a conflict decision');
+      await window.termforge.transferDiscardFolder({planId:unresolved.planId});
+      const skipped=await window.termforge.transferPrepareFolder({...input,resolutions:[{relativePath:'file.txt',source:'skip'}]});
+      const job=await window.termforge.transferStartFolder({planId:skipped.planId});
+      await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'skip persistent conflict');
+      if(state.jobs[job.transferId].status!=='completed'||state.jobs[job.transferId].filesCompleted!==0)throw new Error('Skipped conflict unexpectedly copied files');
+      const again=await window.termforge.transferPrepareFolder(input);
+      if(again.unresolved!==1||!again.baselineUsed)throw new Error('Skipped divergent conflict was silently recorded as synchronized');
+      await window.termforge.transferDiscardFolder({planId:again.planId});
+      const pair=(await window.termforge.transferListSyncPairs({id:state.folderConnection}))[0];state.syncRevision=pair.revision;
+      const declined=await window.termforge.transferForgetSyncPair({id:state.folderConnection,pairId:state.syncPairId,revision:state.syncRevision});
+      if(declined.forgotten||(await window.termforge.transferListSyncPairs({id:state.folderConnection})).length!==1)throw new Error('Native baseline forget decline was ignored');
+    `);
+    allowForgetPair=true;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke;
+      const forgotten=await window.termforge.transferForgetSyncPair({id:state.folderConnection,pairId:state.syncPairId,revision:state.syncRevision});
+      if(!forgotten.forgotten||(await window.termforge.transferListSyncPairs({id:state.folderConnection})).length)throw new Error('Approved baseline forget did not remove only its record');
+    `);
+    assert.equal(forgottenPairs,1);
+    assert.equal(await fsp.readFile(path.join(persistentLocal,'file.txt'),'utf8'),'local divergent edit');assert.equal(await fsp.readFile(path.join(persistentRemote,'file.txt'),'utf8'),'remote divergent edit');
+    report.nativePersistentTwoWayBaseline=true;report.nativeSyncSkippedConflictPreserved=true;report.nativeSyncBaselineForgetApproval=true;
+    console.log('PASS native persistent sync reconnect, inferred changes, skipped conflict preservation and baseline-only forgetting');
     fixture.controls.readDelayMs = 10;
     await evaluate(`
       const state = window.__termforgeSecureSmoke;
@@ -470,7 +574,7 @@ module.exports = async ({ window, terminals, directory }) => {
       assert.deepEqual(await evaluate('return await window.termforge.credentialList();'), []); assert.equal(deletionApprovals, 1);
     }
     const observed = await evaluate(`const state = window.__termforgeSecureSmoke; return {prompts:state.prompts,closed:state.closed,output:Object.values(state.output).join(''),jobs:Object.values(state.jobs).map(job => ({status:job.status,bytes:job.bytes}))};`);
-    assert.equal(observed.prompts.length, 4); assert.deepEqual([...observed.closed].sort(), observed.prompts.map(prompt => prompt.id).sort());
+    assert.equal(observed.prompts.length, 5); assert.deepEqual([...observed.closed].sort(), observed.prompts.map(prompt => prompt.id).sort());
     assert.ok(observed.prompts.every(prompt => prompt.kind === 'password' && prompt.prompts.length === 1 && prompt.prompts[0].echo === false));
     assert.ok(!JSON.stringify(observed).includes(secret.password) && !observed.output.includes('cancelled-fixture-secret'));
     assert.equal(writes.length, 1, 'Only the explicit command probe may reach terminalWrite'); assert.equal(writes[0].data, 'native-managed-probe\r');

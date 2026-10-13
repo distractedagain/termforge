@@ -93,6 +93,9 @@ jobs:
       - name: Check two-way conflicts, reviewed mirroring, FTP and FTPS controls
         if: runner.os == 'Linux'
         run: npm run test:advanced-transfers-ui
+      - name: Check FTP folder recovery and saved synchronization pairs
+        if: runner.os == 'Linux'
+        run: npm run test:persistent-transfers-ui
       - name: Install isolated localhost automation test runtime
         if: runner.os != 'Windows'
         run: python -m pip install ansible-core==2.21.5 ansible-runner==2.4.3

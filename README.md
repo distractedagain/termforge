@@ -28,11 +28,19 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. ForgeCRT is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.17 — FTP recovery and saved synchronization
+
+FTP, explicit FTPS and implicit FTPS now support reviewed folder upload/download and merging, plus durable file/folder pause and resume after reconnecting or restarting. Recovery verifies the source, retained bytes, completed children and endpoint/account; FTPS also checks the certificate identity.
+
+SFTP **Two-way** can remember named folder pairs and their common content baseline. Later reviews infer one-sided changes and deletions; concurrent edits and deletion conflicts need explicit choices. Deletions are listed before native confirmation, skipped conflicts retain their history, and partial runs do not advance the baseline. Saved pairs can load their folders or forget their baseline without deleting files.
+
+Version 0.17 is undergoing release verification; the download above remains the verified 0.16 release until publication. See [0.17 release notes](docs/RELEASE-v0.17.0.md), [verification](docs/VERIFICATION-v0.17.0.md) and [workflow limits](docs/SECURE-CONNECTIONS.md). Saved synchronization remains SFTP-only and explicit; whole-queue persistence, automatic reconnect, FTP sync and metadata replication remain future work.
+
 ## New in 0.16 — ForgeCRT and expanded file workflows
 
 This preview adopts the **ForgeCRT** display name and adds durable SFTP folder recovery, SCP transfers that resume verified suffixes over SFTP, additive two-way synchronization with explicit conflict choices, and reviewed one-way mirroring. FTP, explicit FTPS and implicit FTPS add a separate passive-mode individual-file workflow with certificate validation and native approval before unencrypted FTP connections. These are original implementations; full SecureFX parity remains a goal.
 
-Two-way synchronization does not propagate deletions. Mirroring permanently removes only the target-only paths listed in its review; it stops on changed files or newly nonempty directories. Folder operations are sequences of commits, so completed changes remain after interruption. FTP/FTPS does not yet support folders, synchronization, resume or remote editing. See [the 0.16 release notes](docs/RELEASE-v0.16.0.md) and [file-transfer guide](docs/SECURE-CONNECTIONS.md).
+In version 0.16, two-way synchronization does not propagate deletions. Mirroring permanently removes only the target-only paths listed in its review; it stops on changed files or newly nonempty directories. Folder operations are sequences of commits, so completed changes remain after interruption. At that release, FTP/FTPS does not yet support folders, synchronization, resume or remote editing. See [the 0.16 release notes](docs/RELEASE-v0.16.0.md) and [file-transfer guide](docs/SECURE-CONNECTIONS.md).
 
 All four platform CI jobs and installer builds passed at source `cab6f7edc9d6cddf20381f822b2dc3da95f17026`. Both Macs and Linux passed 550 backend tests each; Windows passed 532 with 18 expected platform skips. Linux passed 300 interface checks and native Electron tests for the new workflows, branding and preserved storage identities. Public verification confirmed the source tag, thirteen assets and twelve checksum entries; see [0.16 verification](docs/VERIFICATION-v0.16.0.md). Installed-package credential unlocking after the rename remains unverified; see [storage compatibility](docs/BRANDING.md).
 

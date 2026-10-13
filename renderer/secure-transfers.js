@@ -8,6 +8,7 @@ function appendPath(parent, name, remote) { const separator = remote || !parent.
 function parentPath(path, remote) { const separator = remote || !path.includes('\\') ? '/' : '\\'; const parts = path.replace(/[\\/]+$/, '').split(separator); parts.pop(); const result = parts.join(separator); if (separator === '\\' && /^[A-Za-z]:$/.test(result)) return `${result}\\`; if (separator === '\\' && path.startsWith('\\\\') && parts.length < 4) return path; return result || (separator === '/' ? '/' : path.slice(0, 3)); }
 export function createSecureTransferUi({ api, toast, confirmAction }) {
   let session = null; let connecting = false; let closing = false; let selected = {local:new Set(), remote:new Set()}; const anchors = {local:null,remote:null}; let pendingStart = false; let profileKey = ''; let paths = {local:'', remote:'.'}; let listings = {local:[], remote:[]}; const revisions = {local:0, remote:0}; const loading = {local:false,remote:false}; const jobs = new Map(); let remoteOperation = null; let folderOperation = null; let editor = null; const pendingJobs = new Set(); const clearedJobs = new Set(); const ftpRefresh = new Set(); const closedConnections = new Set();
+  let syncPairs = []; let syncPairsRevision = 0; let syncPairsLoading = false; let syncPairPending = false;
   const report = exception => { $('file-transfer-error').textContent = exception?.message || String(exception); $('file-transfer-error').hidden = false; };
   const attempt = callback => Promise.resolve().then(callback).catch(report);
   const selectedEntries = side => listings[side].filter(entry => selected[side].has(entry.name));
@@ -16,34 +17,50 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
   const reviewOpen = () => Boolean(remoteOperation || folderOperation || editor);
   const isFtp = () => ['ftp','ftps','ftps-implicit'].includes(session?.protocol);
   const can = feature => session?.capabilities?.[feature] !== false;
-  const supportsResume = () => ['transferPause','transferResume','transferDiscardPartial','transferListJobs'].every(name => typeof api?.[name] === 'function');
+  const supportsResume = () => can('resume') && ['transferPause','transferResume','transferDiscardPartial','transferListJobs'].every(name => typeof api?.[name] === 'function');
   const supportsEditor = () => can('remoteEditing') && ['remoteEditOpen','remoteEditPrepareSave','remoteEditSave','remoteEditDiscardSave','remoteEditClose'].every(name => typeof api?.[name] === 'function');
-  const matchingConnection = job => Boolean(session && !isFtp() && (job.host ? job.host.toLowerCase() === session.host.toLowerCase() && Number(job.port || 22) === Number(session.port || 22) : job.id === session.id));
+  const ftpProtocol = protocol => ['ftp','ftps','ftps-implicit'].includes(protocol);
+  const matchingConnection = job => Boolean(session && ftpProtocol(job.protocol) === isFtp() && (!isFtp() || job.protocol === session.protocol)
+    && (job.host ? job.host.toLowerCase() === session.host.toLowerCase() && Number(job.port || (ftpProtocol(job.protocol) ? 21 : 22)) === Number(session.port || (isFtp() ? 21 : 22)) : job.id === session.id));
+  const supportsPersistentSync = () => !isFtp() && typeof api?.transferListSyncPairs === 'function' && typeof api?.transferForgetSyncPair === 'function';
+  const sameRoots = pair => pair?.localPath === paths.local && pair?.remotePath === paths.remote;
+  const chosenSyncPair = () => syncPairs.find(pair => pair.pairId === $('file-sync-pair')?.value);
+
   const supportsFolders = () => can('folders') && typeof api?.transferPrepareFolder === 'function' && typeof api?.transferStartFolder === 'function' && typeof api?.transferDiscardFolder === 'function';
   const activeTransfers = () => [...jobs.values()].some(job => job.id === session?.id && busy(job.status));
   function updateButtons() {
     for (const [side, id, label] of [['local','file-upload','Upload →'],['remote','file-download','← Download']]) {
       const entries = selectedEntries(side); const folder = entries.length === 1 && entries[0].type === 'directory';
-      const supported = folder ? supportsFolders() && $('file-transfer-protocol').value === 'sftp' && !activeTransfers() && !loading.local && !loading.remote : entries.length && entries.every(entry => entry.type === 'file');
-      $(id).disabled = !session || !supported || connecting || closing || pendingStart || reviewOpen() || loading.local || loading.remote;
+      const supported = folder ? supportsFolders() && (isFtp() || $('file-transfer-protocol').value === 'sftp') && !activeTransfers() && !loading.local && !loading.remote : entries.length && entries.every(entry => entry.type === 'file');
+      $(id).disabled = !session || !supported || connecting || closing || pendingStart || syncPairPending || reviewOpen() || loading.local || loading.remote;
       $(id).textContent = folder ? `${side === 'local' ? 'Upload folder →' : '← Download folder'}` : entries.length > 1 ? `${side === 'local' ? 'Upload' : 'Download'} ${entries.length} files ${side === 'local' ? '→' : '←'}` : label;
-      $(id).title = folder && $('file-transfer-protocol').value !== 'sftp' ? 'Choose SFTP to copy a folder.' : folder ? 'Review this folder and its contents before copying.' : '';
+      $(id).title = folder && !isFtp() && $('file-transfer-protocol').value !== 'sftp' ? 'Choose SFTP to copy a folder.' : folder ? 'Review this folder and its contents before copying.' : '';
     }
-    $('file-transfer-disconnect').disabled = !session || closing || reviewOpen();
+    $('file-transfer-disconnect').disabled = !session || closing || syncPairPending || reviewOpen();
     const remoteSelection = selectedEntries('remote');
-    const operationsDisabled = !session || connecting || closing || pendingStart || loading.remote || reviewOpen() || activeTransfers();
+    const operationsDisabled = !session || connecting || closing || pendingStart || syncPairPending || loading.remote || reviewOpen() || activeTransfers();
     const singleTarget = remoteSelection.length === 1 && ['file','directory'].includes(remoteSelection[0].type);
     for (const operation of ['mkdir','rename','delete','chmod']) $(`file-remote-${operation}`).disabled = operationsDisabled || !can('remoteOperations') || (operation !== 'mkdir' && !singleTarget);
-    for (const side of ['local','remote']) for (const control of $(`file-${side}-form`).querySelectorAll('input,button')) control.disabled = reviewOpen() || closing || isFtp() && activeTransfers() || side === 'remote' && !session;
-    for (const control of document.querySelectorAll('#file-transfer-jobs button')) control.disabled = reviewOpen() || pendingJobs.has(control.dataset.transferId) || control.dataset.needsConnection === 'true' && !matchingConnection(jobs.get(control.dataset.transferId) || {});
+    for (const side of ['local','remote']) for (const control of $(`file-${side}-form`).querySelectorAll('input,button')) control.disabled = reviewOpen() || closing || syncPairPending || isFtp() && activeTransfers() || side === 'remote' && !session;
+    for (const control of document.querySelectorAll('#file-transfer-jobs button')) control.disabled = reviewOpen() || syncPairPending || pendingJobs.has(control.dataset.transferId) || control.dataset.needsConnection === 'true' && !matchingConnection(jobs.get(control.dataset.transferId) || {});
     $('file-remote-edit').disabled = operationsDisabled || remoteSelection.length !== 1 || remoteSelection[0]?.type !== 'file' || !supportsEditor();
-    for (const control of document.querySelectorAll('.file-folder-workflows select,.file-folder-workflows button')) control.disabled = operationsDisabled || loading.local || $('file-transfer-protocol').value !== 'sftp' || !supportsFolders();
+    for (const control of document.querySelectorAll('.file-folder-workflows select,.file-folder-workflows button,.file-folder-workflows input')) control.disabled = operationsDisabled || loading.local || (!isFtp() && $('file-transfer-protocol').value !== 'sftp') || !supportsFolders();
+    for (const control of document.querySelectorAll('.file-sync-actions select,.file-sync-actions button')) control.disabled ||= !can('synchronization') || syncPairsLoading;
+    $('file-sync-pairs').hidden = !supportsPersistentSync() || $('file-sync-mode').value !== 'two-way';
+    const selectedPair = chosenSyncPair();
+    for (const control of $('file-sync-pairs').querySelectorAll('input,select,button')) control.disabled ||= syncPairsLoading;
+    $('file-sync-pair').disabled ||= !$('file-sync-persistent').checked;
+    $('file-sync-pair-load').disabled ||= !selectedPair || sameRoots(selectedPair) || !$('file-sync-persistent').checked;
+    $('file-sync-pair-forget').disabled ||= !selectedPair;
+    $('file-sync-pair-name').disabled ||= Boolean(selectedPair) || !$('file-sync-persistent').checked;
+    $('file-sync-pair-status').textContent = syncPairsLoading ? 'Loading saved synchronization pairs…' : selectedPair ? `${selectedPair.name} · revision ${selectedPair.revision}${sameRoots(selectedPair) ? '' : ' · Load its folders before reviewing'}` : 'A baseline is saved only after the reviewed synchronization succeeds.';
+
     $('file-transfer-protocol').disabled = isFtp() || reviewOpen() || pendingStart;
     $('file-transfer-protocol').closest('label').hidden = isFtp();
-    $('file-transfer-resumable').disabled = isFtp() || reviewOpen() || pendingStart || !supportsResume();
-    $('file-transfer-resumable').closest('label').hidden = isFtp();
-    $('file-ftp-toggle').disabled = connecting || closing || reviewOpen();
-    for (const control of $('file-ftp-form').querySelectorAll('input,select,button')) control.disabled = connecting || closing || reviewOpen();
+    $('file-transfer-resumable').disabled = reviewOpen() || syncPairPending || pendingStart || !supportsResume();
+    $('file-transfer-resumable').closest('label').hidden = !supportsResume();
+    $('file-ftp-toggle').disabled = connecting || closing || syncPairPending || reviewOpen();
+    for (const control of $('file-ftp-form').querySelectorAll('input,select,button')) control.disabled = connecting || closing || syncPairPending || reviewOpen();
     for (const id of ['file-transfer-hide','file-transfer-done']) $(id).disabled = reviewOpen();
     $('file-clear-jobs').disabled = reviewOpen() || ![...jobs.values()].some(job => !busy(job.status) && !retained(job));
     $('file-transfer-status').textContent = connecting ? 'Connecting…' : session ? `${session.host}:${session.port} · ${isFtp() ? session.protocol === 'ftp' ? 'unencrypted FTP' : 'TLS-encrypted FTPS' : 'encrypted SSH connection'}` : 'Disconnected';
@@ -73,7 +90,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     $(`file-${side}-count`).textContent = `${listings[side].length} items`;
   }
   async function navigate(side, requested, operationRefresh = false) {
-    if (reviewOpen() && !operationRefresh) return;
+    if ((reviewOpen() || syncPairPending) && !operationRefresh) return;
     if (side === 'remote' && !session) return;
     const revision = ++revisions[side]; const connection = session;
     loading[side] = true; updateButtons();
@@ -95,11 +112,11 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (job.kind === 'folder') {
         detail.append(node('small','transfer-folder-destination',`Destination: ${job.direction === 'upload' ? job.remotePath : job.localPath}`));
         detail.append(node('small','transfer-folder-progress',`${Number(job.filesCompleted) || 0} / ${Number(job.filesTotal) || 0} files · ${Number(job.directoriesCreated) || 0} / ${Number(job.directoriesTotal) || 0} folders`));
-        if (job.mode === 'mirror') detail.append(node('small','transfer-folder-progress',`${Number(job.deletedFiles) || 0} files and ${Number(job.deletedDirectories) || 0} folders deleted`));
+        if (job.mode === 'mirror' || job.persistentSync) detail.append(node('small','transfer-folder-progress',`${Number(job.deletedFiles) || 0} files and ${Number(job.deletedDirectories) || 0} folders deleted`));
         if (job.currentPath) detail.append(node('small','transfer-current-path',job.currentPath));
         if (['failed','cancelled'].includes(job.status)) detail.append(node('small','transfer-job-warning','Files and folders already created remain at the destination. Inspect them before starting a new copy.'));
       }
-      if (retained(job)) { detail.append(node('small','transfer-job-warning', `${bytes(job.retainedBytes ?? job.bytes)} retained for recovery${job.host ? ` · ${job.host}:${job.port || 22}` : ''}. ${job.forgetOnly ? job.kind === 'folder' ? 'Completed files and the current partial copy are retained. Forgetting the checkpoint leaves files untouched for inspection.' : 'The transfer outcome is uncertain. Forgetting the checkpoint leaves files untouched for inspection.' : job.reason || 'Resume verifies the source and partial content before continuing.'}`)); if (!matchingConnection(job)) detail.append(node('small','transfer-job-warning',job.forgetOnly ? 'This checkpoint can be forgotten here; retained files are not deleted.' : job.direction === 'download' ? 'Connect to the same server to resume. The local partial copy can be discarded here.' : 'Connect to the same server to resume or discard its partial transfer.')); }
+      if (retained(job)) { detail.append(node('small','transfer-job-warning', `${job.retainedBytesVerified === false ? 'Server-retained bytes will be verified when resuming' : `${bytes(job.retainedBytes ?? job.bytes)} retained for recovery`}${job.host ? ` · ${job.host}:${job.port || 22}` : ''}. ${job.forgetOnly ? job.kind === 'folder' ? 'Completed files and the current partial copy are retained. Forgetting the checkpoint leaves files untouched for inspection.' : job.resumeAvailable === false ? 'The transfer outcome is uncertain. Forgetting the checkpoint leaves files untouched for inspection.' : 'Resume verifies the source and partial content. Forgetting the checkpoint leaves files untouched.' : job.reason || 'Resume verifies the source and partial content before continuing.'}`)); if (!matchingConnection(job)) detail.append(node('small','transfer-job-warning',job.forgetOnly ? 'This checkpoint can be forgotten here; retained files are not deleted.' : job.direction === 'download' ? 'Connect to the same server to resume. The local partial copy can be discarded here.' : 'Connect to the same server to resume or discard its partial transfer.')); }
       if (job.warning) detail.append(node('small', 'transfer-job-warning', job.warning));
       const progress = node('progress'); progress.max = Number(job.total) || 1; progress.value = job.status === 'completed' ? progress.max : Number(job.bytes) || 0; progress.setAttribute('aria-label', `Transfer progress for ${filename}`); detail.append(progress);
       row.append(detail, node('span', 'transfer-job-size', `${bytes(job.bytes)}${job.total ? ` / ${bytes(job.total)}` : ''}`));
@@ -108,7 +125,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (retained(job) && supportsResume() && !busy(job.status)) { if (job.resumeAvailable !== false) action('Resume',() => api.transferResume({transferId:job.transferId,id:session.id}),true); action(job.forgetOnly ? 'Forget checkpoint' : 'Discard partial',async () => { const result = await api.transferDiscardPartial({transferId:job.transferId,...(matchingConnection(job) ? {id:session.id} : {})}); if (result?.cancelled) return; if (!result?.discarded) throw new Error('The retained partial transfer was not discarded. Refresh its recovery status before retrying.'); if (jobs.get(job.transferId) === job) jobs.set(job.transferId,{...job,status:'cancelled',resumable:false,resumeAvailable:false,retainedBytes:0,reason:'',warning:result.retainedFiles?.length ? `Recovery record removed; these files remain for inspection: ${result.retainedFiles.join(', ')}` : ''}); else if (result.retainedFiles?.length && jobs.has(job.transferId)) jobs.set(job.transferId,{...jobs.get(job.transferId),warning:`Recovery record removed; these files remain for inspection: ${result.retainedFiles.join(', ')}`}); return result; },job.direction === 'upload' && !job.forgetOnly); }
       root.append(row);
     }
-    if (!jobs.size) root.append(node('p', 'field-note', 'Select files or one folder, then choose Upload or Download. Folder copies use SFTP and open a review first. Use Command / Ctrl-click to select multiple files.'));
+    if (!jobs.size) root.append(node('p', 'field-note', 'Select files or one folder, then choose Upload or Download. Folder copies use SFTP or FTP/FTPS and open a review first. Use Command / Ctrl-click to select multiple files.'));
     $('file-clear-jobs').disabled = reviewOpen() || ![...jobs.values()].some(job => !busy(job.status) && !retained(job));
   }
   function flushFtpRefresh() {
@@ -118,7 +135,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
   }
   async function start(direction) {
     const source = direction === 'upload' ? 'local' : 'remote'; const entries = selectedEntries(source); const connection = session;
-    if (!connection || reviewOpen() || pendingStart || loading[source] || !entries.length) return;
+    if (!connection || reviewOpen() || syncPairPending || pendingStart || loading[source] || !entries.length) return;
     if (entries.length === 1 && entries[0].type === 'directory') { await beginFolderTransfer(direction); return; }
     if (entries.some(entry => entry.type !== 'file')) return;
     const localDirectory = paths.local; const remoteDirectory = paths.remote; const protocol = isFtp() ? connection.protocol : $('file-transfer-protocol').value;
@@ -127,12 +144,49 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       for (const entry of entries) {
         if (session !== connection) break;
         const request = {id:connection.id,direction,protocol,localPath:appendPath(localDirectory,entry.name,false),remotePath:appendPath(remoteDirectory,entry.name,true)};
-        if (['sftp','scp'].includes(protocol) && supportsResume() && $('file-transfer-resumable').checked) request.resumable = true;
+        if (supportsResume() && $('file-transfer-resumable').checked) request.resumable = true;
         const result = await api.transferStart(request);
         if (!jobs.has(result.transferId)) jobs.set(result.transferId, {...request,host:connection.host,port:connection.port,transferId:result.transferId,status:'queued',bytes:0,total:entry.size,...result});
         renderJobs();
       }
     } finally { pendingStart = false; updateButtons(); flushFtpRefresh(); }
+  }
+  function renderSyncPairs() {
+    const select = $('file-sync-pair'); if (!select) return;
+    const previous = select.value; select.replaceChildren();
+    const fresh = node('option','','New pair for current folders'); fresh.value = ''; select.append(fresh);
+    for (const pair of syncPairs) { const option = node('option','',pair.name); option.value = pair.pairId; select.append(option); }
+    select.value = syncPairs.some(pair => pair.pairId === previous) ? previous : syncPairs.find(sameRoots)?.pairId || '';
+  }
+  async function refreshSyncPairs() {
+    const revision = ++syncPairsRevision; const connection = session;
+    if (!connection || !supportsPersistentSync()) { syncPairs = []; syncPairsLoading = false; renderSyncPairs(); updateButtons(); return; }
+    syncPairsLoading = true; updateButtons();
+    try {
+      const result = await api.transferListSyncPairs({id:connection.id});
+      if (revision !== syncPairsRevision || connection !== session) return;
+      if (!Array.isArray(result)) throw new Error('Could not read saved synchronization pairs.');
+      syncPairs = result; renderSyncPairs();
+    } finally { if (revision === syncPairsRevision) { syncPairsLoading = false; updateButtons(); } }
+  }
+  async function loadSyncPair() {
+    const pair = chosenSyncPair(); const connection = session;
+    if (!pair || !connection || syncPairPending || reviewOpen() || activeTransfers() || loading.local || loading.remote) return;
+    syncPairPending = true; updateButtons();
+    try {
+      await navigate('local',pair.localPath,true);
+      if (connection !== session) throw new Error('The connection changed while loading the saved pair.');
+      await navigate('remote',pair.remotePath,true);
+    } finally { syncPairPending = false; updateButtons(); }
+  }
+  async function forgetSyncPair() {
+    const pair = chosenSyncPair(); const connection = session;
+    if (!pair || !connection || syncPairPending || reviewOpen() || activeTransfers() || loading.local || loading.remote) return;
+    syncPairPending = true; updateButtons();
+    try {
+      const result = await api.transferForgetSyncPair({id:connection.id,pairId:pair.pairId,revision:pair.revision});
+      if (connection === session) { await refreshSyncPairs(); if (result?.forgotten) toast('Synchronization baseline forgotten. Files were kept.'); }
+    } finally { syncPairPending = false; updateButtons(); }
   }
   function folderMessage(message, error = false) {
     $('folder-transfer-status').textContent = error ? '' : message;
@@ -167,7 +221,16 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     const add = (label,value) => fields.append(node('dt','',label),node('dd','',String(value)));
     add('Server',`${plan.host}:${plan.port}`); add('Direction',operation.mode === 'two-way' ? 'Both directions, with explicit conflict choices' : plan.direction === 'upload' ? 'This computer → Remote server' : 'Remote server → This computer');
     add(operation.mode === 'two-way' ? 'Local folder' : 'Source folder',operation.mode === 'two-way' ? operation.request.localPath : plan.sourceRoot); add(operation.mode === 'two-way' ? 'Remote folder' : operation.mode === 'copy' ? 'New destination' : 'Destination folder',operation.mode === 'two-way' ? operation.request.remotePath : plan.destinationRoot);
-    if (operation.mode !== 'copy') { add('Operation',operation.mode === 'mirror' ? 'Mirror contents with target-only deletions' : operation.mode === 'two-way' ? 'Two-way content reconciliation' : operation.mode === 'sync' ? 'One-way content synchronization' : 'Merge folder'); add('Existing files',operation.mode === 'two-way' ? 'Each differing file needs a local, remote or skip choice' : ['sync','mirror'].includes(operation.mode) ? 'Equal files skipped; differing files replaced after review' : operation.conflictPolicy === 'replace' ? 'Replace changed files after review' : 'Skip existing files'); const count = action => plan.entries.filter(entry => entry.type === 'file' && entry.action === action).length; add('Planned actions',`${plan.copied ?? count('copy')} files copied · ${plan.replaced ?? count('replace')} files replaced · ${plan.skipped ?? count('skip')} files skipped · ${plan.entries.filter(entry => entry.action === 'mkdir').length} folders created`); if (operation.mode === 'mirror') add('Permanent deletions',`${Number(plan.deletedFiles) || 0} files · ${Number(plan.deletedDirectories) || 0} folders`); else add('Target-only items',operation.mode === 'two-way' ? 'Copied to the missing side; deletions are not propagated' : `${Number(plan.kept) || 0} retained · nothing is deleted`); if (operation.mode === 'two-way') add('Conflicts',`${Number(plan.conflicts) || 0} differing files · ${Number(plan.unresolved) || 0} unresolved`); }
+    if (operation.mode !== 'copy') {
+      add('Operation',operation.mode === 'mirror' ? 'Mirror contents with target-only deletions' : operation.mode === 'two-way' ? plan.persistentSync ? 'Persistent two-way synchronization' : 'Two-way content reconciliation' : operation.mode === 'sync' ? 'One-way content synchronization' : 'Merge folder');
+      add('Existing files',operation.mode === 'two-way' ? plan.persistentSync ? 'One-sided changes follow the baseline; conflicting changes need a choice' : 'Each differing file needs a local, remote or skip choice' : ['sync','mirror'].includes(operation.mode) ? 'Equal files skipped; differing files replaced after review' : operation.conflictPolicy === 'replace' ? 'Replace changed files after review' : 'Skip existing files');
+      const count = action => plan.entries.filter(entry => entry.type === 'file' && entry.action === action).length;
+      add('Planned actions',`${plan.copied ?? count('copy')} files copied · ${plan.replaced ?? count('replace')} files replaced · ${plan.skipped ?? count('skip')} files skipped · ${plan.entries.filter(entry => entry.action === 'mkdir').length} folders created`);
+      if (operation.mode === 'mirror' || plan.persistentSync) add('Permanent deletions',`${Number(plan.deletedFiles) || 0} files · ${Number(plan.deletedDirectories) || 0} folders`);
+      else add('Target-only items',operation.mode === 'two-way' ? 'Copied to the missing side; deletions are not propagated' : `${Number(plan.kept) || 0} retained · nothing is deleted`);
+      if (operation.mode === 'two-way') add('Conflicts',`${Number(plan.conflicts) || 0} conflicting paths · ${Number(plan.unresolved) || 0} unresolved`);
+      if (plan.syncPair) { add('Saved pair',plan.syncPair.name); add('Baseline',plan.baselineUsed ? `Revision ${plan.syncPair.revision} · last synchronized ${new Date(plan.syncPair.lastSyncedAt).toLocaleString()}` : 'First run · saved only after successful verification'); }
+    }
     add(operation.mode === 'copy' ? 'Contents' : 'Transfer work',`${plan.files} files · ${plan.directories} ${operation.mode === 'copy' ? 'folders (including the root)' : 'new folders'} · ${bytes(plan.totalBytes)} (${Number(plan.totalBytes).toLocaleString()} bytes)`);
     const expiration = typeof plan.expiresAt === 'number' ? plan.expiresAt : Date.parse(plan.expiresAt);
     if (Number.isFinite(expiration)) add('Review expires',new Date(expiration).toLocaleTimeString());
@@ -179,13 +242,15 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (entry.direction && !['skip','conflict'].includes(entry.action)) row.append(node('small','folder-entry-direction',entry.direction === 'upload' ? 'Local → Remote' : 'Remote → Local'));
       if (operation.mode === 'two-way' && entry.conflict) {
         const select = node('select','folder-conflict-choice'); select.dataset.relativePath = entry.relativePath; select.setAttribute('aria-label',`Resolve ${entry.relativePath}`);
-        for (const [value,label] of [['','Choose a resolution…'],['local','Use local file → Remote'],['remote','Use remote file → Local'],['skip','Skip this file']]) { const option = node('option','',label); option.value = value; select.append(option); }
+        const labels = plan.persistentSync ? [['','Choose a resolution…'],['local',entry.localPresent === false ? 'Use local deletion → Delete remote' : 'Use local state → Remote'],['remote',entry.remotePresent === false ? 'Use remote deletion → Delete local' : 'Use remote state → Local'],['skip','Skip this conflict']] : [['','Choose a resolution…'],['local','Use local file → Remote'],['remote','Use remote file → Local'],['skip','Skip this file']];
+        for (const [value,label] of labels) { if (value && entry.allowedResolutions && !entry.allowedResolutions.includes(value)) continue; const option = node('option','',label); option.value = value; select.append(option); }
+        if (entry.conflictReason) row.append(node('small','folder-conflict-reason',`${String(entry.conflictReason).replaceAll('-',' ')}${entry.subtree ? ' · includes descendants' : ''}${entry.allowedResolutions?.length === 1 && entry.allowedResolutions[0] === 'skip' ? ' · reconcile manually, then review again' : ''}`));
         select.value = entry.resolution || ''; select.addEventListener('change',() => { operation.choicesChanged = true; $('folder-transfer-start').disabled = true; folderMessage('Review your choices to prepare a fresh transfer plan.'); }); row.append(select);
       }
       tree.append(row);
     }
     $('folder-transfer-review').hidden = false;
-    folderMessage(operation.mode === 'two-way' && plan.unresolved ? 'Choose a source or skip for every conflict, then review your choices.' : operation.mode === 'mirror' ? 'Review every permanent deletion. Applying requires a separate confirmation.' : 'Review the complete tree. The next step asks for confirmation before changing files.');
+    folderMessage(operation.mode === 'two-way' && plan.unresolved ? 'Choose a source or skip for every conflict, then review your choices.' : operation.mode === 'mirror' || Number(plan.deletedFiles) || Number(plan.deletedDirectories) ? 'Review every permanent deletion. Applying requires a separate confirmation.' : 'Review the complete tree. The next step asks for confirmation before changing files.');
     if (Number.isFinite(expiration)) {
       operation.expiryTimer = setTimeout(() => {
         if (folderOperation !== operation || operation.phase !== 'review') return;
@@ -195,15 +260,20 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
   }
   async function beginFolderTransfer(direction, synchronize = false) {
     const source = direction === 'upload' ? 'local' : 'remote'; const entries = selectedEntries(source);
-    if (!session || reviewOpen() || pendingStart || loading.local || loading.remote || activeTransfers() || !supportsFolders() || $('file-transfer-protocol').value !== 'sftp' || !synchronize && (entries.length !== 1 || entries[0].type !== 'directory')) return;
+    if (!session || reviewOpen() || pendingStart || loading.local || loading.remote || activeTransfers() || !supportsFolders() || syncPairPending || (!isFtp() && $('file-transfer-protocol').value !== 'sftp') || synchronize && (!can('synchronization') || syncPairsLoading) || !synchronize && (entries.length !== 1 || entries[0].type !== 'directory')) return;
     const mode = synchronize ? $('file-sync-mode').value : $('file-folder-mode').value; const conflictPolicy = $('file-folder-conflict').value;
     const operation = {connection:session,direction,mode,conflictPolicy,localDirectory:paths.local,remoteDirectory:paths.remote,localRevision:revisions.local,remoteRevision:revisions.remote,phase:'preparing',plan:null,trigger:$(synchronize ? `file-sync-${direction}` : direction === 'upload' ? 'file-upload' : 'file-download')};
+    const persistent = mode === 'two-way' && supportsPersistentSync() && $('file-sync-persistent').checked;
+    const pair = persistent ? chosenSyncPair() : null;
+    if (pair && !sameRoots(pair)) throw new Error('Load the saved pair’s folders before reviewing synchronization, or choose a new pair for the current folders.');
     folderOperation = operation;
     operation.request = {id:session.id,direction,localPath:synchronize ? paths.local : appendPath(paths.local,entries[0].name,false),remotePath:synchronize ? paths.remote : appendPath(paths.remote,entries[0].name,true)};
     if (mode !== 'copy') Object.assign(operation.request,{mode,conflictPolicy});
+    if (persistent) Object.assign(operation.request,{persistentSync:true,...(pair ? {syncPairId:pair.pairId} : {pairName:$('file-sync-pair-name').value.trim() || undefined})});
     if (!['two-way','mirror'].includes(mode) && supportsResume() && $('file-transfer-resumable').checked) operation.request.resumable = true;
     $('folder-transfer-title').textContent = mode === 'mirror' ? 'Review mirror and permanent deletions' : mode === 'two-way' ? 'Review two-way synchronization' : synchronize ? 'Review one-way synchronization' : mode === 'merge' ? 'Review folder merge' : direction === 'upload' ? 'Review folder upload' : 'Review folder download';
-    $('folder-transfer-note').textContent = mode === 'mirror' ? 'Make the destination match the source contents. Target-only files and folders listed below will be permanently deleted. There is no undo. Inspect the direction and every deletion before applying. Completed changes remain if interrupted; mirror jobs cannot resume.' : mode === 'two-way' ? 'Copy missing items to the other side. For differing files, choose which version to keep or skip. No deletion propagation or saved synchronization baseline. Both folders may change; completed changes remain if interrupted. Two-way jobs cannot resume.' : mode === 'copy' ? 'The destination folder must be new. Existing folders are never merged or replaced. If copying fails or is cancelled, files and folders already created remain at the destination.' : `${synchronize ? 'Compare the current local and remote folders by content, then copy in one direction.' : 'Merge the selected folder into the matching destination folder.'} ${synchronize ? 'Equal files are skipped; differing destination files are replaced after review.' : conflictPolicy === 'replace' ? 'Changed destination files can be replaced after review.' : 'Existing destination files are skipped.'} Target-only files are retained; nothing is deleted. If copying fails or is cancelled, completed changes remain.`;
+    $('folder-transfer-note').textContent = mode === 'mirror' ? 'Make the destination match the source contents. Target-only files and folders listed below will be permanently deleted. There is no undo. Inspect the direction and every deletion before applying. Completed changes remain if interrupted; mirror jobs cannot resume.' : mode === 'two-way' ? persistent ? 'Compare both folders against their last successful baseline. One-sided edits and deletions become reviewed actions; conflicting changes require a choice. Deletions are permanent. Skipped conflicts remain unresolved in the baseline. Completed changes remain if interrupted; two-way jobs cannot resume.' : 'Copy missing items to the other side. For differing files, choose which version to keep or skip. Deletions are not propagated in a one-time comparison. Both folders may change; completed changes remain if interrupted. Two-way jobs cannot resume.' : mode === 'copy' ? 'The destination folder must be new. Existing folders are never merged or replaced. If copying fails or is cancelled, files and folders already created remain at the destination.' : `${synchronize ? 'Compare the current local and remote folders by content, then copy in one direction.' : 'Merge the selected folder into the matching destination folder.'} ${synchronize ? 'Equal files are skipped; differing destination files are replaced after review.' : conflictPolicy === 'replace' ? 'Changed destination files can be replaced after review.' : 'Existing destination files are skipped.'} Target-only files are retained; nothing is deleted. If copying fails or is cancelled, completed changes remain.`;
+    $('folder-transfer-limits').textContent = `${isFtp() ? session.protocol.toUpperCase() : 'SFTP'} · Up to 2,000 entries, 32 levels and 1 TiB per folder review. Links and special files are refused. Only explicitly reviewed deletions can remove files.`;
     $('folder-transfer-review').hidden = true; $('folder-transfer-fields').replaceChildren(); $('folder-transfer-entries').replaceChildren();
     folderMessage('Inspecting the folder tree and checking the destination…'); updateFolderTransfer(); $('folder-transfer-dialog').showModal();
     try {
@@ -222,13 +292,13 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     try {
       const result = await api.transferStartFolder({planId:plan.planId}); operation.plan = null;
       if (folderOperation !== operation) return;
-      if (result?.transferId && !jobs.has(result.transferId)) { jobs.set(result.transferId,{...operation.request,protocol:'sftp',kind:'folder',status:'queued',bytes:0,total:plan.totalBytes,filesTotal:plan.files,filesCompleted:0,directoriesTotal:plan.directories,directoriesCreated:0,...result}); renderJobs(); }
+      if (result?.transferId && !jobs.has(result.transferId)) { jobs.set(result.transferId,{...operation.request,protocol:plan.protocol || 'sftp',kind:'folder',status:'queued',bytes:0,total:plan.totalBytes,filesTotal:plan.files,filesCompleted:0,directoriesTotal:plan.directories,directoriesCreated:0,...result}); renderJobs(); }
       if (!folderStillCurrent(operation)) { operation.invalidated = true; folderMessage(result?.transferId ? 'The copy was queued, but this connection closed. Inspect its transfer status and destination before retrying.' : 'The connection closed before copying started. Close this review and reconnect.',true); return; }
       if (result?.cancelled || result?.canceled) { operation.phase = 'finished'; folderMessage('Folder operation cancelled. No files or folders were changed.'); return; }
       if (!result?.transferId) throw new Error('The folder copy did not return a transfer job. Inspect the destination before retrying.');
       renderJobs(); folderOperation = null; $('folder-transfer-dialog').close(); updateButtons(); operation.trigger?.focus(); toast('Folder operation added to Transfers.');
       // A very small or empty tree can finish before the invoke result arrives.
-      if (jobs.get(result.transferId)?.status === 'completed') { const sides = operation.mode === 'two-way' ? ['local','remote'] : [operation.direction === 'upload' ? 'remote' : 'local']; for (const side of sides) attempt(() => navigate(side,paths[side])); }
+      if (jobs.get(result.transferId)?.status === 'completed') { if (operation.request.persistentSync) attempt(refreshSyncPairs); const sides = operation.mode === 'two-way' ? ['local','remote'] : [operation.direction === 'upload' ? 'remote' : 'local']; for (const side of sides) attempt(() => navigate(side,paths[side])); }
     } catch (exception) { await discardFolderPlan(operation); if (folderOperation === operation) { operation.phase = 'finished'; folderMessage(exception?.message || String(exception),true); } }
     finally { if (folderOperation === operation) { if (operation.phase === 'starting') operation.phase = 'finished'; updateFolderTransfer(); } updateButtons(); }
   }
@@ -437,7 +507,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     const active = [...jobs.values()].filter(job => job.id === session.id && busy(job.status));
     if (confirm && active.length && !await confirmAction({title:'Stop file transfers?',message:`Disconnecting will cancel ${active.length} active transfer${active.length === 1 ? '' : 's'}. Completed files remain available.`,accept:'Stop and disconnect'})) return false;
     closing = true; updateButtons(); const connection = session;
-    try { await api.transferClose(connection.id); if (session === connection) { session = null; ftpRefresh.clear(); revisions.remote++; loading.remote = false; listings.remote = []; selected.remote = new Set(); anchors.remote = null; profileKey = ''; $('file-remote-entries').replaceChildren(node('p','file-empty','Connect to a server to browse files.')); } return true; }
+    try { await api.transferClose(connection.id); if (session === connection) { session = null; syncPairs = []; syncPairsRevision++; syncPairsLoading = false; renderSyncPairs(); ftpRefresh.clear(); revisions.remote++; loading.remote = false; listings.remote = []; selected.remote = new Set(); anchors.remote = null; profileKey = ''; $('file-remote-entries').replaceChildren(node('p','file-empty','Connect to a server to browse files.')); } return true; }
     finally { closing = false; updateButtons(); }
   }
   async function open(profile) {
@@ -456,6 +526,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (closedConnections.has(opened.id)) throw new Error('The file connection closed while opening. Reconnect to try again.');
       session = opened; profileKey = key;
       await Promise.all([navigate('local', paths.local), navigate('remote', session.remotePath || '.')]);
+      await refreshSyncPairs();
     } catch (exception) { report(exception); }
     finally { connecting = false; updateButtons(); }
   }
@@ -468,7 +539,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     try {
       const opened = await api.ftpOpen(profile);
       if (closedConnections.has(opened.id)) throw new Error('The FTP connection closed while opening. Reconnect to try again.');
-      session = opened; profileKey = '';
+      session = opened; profileKey = ''; syncPairs = []; syncPairsRevision++; syncPairsLoading = false; renderSyncPairs();
       $('file-transfer-title').textContent = `File transfer — ${session.host}`;
       $('file-ftp-form').hidden = true;
       await Promise.all([navigate('local',paths.local),navigate('remote',session.remotePath || '/')]);
@@ -481,11 +552,11 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     $('file-ftp-form').hidden = false; $('file-ftp-host').focus(); attempt(loadJobs);
   }
   function install() {
-    const wrapper = node('div'); wrapper.innerHTML = `<dialog id="file-transfer-dialog" class="modal file-transfer-modal"><header class="modal-header"><div><span class="secure-eyebrow">FILES</span><h2 id="file-transfer-title">File transfer</h2></div><button id="file-transfer-hide" class="icon-button" type="button" aria-label="Hide file transfers">×</button></header><div class="file-transfer-toolbar"><span id="file-transfer-status" role="status">Disconnected</span><label>Copy protocol<select id="file-transfer-protocol"><option value="sftp">SFTP</option><option value="scp">SCP</option></select></label><button type="button" id="file-transfer-disconnect" class="quiet-button">Disconnect</button></div><div id="file-transfer-error" class="form-error" role="alert" hidden></div><div class="file-panes">${['local','remote'].map(side => `<section class="file-pane" aria-label="${side === 'local' ? 'Local files' : 'Remote files'}"><header><h3>${side === 'local' ? 'This computer' : 'Remote server'}</h3><span id="file-${side}-count"></span></header><form id="file-${side}-form" class="file-path-bar"><button type="button" id="file-${side}-up" class="icon-button" aria-label="${side === 'local' ? 'Local' : 'Remote'} parent folder">↑</button><input id="file-${side}-path" aria-label="${side === 'local' ? 'Local' : 'Remote'} folder path" autocomplete="off" spellcheck="false"><button type="submit" class="icon-button" aria-label="Refresh ${side} folder">↻</button>${side === 'local' ? '<button type="button" id="file-choose-local" class="quiet-button">Browse…</button>' : ''}</form><div class="file-table" role="table" aria-label="${side === 'local' ? 'Local' : 'Remote'} file list"><div class="file-table-heading" role="row"><span role="columnheader">Name</span><span role="columnheader">Size / type</span></div><div id="file-${side}-entries" role="rowgroup"></div></div><footer><button type="button" id="${side === 'local' ? 'file-upload' : 'file-download'}" class="primary-button" disabled>${side === 'local' ? 'Upload →' : '← Download'}</button></footer></section>`).join('')}</div><section class="transfer-queue"><header><h3>Transfers</h3><button type="button" id="file-clear-jobs" class="quiet-button">Clear finished</button></header><div id="file-transfer-jobs"></div></section><footer class="modal-footer"><p class="field-note">SFTP supports resumable files and folders, merges, synchronization, mirroring and remote editing. SCP starts over SCP; resume uses verified SFTP. FTP/FTPS supports individual files. Links are refused.</p><button type="button" id="file-transfer-done" class="secondary-button">Hide</button></footer></dialog>`; document.body.append(wrapper);
+    const wrapper = node('div'); wrapper.innerHTML = `<dialog id="file-transfer-dialog" class="modal file-transfer-modal"><header class="modal-header"><div><span class="secure-eyebrow">FILES</span><h2 id="file-transfer-title">File transfer</h2></div><button id="file-transfer-hide" class="icon-button" type="button" aria-label="Hide file transfers">×</button></header><div class="file-transfer-toolbar"><span id="file-transfer-status" role="status">Disconnected</span><label>Copy protocol<select id="file-transfer-protocol"><option value="sftp">SFTP</option><option value="scp">SCP</option></select></label><button type="button" id="file-transfer-disconnect" class="quiet-button">Disconnect</button></div><div id="file-transfer-error" class="form-error" role="alert" hidden></div><div class="file-panes">${['local','remote'].map(side => `<section class="file-pane" aria-label="${side === 'local' ? 'Local files' : 'Remote files'}"><header><h3>${side === 'local' ? 'This computer' : 'Remote server'}</h3><span id="file-${side}-count"></span></header><form id="file-${side}-form" class="file-path-bar"><button type="button" id="file-${side}-up" class="icon-button" aria-label="${side === 'local' ? 'Local' : 'Remote'} parent folder">↑</button><input id="file-${side}-path" aria-label="${side === 'local' ? 'Local' : 'Remote'} folder path" autocomplete="off" spellcheck="false"><button type="submit" class="icon-button" aria-label="Refresh ${side} folder">↻</button>${side === 'local' ? '<button type="button" id="file-choose-local" class="quiet-button">Browse…</button>' : ''}</form><div class="file-table" role="table" aria-label="${side === 'local' ? 'Local' : 'Remote'} file list"><div class="file-table-heading" role="row"><span role="columnheader">Name</span><span role="columnheader">Size / type</span></div><div id="file-${side}-entries" role="rowgroup"></div></div><footer><button type="button" id="${side === 'local' ? 'file-upload' : 'file-download'}" class="primary-button" disabled>${side === 'local' ? 'Upload →' : '← Download'}</button></footer></section>`).join('')}</div><section class="transfer-queue"><header><h3>Transfers</h3><button type="button" id="file-clear-jobs" class="quiet-button">Clear finished</button></header><div id="file-transfer-jobs"></div></section><footer class="modal-footer"><p class="field-note">SFTP supports resumable files and folders, merges, synchronization, mirroring and remote editing. SCP starts over SCP; resume uses verified SFTP. FTP/FTPS supports resumable files, folders and merges. Links are refused.</p><button type="button" id="file-transfer-done" class="secondary-button">Hide</button></footer></dialog>`; document.body.append(wrapper);
     const ftpToggle = node('button','quiet-button','FTP / FTPS…'); ftpToggle.type = 'button'; ftpToggle.id = 'file-ftp-toggle'; ftpToggle.hidden = typeof api?.ftpOpen !== 'function'; ftpToggle.addEventListener('click',showFtp); $('file-transfer-disconnect').before(ftpToggle);
-    const resumeLabel = node('label','file-resume-toggle'); resumeLabel.innerHTML = '<input type="checkbox" id="file-transfer-resumable" checked>Allow resume'; resumeLabel.title = 'SFTP files and folder copies keep verified checkpoints. SCP starts with SCP and resumes via SFTP. Mirror and two-way jobs do not resume.'; $('file-transfer-disconnect').before(resumeLabel);
+    const resumeLabel = node('label','file-resume-toggle'); resumeLabel.innerHTML = '<input type="checkbox" id="file-transfer-resumable" checked>Allow resume'; resumeLabel.title = 'File and folder copies keep verified checkpoints. FTP/FTPS resume requires server offset/append support. SCP resumes via SFTP. Mirror and two-way jobs do not resume.'; $('file-transfer-disconnect').before(resumeLabel);
     const ftpForm = node('form','file-ftp-form'); ftpForm.id = 'file-ftp-form'; ftpForm.hidden = true;
-    ftpForm.innerHTML = `<label>Protocol<select id="file-ftp-protocol"><option value="ftps">FTPS (explicit TLS)</option><option value="ftps-implicit">FTPS (implicit TLS)</option><option value="ftp">FTP (unencrypted)</option></select></label><label>Hostname<input id="file-ftp-host" required autocomplete="off" spellcheck="false" placeholder="files.example.com"></label><label>Port<input id="file-ftp-port" type="number" min="1" max="65535" required value="21"></label><label>Username<input id="file-ftp-username" autocomplete="off" spellcheck="false" placeholder="Ask when connecting"></label><button type="submit" class="primary-button">Connect</button><p class="field-note">Your password is requested separately and is not saved. FTPS verifies the server certificate. FTP/FTPS currently supports browsing and individual file transfers.</p>`;
+    ftpForm.innerHTML = `<label>Protocol<select id="file-ftp-protocol"><option value="ftps">FTPS (explicit TLS)</option><option value="ftps-implicit">FTPS (implicit TLS)</option><option value="ftp">FTP (unencrypted)</option></select></label><label>Hostname<input id="file-ftp-host" required autocomplete="off" spellcheck="false" placeholder="files.example.com"></label><label>Port<input id="file-ftp-port" type="number" min="1" max="65535" required value="21"></label><label>Username<input id="file-ftp-username" autocomplete="off" spellcheck="false" placeholder="Ask when connecting"></label><button type="submit" class="primary-button">Connect</button><p class="field-note">Your password is requested separately and is not saved. FTPS verifies the server certificate. FTP/FTPS supports reviewed file and folder transfers. Resume verifies retained content before continuing.</p>`;
     document.querySelector('.file-transfer-toolbar').after(ftpForm);
     ftpForm.addEventListener('submit',event => { event.preventDefault(); attempt(connectFtp); });
     $('file-ftp-protocol').addEventListener('change',() => { $('file-ftp-port').value = $('file-ftp-protocol').value === 'ftps-implicit' ? '990' : '21'; });
@@ -496,15 +567,22 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
     const workflowToolbar = node('div','file-folder-workflows'); workflowToolbar.setAttribute('aria-label','Folder copy and synchronization');
     workflowToolbar.innerHTML = `<label>Selected folder<select id="file-folder-mode"><option value="copy">New destination</option><option value="merge">Merge into destination</option></select></label><label>Existing files<select id="file-folder-conflict"><option value="skip">Skip existing files</option><option value="replace">Replace changed files</option></select></label><div class="file-sync-actions"><label>Current folders<select id="file-sync-mode"><option value="sync">One-way synchronization</option><option value="two-way">Two-way synchronization</option><option value="mirror">Mirror (delete target-only items)</option></select></label><button type="button" id="file-sync-upload" class="quiet-button">Local → Remote</button><button type="button" id="file-sync-download" class="quiet-button">Remote → Local</button></div><p id="file-sync-note" class="field-note">One-way content comparison. Target-only files are retained; nothing is deleted.</p>`;
     document.querySelector('.file-panes').after(workflowToolbar);
+    const pairControls = node('div','file-sync-pairs'); pairControls.id = 'file-sync-pairs'; pairControls.hidden = true;
+    pairControls.innerHTML = `<label class="file-sync-persistent"><input id="file-sync-persistent" type="checkbox" checked>Remember changes between runs</label><label>Saved synchronization pair<select id="file-sync-pair"><option value="">New pair for current folders</option></select></label><label>New pair name<input id="file-sync-pair-name" maxlength="120" placeholder="Optional name" autocomplete="off"></label><button type="button" id="file-sync-pair-load" class="quiet-button">Load folders</button><button type="button" id="file-sync-pair-forget" class="quiet-button">Forget baseline…</button><p id="file-sync-pair-status" class="field-note" role="status"></p>`;
+    workflowToolbar.append(pairControls);
+    $('file-sync-persistent').addEventListener('change',updateButtons);
+    $('file-sync-pair').addEventListener('change',updateButtons);
+    $('file-sync-pair-load').addEventListener('click',() => attempt(loadSyncPair));
+    $('file-sync-pair-forget').addEventListener('click',() => attempt(forgetSyncPair));
     $('file-folder-mode').addEventListener('change',updateButtons);
-    $('file-sync-mode').addEventListener('change',() => { const mode = $('file-sync-mode').value; $('file-sync-download').hidden = mode === 'two-way'; $('file-sync-upload').textContent = mode === 'two-way' ? 'Review both directions' : 'Local → Remote'; $('file-sync-note').textContent = mode === 'mirror' ? 'Mirror deletes target-only items permanently after a reviewed plan and separate confirmation.' : mode === 'two-way' ? 'Missing files copy to the other side. Differing files require a choice; deletions are not propagated.' : 'One-way content comparison. Target-only files are retained; nothing is deleted.'; });
+    $('file-sync-mode').addEventListener('change',() => { const mode = $('file-sync-mode').value; $('file-sync-download').hidden = mode === 'two-way'; $('file-sync-upload').textContent = mode === 'two-way' ? 'Review both directions' : 'Local → Remote'; $('file-sync-note').textContent = mode === 'mirror' ? 'Mirror deletes target-only items permanently after a reviewed plan and separate confirmation.' : mode === 'two-way' ? 'Save a baseline to track one-sided changes across runs. Conflicts and deletions are reviewed before applying.' : 'One-way content comparison. Target-only files are retained; nothing is deleted.'; updateButtons(); });
     for (const direction of ['upload','download']) $(`file-sync-${direction}`).addEventListener('click',() => attempt(() => beginFolderTransfer(direction,true)));
     const permissionsHeading = node('span','','Permissions'); permissionsHeading.setAttribute('role','columnheader'); $('file-remote-entries').previousElementSibling.append(permissionsHeading); $('file-remote-entries').parentElement.classList.add('remote-file-table');
     const operationDialog = node('dialog','modal remote-operation-modal'); operationDialog.id = 'remote-operation-dialog'; operationDialog.setAttribute('aria-labelledby','remote-operation-title'); operationDialog.setAttribute('aria-describedby','remote-operation-note');
     operationDialog.innerHTML = `<form id="remote-operation-form"><header class="modal-header"><h2 id="remote-operation-title">Remote file operation</h2></header><div class="modal-body remote-operation-body"><p id="remote-operation-target" class="remote-operation-target"></p><p id="remote-operation-note" class="field-note"></p><label id="remote-operation-name-row"><span id="remote-operation-name-label">Name</span><input id="remote-operation-name" autocomplete="off" spellcheck="false" maxlength="255"></label><label id="remote-operation-permissions-row">Permissions (octal)<input id="remote-operation-permissions" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="3" aria-describedby="remote-permissions-preview"><span id="remote-permissions-preview" class="field-note"></span></label><section id="remote-operation-review" class="remote-operation-review" aria-label="Review remote change" hidden><h3>Review change</h3><dl id="remote-operation-review-fields"></dl></section><p id="remote-operation-status" class="field-note" role="status" aria-live="polite"></p><div id="remote-operation-error" class="form-error" role="alert" hidden></div></div><footer class="modal-footer"><button id="remote-operation-edit" type="button" class="quiet-button" hidden>Edit</button><span class="remote-operation-spacer"></span><button id="remote-operation-cancel" type="button" class="secondary-button">Cancel</button><button id="remote-operation-submit" type="submit" class="primary-button">Review</button></footer></form>`;
     document.body.append(operationDialog);
     const folderDialog = node('dialog','modal folder-transfer-modal'); folderDialog.id = 'folder-transfer-dialog'; folderDialog.setAttribute('aria-labelledby','folder-transfer-title'); folderDialog.setAttribute('aria-describedby','folder-transfer-note');
-    folderDialog.innerHTML = `<form id="folder-transfer-form"><header class="modal-header"><h2 id="folder-transfer-title">Review folder copy</h2></header><div class="modal-body folder-transfer-body"><p id="folder-transfer-note" class="secure-notice">The destination folder must be new. Existing folders are never merged or replaced. If copying fails or is cancelled, files and folders already created remain at the destination.</p><section id="folder-transfer-review" hidden><dl id="folder-transfer-fields"></dl><h3>Folder contents</h3><ul id="folder-transfer-entries" aria-label="Planned folder contents"></ul></section><p class="field-note">SFTP only · Up to 2,000 entries, 32 levels and 1 TiB per folder copy. Links and special files are refused. Copying does not delete the source.</p><p id="folder-transfer-status" class="field-note" role="status" aria-live="polite"></p><div id="folder-transfer-error" class="form-error" role="alert" hidden></div></div><footer class="modal-footer"><button id="folder-transfer-resolve" type="button" class="quiet-button" hidden>Review resolutions</button><button id="folder-transfer-cancel" type="button" class="secondary-button">Cancel</button><button id="folder-transfer-start" type="submit" class="primary-button" disabled>Start copy</button></footer></form>`;
+    folderDialog.innerHTML = `<form id="folder-transfer-form"><header class="modal-header"><h2 id="folder-transfer-title">Review folder copy</h2></header><div class="modal-body folder-transfer-body"><p id="folder-transfer-note" class="secure-notice">The destination folder must be new. Existing folders are never merged or replaced. If copying fails or is cancelled, files and folders already created remain at the destination.</p><section id="folder-transfer-review" hidden><dl id="folder-transfer-fields"></dl><h3>Folder contents</h3><ul id="folder-transfer-entries" aria-label="Planned folder contents"></ul></section><p id="folder-transfer-limits" class="field-note">Up to 2,000 entries, 32 levels and 1 TiB per folder copy. Links and special files are refused. Copying does not delete the source.</p><p id="folder-transfer-status" class="field-note" role="status" aria-live="polite"></p><div id="folder-transfer-error" class="form-error" role="alert" hidden></div></div><footer class="modal-footer"><button id="folder-transfer-resolve" type="button" class="quiet-button" hidden>Review resolutions</button><button id="folder-transfer-cancel" type="button" class="secondary-button">Cancel</button><button id="folder-transfer-start" type="submit" class="primary-button" disabled>Start copy</button></footer></form>`;
     document.body.append(folderDialog);
     const editorDialog = node('dialog','modal remote-edit-modal'); editorDialog.id = 'remote-edit-dialog'; editorDialog.setAttribute('aria-labelledby','remote-edit-title');
     editorDialog.innerHTML = `<form id="remote-edit-form"><header class="modal-header"><div><span class="secure-eyebrow">REMOTE TEXT EDITOR</span><h2 id="remote-edit-title">Edit remote file</h2></div><span id="remote-edit-dirty" role="status"></span></header><div class="modal-body remote-edit-body"><p id="remote-edit-target" class="remote-operation-target"></p><p class="field-note">UTF-8 text only. Changes stay in this editor until you review and confirm a save. The server revision is checked again before replacement.</p><label class="remote-edit-label" for="remote-edit-text">Working copy</label><textarea id="remote-edit-text" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Remote file working copy" maxlength="1048576"></textarea><section id="remote-edit-review" hidden><h3>Review before saving</h3><div class="remote-edit-comparison"><section><h4>Original remote contents</h4><pre id="remote-edit-before" tabindex="0"></pre></section><section><h4>Proposed contents</h4><pre id="remote-edit-after" tabindex="0"></pre></section></div></section><p id="remote-edit-status" class="field-note" role="status" aria-live="polite"></p><div id="remote-edit-error" class="form-error" role="alert" hidden></div></div><footer class="modal-footer"><button id="remote-edit-back" class="quiet-button" type="button" hidden>Continue editing</button><span class="remote-operation-spacer"></span><button id="remote-edit-close" class="secondary-button" type="button">Close</button><button id="remote-edit-submit" class="primary-button" type="submit">Review changes</button></footer></form>`;
@@ -542,7 +620,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (event?.type === 'connection' && event.status === 'closed') {
         closedConnections.add(event.id); if (closedConnections.size > 256) closedConnections.delete(closedConnections.values().next().value);
         if (session?.id === event.id) {
-          session = null; profileKey = ''; ftpRefresh.clear(); revisions.remote++; loading.remote = false; selected.remote = new Set(); anchors.remote = null; listings.remote = [];
+          session = null; profileKey = ''; syncPairs = []; syncPairsRevision++; syncPairsLoading = false; renderSyncPairs(); ftpRefresh.clear(); revisions.remote++; loading.remote = false; selected.remote = new Set(); anchors.remote = null; listings.remote = [];
           if (remoteOperation) { const operation = remoteOperation; operation.invalidated = true; operationMessage('The connection closed. Close this dialog and reconnect before making a change.',true); if (!operationPending()) attempt(() => discardPlan(operation)); updateOperation(); }
           if (editor) { editor.invalidated = true; editorMessage('The connection closed. Your unsaved buffer is preserved. Close it and reconnect to open a fresh remote revision.',true); if (!editorPending()) { const document = editor; document.phase = 'edit'; $('remote-edit-review').hidden = true; attempt(() => discardEditorPlan(document)); } updateEditor(); }
           if (folderOperation) { const operation = folderOperation; operation.invalidated = true; folderMessage('The connection closed. Close this review and reconnect before copying.',true); if (!folderPending()) attempt(() => discardFolderPlan(operation)); updateFolderTransfer(); }
@@ -554,7 +632,7 @@ export function createSecureTransferUi({ api, toast, confirmAction }) {
       if (!event?.transferId) return;
       const previous = jobs.get(event.transferId); jobs.set(event.transferId, {...previous,...event}); renderJobs(); updateButtons();
       if (isFtp() && session?.id === event.id) { if (event.status === 'completed') ftpRefresh.add(event.direction === 'upload' ? 'remote' : 'local'); flushFtpRefresh(); return; }
-      if (event.status === 'completed' && previous?.status !== 'completed' && session?.id === event.id) { if (event.mode === 'two-way') { attempt(() => navigate('local',paths.local)); attempt(() => navigate('remote',paths.remote)); } else attempt(() => navigate(event.direction === 'upload' ? 'remote' : 'local',paths[event.direction === 'upload' ? 'remote' : 'local'])); }
+      if (event.status === 'completed' && previous?.status !== 'completed' && session?.id === event.id) { if (event.mode === 'two-way') { if (event.persistentSync) attempt(refreshSyncPairs); attempt(() => navigate('local',paths.local)); attempt(() => navigate('remote',paths.remote)); } else attempt(() => navigate(event.direction === 'upload' ? 'remote' : 'local',paths[event.direction === 'upload' ? 'remote' : 'local'])); }
     });
     renderJobs(); updateButtons(); attempt(loadJobs);
   }

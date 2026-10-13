@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('termforge', {
   transferPrepareFolder: invoke('transferPrepareFolder'),
   transferStartFolder: invoke('transferStartFolder'),
   transferDiscardFolder: invoke('transferDiscardFolder'),
+  transferListSyncPairs: invoke('transferListSyncPairs'),
+  transferForgetSyncPair: invoke('transferForgetSyncPair'),
   remoteEditOpen: invoke('remoteEditOpen'),
   remoteEditPrepareSave: invoke('remoteEditPrepareSave'),
   remoteEditSave: invoke('remoteEditSave'),

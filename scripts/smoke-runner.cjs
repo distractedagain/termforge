@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const ciGraphics = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.TERMFORGE_CI_NO_SANDBOX === '1';
 
 async function screenshot(window, directory, name) {
@@ -16,6 +17,43 @@ async function screenshot(window, directory, name) {
     const captureError = error.message || String(error);
     console.warn(`WARN CI screenshot unavailable (${name}): ${captureError}. Behavioral checks remain strict.`);
     return { screenshotCaptured: false, captureError };
+  }
+}
+
+async function singleInstanceSmoke(app, window, terminals) {
+  assert.equal(app.hasSingleInstanceLock(), true, 'Primary desktop process must own the application lock');
+  const originalUserData = app.getPath('userData'), originalSessionData = app.getPath('sessionData');
+  const originalTerminals = terminals.count; let observed = false;
+  const onSecondInstance = () => { observed = true; };
+  app.on('second-instance', onSecondInstance);
+  const childEnvironment = { ...process.env }; delete childEnvironment.ELECTRON_RUN_AS_NODE;
+  // Same binary, app path and environment resolve the same native userData
+  // identity. The second process has no smoke flag and must quit before boot.
+  const child = spawn(process.execPath, [...(ciGraphics ? ['--no-sandbox', '--disable-gpu'] : []), app.getAppPath(), '--forgecrt-single-instance-probe'],
+    { cwd: app.getAppPath(), env: childEnvironment, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '', settled = false;
+  const collect = chunk => { output = (output + String(chunk)).slice(-16000); };
+  child.stdout.on('data', collect); child.stderr.on('data', collect);
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Second desktop instance failed to exit within 15 seconds: ' + output)); }, 15000);
+      child.once('error', error => { clearTimeout(timer); settled = true; reject(error); });
+      child.once('exit', (code, signal) => { clearTimeout(timer); settled = true; resolve({ code, signal }); });
+    });
+    assert.deepEqual(result, { code: 0, signal: null }, 'Secondary desktop process must quit cleanly: ' + output);
+    const deadline = Date.now() + 3000;
+    while (!observed && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(observed, true, 'Primary process must receive the rejected secondary launch');
+    assert.equal(app.hasSingleInstanceLock(), true); assert.equal(window.isDestroyed(), false);
+    assert.equal(app.getPath('userData'), originalUserData); assert.equal(app.getPath('sessionData'), originalSessionData);
+    assert.equal(terminals.count, originalTerminals, 'Secondary launch must not open a terminal');
+    const alive = await window.webContents.executeJavaScript(`(async () => ({url:location.href,version:(await window.termforge.getState()).version}))()`);
+    assert.equal(alive.url, 'termforge://app/index.html'); assert.equal(typeof alive.version, 'string');
+    console.log('PASS native single-instance lock, second-process rejection and continued primary IPC');
+    return { nativeSingleInstanceLock: true, nativeSecondInstanceRejected: true, nativePrimaryContinuesAfterSecondLaunch: true };
+  } finally {
+    app.removeListener('second-instance', onSecondInstance);
+    if (!settled) child.kill('SIGKILL');
   }
 }
 
@@ -158,6 +196,7 @@ module.exports = async ({ window, terminals, store }) => {
   assert.ok(process.env.TERMFORGE_DATA_DIR && path.isAbsolute(process.env.TERMFORGE_DATA_DIR), 'Native smoke requires an isolated configuration override');
   const isolatedProfile = path.resolve(process.env.TERMFORGE_DATA_DIR);
   assert.equal(path.resolve(resolveDataDirectory(app.getPath('appData'), app.getPath('userData'))), isolatedProfile, 'The legacy configuration override must still control application files');
+  const singleInstance = await singleInstanceSmoke(app, window, terminals);
   const errors = [];
   window.webContents.on('console-message', (details) => { if (details.level === 'error' || /Could not create web worker|Falling back to loading web worker/i.test(details.message)) errors.push(details.message); });
   console.log('START native isolation, PTY, terminal UI, broadcast, and preferences checks');
@@ -224,7 +263,7 @@ module.exports = async ({ window, terminals, store }) => {
   assert.equal(isolatedConfig.settings.fontSize, 16, 'Native preference writes must reach the existing configuration override');
   const displayedTitle = await window.webContents.executeJavaScript('document.title');
   assert.match(displayedTitle, /ForgeCRT/, 'Visible document title must use the new product name');
-  Object.assign(result, { runtimeIdentityPreserved: true, nativeUserDataIdentityPreserved: true, chromiumSessionIdentityPreserved: true,
+  Object.assign(result, singleInstance, { runtimeIdentityPreserved: true, nativeUserDataIdentityPreserved: true, chromiumSessionIdentityPreserved: true,
     isolatedConfigOverrideVerified: true, brandDisplayVerified: true, installedCredentialMigrationVerified: false });
   console.log('PASS native display branding, retained runtime/storage identities and isolated configuration persistence');
   assert.equal(errors.length, 0, errors.join('\n'));

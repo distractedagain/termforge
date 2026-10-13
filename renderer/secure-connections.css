@@ -159,3 +159,13 @@
 .folder-transfer-action-row { grid-template-columns:16px minmax(0,1fr) 65px 90px; }
 .file-sync-actions { flex-wrap:wrap; }
 @media(max-width:650px) { .file-transfer-toolbar { flex-wrap:wrap; }.file-ftp-form { padding:12px 14px; }.folder-transfer-action-row { grid-template-columns:16px minmax(0,1fr) 50px 75px; } }
+
+.file-sync-pairs { display:flex;flex-wrap:wrap;gap:9px 12px;align-items:end;flex-basis:100%;border-top:1px solid var(--border-soft);padding-top:12px; }
+.file-sync-pairs[hidden] { display:none; }
+.file-sync-pairs label { min-width:150px;flex:1; }
+.file-sync-pairs .file-sync-persistent { display:flex;align-items:center;gap:7px;flex-basis:100%; }
+.file-sync-pairs>p { flex-basis:100%;margin:0;overflow-wrap:anywhere; }
+.file-sync-pairs input,.file-sync-pairs select { min-width:0;width:100%; }
+.file-sync-pairs .file-sync-persistent input { width:14px;height:14px;flex:0 0 14px; }
+.folder-conflict-reason { grid-column:2/-1;color:var(--muted);overflow-wrap:anywhere; }
+@media(max-width:650px) { .file-sync-pairs { gap:10px; }.file-sync-pairs label { flex-basis:100%; }.file-sync-pairs button { flex:1; } }
