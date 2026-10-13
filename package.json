@@ -1,7 +1,7 @@
 {
   "name": "termforge",
   "productName": "TermForge",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",
@@ -25,7 +25,8 @@
     "dist:dir": "npm run build && electron-builder --dir --publish never",
     "test:projects": "npm run build && node scripts/project-ui-check.cjs",
     "test:ansible": "node scripts/ansible-check.cjs",
-    "test:secure-ui": "npm run build && node scripts/secure-ui-check.cjs"
+    "test:secure-ui": "npm run build && node scripts/secure-ui-check.cjs",
+    "test:quick-connect": "npm run build && node scripts/quick-connect-ui-check.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -56,6 +57,7 @@
       "!app/**/__pycache__/**",
       "!app/**/*.pyc",
       "renderer/index.html",
+      "renderer/quick-connect.html",
       "renderer/dist/**/*",
       "LICENSE",
       "README.md",

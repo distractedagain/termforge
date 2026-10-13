@@ -5,7 +5,8 @@ module.exports = function installFixture({ platform = 'darwin', settings = {}, s
   let state = { version: '0.8.0', platform, settings, sessions, snippets, snapshots: [], commandHistory: [] };
   let counter = 0;
   const listeners = new Map();
-  const calls = { opens: [], writes: [], closes: [], resizes: [], saves: [], bulk: [], history: [], snapshots: [], breaks: [], logs: [], scriptRuns: [], scriptCancels: [], recordedScripts: [], screens: [], clipboard: [], active: [], focus: [], orders: [], tftpRoots: [], tftpStarts: [], tftpStops: [], aiModels: [], aiStarts: [], aiCancels: [] };
+  const calls = { opens: [], writes: [], closes: [], resizes: [], saves: [], bulk: [], history: [], snapshots: [], breaks: [], logs: [], scriptRuns: [], scriptCancels: [], recordedScripts: [], screens: [], clipboard: [], active: [], focus: [], orders: [], tftpRoots: [], tftpStarts: [], tftpStops: [], aiModels: [], aiStarts: [], aiCancels: [], quickConnectOpens: [], quickConnectAccepts: [], quickConnectResumes: [] };
+  const quickRequests = new Map();
   let clipboard = 'synthetic clipboard';
   let asciiFile = { name: 'synthetic-commands.txt', size: 11, text: 'show clock\n' };
   let tftp = { state: 'stopped', running: false, activeTransfers: 0, completedTransfers: 0 };
@@ -16,8 +17,32 @@ module.exports = function installFixture({ platform = 'darwin', settings = {}, s
   const saveSession = async profile => { const saved = await window.__validateProfile({ ...profile, id: profile.id || `fixture-saved-${++counter}` }); const index = state.sessions.findIndex(item => item.id === saved.id); if (index < 0) state.sessions.push(saved); else state.sessions[index] = saved; calls.saves.push(clone(saved)); return clone(saved); };
   window.__qa = { calls, getState: () => clone(state), setClipboard: value => { clipboard = value; }, setAscii: value => { asciiFile = value; }, emitMenu: action => emit('menu', action), emitData: (id, data) => emit('data', { id, data }), emitScript: value => emit('script-status', value), emitOutput: value => emit('script-output', value), emitScreen: value => emit('screen-request', value), emitOpened: value => emit('opened', value), emitActivated: id => emit('activated', { id }), emitMapped: value => emit('mapped', value), emitTftpTransfer: value => emit('tftp-transfer', value), emitTftpStatus: value => { tftp = { ...tftp, ...value }; emit('tftp-status', tftp); }, emitExit: id => emit('exit', { id, exitCode: 0 }) };
   Object.assign(window.__qa, { setAiModels: value => { aiModels = clone(value); }, setAiModelError: value => { aiModelError = value; }, setAiStartError: value => { aiStartError = value; }, emitAi: value => emit('ai-event', value) });
+  // The actual native child validates and queues this request in the main process.
+  // This fixture checks only the parent renderer's handoff and routing; the child
+  // form and privileged window boundary have their own UI/native checks.
+  window.__qa.emitQuickConnect = async ({ profile, saveSession = false, showOnStartup = state.settings.showQuickConnectOnStartup }) => {
+    const normalized = await window.__validateProfile(profile);
+    const id = `fixture-quick-${++counter}`;
+    quickRequests.set(id, { profile: normalized, saveSession, showOnStartup });
+    emit('quick-connect-request', { id });
+    return id;
+  };
+  window.__qa.emitQuickConnectCredentials = () => emit('quick-connect-credentials', {});
   window.termforge = {
     getState: async () => clone(state), saveSession,
+    quickConnectOpen: async () => { calls.quickConnectOpens.push(true); return { opened: true }; },
+    onQuickConnectRequest: subscribe('quick-connect-request'),
+    onQuickConnectCredentials: subscribe('quick-connect-credentials'),
+    quickConnectResume: async () => { calls.quickConnectResumes.push(true); return { resumed: true }; },
+    quickConnectAccept: async id => {
+      const request = quickRequests.get(id);
+      if (!request) throw new Error('Unknown or already consumed synthetic Quick Connect request.');
+      quickRequests.delete(id); calls.quickConnectAccepts.push(id);
+      state.settings = await window.__validateSettings({ ...state.settings, showQuickConnectOnStartup: request.showOnStartup });
+      const profile = request.saveSession ? await saveSession(request.profile) : request.profile;
+      if (!request.saveSession) delete profile.id;
+      return { profile: clone(profile), state: clone(state) };
+    },
     saveSessions: async profiles => {
       // Validate the complete batch before changing the fixture, just as the
       // production store does. Invalid bulk changes cannot partially commit.

@@ -16,6 +16,10 @@ Promise.all([esbuild.build({
   loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file' }
 }), esbuild.build({
   ...common,
+  entryPoints: [path.join(__dirname, '../renderer/quick-connect.js')],
+  outfile: path.join(__dirname, '../renderer/dist/quick-connect.js')
+}), esbuild.build({
+  ...common,
   entryPoints: {
     'editor.worker': require.resolve('monaco-editor/editor/editor.worker.js'),
     'json.worker': require.resolve('monaco-editor/language/json/json.worker.js')

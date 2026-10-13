@@ -338,6 +338,15 @@ function validateConfig(input, { imported = false } = {}) {
   return { version: 2, sessions, settings, snippets: input.snippets === undefined ? undefined : validateSnippets(input.snippets), snapshots: input.snapshots === undefined && imported ? undefined : validateSnapshots(input.snapshots, sessions), commandHistory: input.commandHistory === undefined && imported ? undefined : validateCommandHistory(input.commandHistory, settings?.commandHistoryLimit ?? 200) };
 }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function validateQuickConnect(input) {
+  object(input, 'Quick Connect request', ['profile', 'saveSession', 'showOnStartup']);
+  object(input.profile, 'Quick Connect profile', SESSION_KEYS);
+  if (typeof input.saveSession !== 'boolean' || typeof input.showOnStartup !== 'boolean') fail('Quick Connect options must be boolean.');
+  // Quick Connect creates a new profile; it cannot overwrite an existing ID.
+  const profile = validateSession({ ...input.profile, id: randomUUID() });
+  return { profile, saveSession: input.saveSession, showOnStartup: input.showOnStartup };
+}
+
 function createStore(directory) {
   if (typeof directory !== 'string' || !path.isAbsolute(directory)) fail('Configuration directory must be an absolute path.');
   const filename = path.join(directory, 'config.json');
@@ -382,6 +391,21 @@ function createStore(directory) {
   }
   return {
     load,
+    prepareQuickConnect(input) {
+      const request = validateQuickConnect(input);
+      const state = load();
+      const changed = state.settings.showQuickConnectOnStartup !== request.showOnStartup;
+      state.settings.showQuickConnectOnStartup = request.showOnStartup;
+      if (request.saveSession) {
+        if (state.sessions.length >= 1000) fail('At most 1000 sessions can be saved.');
+        state.sessions.push(request.profile);
+      }
+      // Preference and optional profile share one validated, atomic write.
+      const saved = request.saveSession || changed ? persist(state) : state;
+      const profile = { ...request.profile };
+      if (!request.saveSession) delete profile.id;
+      return { profile, state: saved };
+    },
     saveSession(input) {
       const session = validateSession(input);
       const state = load();
@@ -444,4 +468,4 @@ function createStore(directory) {
   };
 }
 
-module.exports = { DEFAULT_SETTINGS, validateSession, validateSettings, validateSnippets, validateCommandHistory, validateSnapshots, buildLaunch, parseSecureCRTIni, createStore };
+module.exports = { DEFAULT_SETTINGS, validateSession, validateQuickConnect, validateSettings, validateSnippets, validateCommandHistory, validateSnapshots, buildLaunch, parseSecureCRTIni, createStore };

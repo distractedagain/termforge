@@ -1257,7 +1257,7 @@ function openSftp() {
   if (profile && ['ssh', 'sftp'].includes(profile.protocol)) {
     secureTransfers.open(profile).catch(error => toast(errorMessage(error), true));
   } else if (secureTransfers.connected()) secureTransfers.show();
-  else { workflows.openQuickConnect(); $('quick-sftp').checked = true; $('quick-sftp').dispatchEvent(new Event('change')); }
+  else workflows.openQuickConnect({fileSession:true});
 }
 
 function showSessionOptions() {
@@ -1573,6 +1573,18 @@ async function init() {
     const name = String(action);
     if (!document.querySelector('dialog[open]') || focusedEditTarget() && ['copy', 'cut', 'paste', 'select-all', 'undo', 'redo'].includes(name)) runAction(name);
   });
+  api.onQuickConnectRequest?.(async ({id}) => {
+    if (!ready) return;
+    try {
+      const accepted = await api.quickConnectAccept(id);
+      if (!accepted) return;
+      state = { ...state, ...accepted.state };
+      renderSessions(); workflows.refresh();
+      await openConnection(accepted.profile);
+    } catch (error) { toast(errorMessage(error), true); }
+  });
+  api.onQuickConnectCredentials?.(() => secureConnections.openCredentials().catch(error => toast(errorMessage(error), true)));
+  $('credential-dialog').addEventListener('close', () => api.quickConnectResume?.().catch(error => toast(errorMessage(error), true)));
   api.onTerminalData(handleTerminalData);
   api.onTerminalExit(handleTerminalExit);
   if (typeof api.onTerminalOpened === 'function') api.onTerminalOpened((event) => { if (!connections.has(event.id) && event.profile) { createConnection(event, event.profile); activate(event.id); renderSessions(); workflows.refresh(); } });

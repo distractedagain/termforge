@@ -9,6 +9,11 @@ const subscribe = (name) => (callback) => {
 };
 contextBridge.exposeInMainWorld('termforge', {
   getState: invoke('getState'),
+  quickConnectOpen: invoke('quickConnectOpen'),
+  quickConnectAccept: invoke('quickConnectAccept'),
+  quickConnectResume: invoke('quickConnectResume'),
+  onQuickConnectRequest: subscribe('quickConnectRequest'),
+  onQuickConnectCredentials: subscribe('quickConnectCredentials'),
   credentialStatus: invoke('credentialStatus'),
   credentialList: invoke('credentialList'),
   credentialSave: invoke('credentialSave'),

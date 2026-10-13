@@ -1017,8 +1017,14 @@ async function run() {
   await check('Connect Bar refuses embedded passwords without opening a session', mac, async () => {
     const before = (await calls(mac)).opens.length; await mac.locator('#connect-address').fill('ssh://demo:secret@example.test'); await mac.locator('#connect-address').press('Enter'); await mac.locator('.toast').filter({ hasText: 'Passwords must be entered' }).waitFor(); assert.equal((await calls(mac)).opens.length, before);
   });
-  await check('Quick Connect Raw TCP uses port 23 and does not save by default', mac, async () => {
-    const before = await state(mac); const count = (await calls(mac)).opens.length; await nativeDialog(mac, 'quick-connect', 'quick-connect-dialog'); await mac.locator('#quick-protocol').selectOption('raw'); assert.equal(await mac.locator('#quick-port').inputValue(), '23'); await mac.locator('#quick-host').fill('raw.example.test'); await mac.locator('#quick-submit').click(); await mac.waitForFunction(count => window.__qa.calls.opens.length === count + 1, count); assert.equal((await calls(mac)).opens.at(-1).profile.protocol, 'raw'); assert.equal((await state(mac)).sessions.length, before.sessions.length);
+  await check('Quick Connect opens its native window and routes an unsaved Raw TCP request to a tab', mac, async () => {
+    const before = await state(mac); const count = (await calls(mac)).opens.length; const windows = (await calls(mac)).quickConnectOpens.length;
+    await action(mac, 'quick-connect'); await mac.waitForFunction(windows => window.__qa.calls.quickConnectOpens.length === windows + 1, windows);
+    assert.equal(await mac.locator('#quick-connect-dialog').count(), 0);
+    await mac.evaluate(() => window.__qa.emitQuickConnect({ profile: { name: 'Raw TCP', protocol: 'raw', host: 'raw.example.test', port: 23 }, saveSession: false }));
+    await mac.waitForFunction(count => window.__qa.calls.opens.length === count + 1, count);
+    assert.equal((await calls(mac)).opens.at(-1).profile.protocol, 'raw'); assert.equal((await calls(mac)).opens.at(-1).profile.port, 23);
+    assert.equal((await state(mac)).sessions.length, before.sessions.length);
   });
   await check('Tabs clone and reorder with real browser drag events', mac, async () => {
     await mac.locator('.tab-label').filter({ hasText: 'router-01' }).click(); const before = (await calls(mac)).opens.length; await action(mac, 'clone-session'); await mac.waitForFunction(before => window.__qa.calls.opens.length === before + 1, before); assert.equal((await calls(mac)).opens.at(-1).profile.id, 'fixture-router');
@@ -1143,8 +1149,13 @@ async function run() {
       for (const name of ['file', 'edit', 'view', 'options', 'transfer', 'script', 'tools', 'window', 'help']) { await page.locator(`[data-menu="${name}"]`).click(); await page.locator('#menu-dropdown').waitFor(); assert.ok((await page.locator('#menu-dropdown').innerText()).trim()); await page.keyboard.press('Escape'); }
       assert.equal((await calls(page)).opens.length, 0);
     });
-    await check(`${platform} Quick Connect saves a profile only when requested`, page, async () => {
-      await nativeDialog(page, 'quick-connect', 'quick-connect-dialog'); await page.locator('#quick-host').fill('quick.example.test'); await page.locator('#quick-save').check(); await page.locator('#quick-name').fill('Saved synthetic quick connection'); await page.locator('#quick-submit').click(); await page.waitForFunction(() => window.__qa.calls.opens.length === 1); assert.ok((await state(page)).sessions.some(profile => profile.name === 'Saved synthetic quick connection')); assert.ok((await calls(page)).opens[0].request.sessionId);
+    await check(`${platform} Quick Connect handoff refreshes saved sessions before opening a tab`, page, async () => {
+      await page.locator('#quick-connect').click(); await page.waitForFunction(() => window.__qa.calls.quickConnectOpens.length === 1);
+      assert.equal(await page.locator('#quick-connect-dialog').count(), 0);
+      await page.evaluate(() => window.__qa.emitQuickConnect({ profile: { name: 'Saved synthetic quick connection', protocol: 'ssh', host: 'quick.example.test' }, saveSession: true }));
+      await page.waitForFunction(() => window.__qa.calls.opens.length === 1);
+      assert.ok((await state(page)).sessions.some(profile => profile.name === 'Saved synthetic quick connection')); assert.ok((await calls(page)).opens[0].request.sessionId);
+      assert.equal(await page.locator('.session-main').filter({ hasText: 'Saved synthetic quick connection' }).count(), 1);
     });
     await check(`${platform} responsive workspace fits the compact viewport`, page, async () => {
       await page.setViewportSize({ width: 850, height: 600 }); await screenshot(page, `${platform}-synthetic-850x600`); const size = await dimensions(page); assert.equal(size.body.width, 850); assert.equal(size.body.height, 600); assert.ok(size.terminal.right <= 850); assert.ok(size.footer.bottom <= 600); return size;

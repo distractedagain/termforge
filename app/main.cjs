@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu, safeStorage, screen } = require('electron');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { createStore, validateSession, parseSecureCRTIni } = require('./core.cjs');
@@ -17,6 +17,7 @@ const { createCredentialVault } = require('./credentials.cjs');
 const { createAuthPrompts } = require('./auth-prompts.cjs');
 const { createSecureSsh } = require('./secure-ssh.cjs');
 const { createSecureTransfers } = require('./secure-transfers.cjs');
+const { createQuickConnectWindow } = require('./quick-connect-window.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -31,6 +32,7 @@ let credentials;
 let authPrompts;
 let secureSsh;
 let secureTransfers;
+let quickConnect;
 const dirtyProjects = new Set();
 const savingProjects = new Map();
 let activeTerminalId = null;
@@ -48,6 +50,7 @@ function send(channel, value) {
   if (window && !window.isDestroyed()) window.webContents.send(`termforge:${channel}`, value);
 }
 async function cleanupTerminals() {
+  quickConnect?.close();
   localAi?.close();
   authPrompts?.closeAll();
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
@@ -93,7 +96,7 @@ async function approveNative({ title, message, detail, accept, signal }) {
 }
 
 function applicationMenu() {
-  const action = (label, key, accelerator) => ({ label, ...(accelerator ? { accelerator } : {}), click: () => send('menuAction', key) });
+  const action = (label, key, accelerator) => ({ label, ...(accelerator ? { accelerator } : {}), click: () => { if (!quickConnect?.routeMenuAction(key)) send('menuAction', key); } });
   const separator = { type: 'separator' };
   return Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [{ role: 'about' }, separator, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, separator, { role: 'quit' }] }] : []),
@@ -170,6 +173,9 @@ async function importSecureCRT() {
 
 function registerHandlers() {
   handle('getState', getState);
+  handle('quickConnectOpen', options => quickConnect.open(options));
+  handle('quickConnectAccept', id => quickConnect.accept(id));
+  handle('quickConnectResume', () => quickConnect.resumeCredentials());
   handle('credentialStatus', () => credentials.status());
   handle('credentialList', () => credentials.list());
   handle('credentialSave', input => credentials.save(input));
@@ -398,6 +404,26 @@ async function boot() {
   credentials = createCredentialVault({ directory: dataDirectory, safeStorage, confirmUse: ({ name, host, port, fingerprint, signal }) => approveNative({ title: 'Allow saved credential', message: `Use “${name}” with ${host}:${port}?`, detail: `Verified server key: ${fingerprint}\n\nThis allows this credential to authenticate to this host and key on future connections. Only approve servers you trust with these credentials.`, accept: 'Allow credential', signal }) });
   secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
   secureTransfers = createSecureTransfers({ connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event), confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }) });
+  quickConnect = createQuickConnectWindow({
+    BrowserWindow, ipcMain, parent: window, preload: path.join(__dirname, 'quick-connect-preload.cjs'),
+    workArea: screen.getDisplayMatching(window.getBounds()).workArea,
+    isStopping: () => shuttingDown || quitting,
+    getState: async () => {
+      let entries = [], credentialError = '';
+      try { entries = await credentials.list(); }
+      catch { credentialError = 'Saved credentials could not be loaded. Use a username or open the credential manager to check storage.'; }
+      return { platform: process.platform, settings: store.load().settings,
+        credentials: entries, credentialError, serialPorts: await listSerialPorts().catch(() => []) };
+    },
+    prepare: input => store.prepareQuickConnect(input),
+    requestMain: request => send('quickConnectRequest', request),
+    manageCredentials: () => send('quickConnectCredentials'),
+    chooseIdentityFile: async parent => {
+      const result = await dialog.showOpenDialog(parent, { title: 'Choose SSH private key', properties: ['openFile'], defaultPath: path.join(app.getPath('home'), '.ssh') });
+      return result.canceled ? null : result.filePaths[0];
+    }
+  });
+  window.on('closed', () => quickConnect.dispose());
   terminals = createTerminalManager({ managedTransport: profile => secureSsh.createTerminal(profile), cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });
   automation = createAutomationManager({
     getSessionProfiles: () => store.load().sessions,

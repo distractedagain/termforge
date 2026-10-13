@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Quick Connect</title>
+    <link rel="stylesheet" href="./dist/quick-connect.css">
+    <script defer src="./dist/quick-connect.js"></script>
+  </head>
+  <body>
+    <form id="quick-connect-form" autocomplete="off" aria-label="Quick Connect">
+      <main class="connection-content">
+        <fieldset id="quick-fields" disabled>
+          <legend class="visually-hidden">Connection details</legend>
+          <div class="form-row protocol-row">
+            <label for="quick-protocol">Protocol:</label>
+            <div class="protocol-fields">
+              <select id="quick-protocol">
+                <option value="ssh">SSH2</option><option value="sftp">SFTP</option><option value="telnet">Telnet</option><option value="raw">Raw TCP</option><option value="serial">Serial</option><option value="local">Local shell</option>
+              </select>
+              <label id="quick-sftp-label" class="check-label"><input id="quick-sftp" type="checkbox">SFTP session</label>
+            </div>
+          </div>
+          <div id="quick-host-label" class="form-row">
+            <label for="quick-host">Hostname:</label><input id="quick-host" required maxlength="253" spellcheck="false" autocapitalize="off">
+          </div>
+          <div class="port-engine-row">
+            <div id="quick-port-label" class="form-row"><label for="quick-port">Port:</label><input id="quick-port" type="number" min="1" max="65535" step="1" value="22" required></div>
+            <div id="quick-backend-label" class="engine-field"><label for="quick-backend">SSH:</label><select id="quick-backend"><option value="managed">Managed SSH</option><option value="openssh">System OpenSSH</option></select></div>
+          </div>
+          <div id="quick-auth-fields">
+            <div id="quick-user-label" class="form-row">
+              <label class="check-label"><input id="quick-use-username" type="radio" name="quick-auth-choice" value="username" checked>Username:</label>
+              <input id="quick-user" aria-label="SSH username" maxlength="128" placeholder="Prompt if empty" spellcheck="false" autocapitalize="off">
+            </div>
+            <div id="quick-credentials-label" class="form-row">
+              <label class="check-label"><input id="quick-use-credential" type="radio" name="quick-auth-choice" value="credential">Credentials:</label>
+              <div class="input-action"><select id="quick-credential" aria-label="Saved credential" disabled><option value="">Choose a saved credential</option></select><button id="quick-manage-credentials" type="button" class="square-button" title="Manage saved credentials" aria-label="Manage saved credentials"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3.5a6 6 0 0 0-5.7 8L3 17.3V21h3.7l1.5-1.5V17h2.5l1.3-1.3a6 6 0 1 0 2.5-12.2Z"/><circle cx="16.5" cy="7.5" r="1.5"/></svg></button></div>
+            </div>
+            <fieldset id="quick-managed-auth" class="authentication-box">
+              <legend>Authentication</legend>
+              <div class="authentication-controls">
+                <div id="quick-auth-order" role="group" aria-label="Authentication methods, tried from top to bottom" aria-describedby="quick-auth-help"></div>
+                <div class="authentication-actions"><button id="quick-auth-up" type="button" class="square-button" aria-label="Move selected authentication method up" title="Try selected method earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 15 7-7 7 7Z"/></svg></button><button id="quick-auth-down" type="button" class="square-button" aria-label="Move selected authentication method down" title="Try selected method later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7Z"/></svg></button></div>
+              </div>
+              <span id="quick-auth-help" class="visually-hidden">Methods are tried from top to bottom. Select a method and use the arrow buttons to reorder it, or press Alt plus Up or Down.</span>
+            </fieldset>
+            <div class="form-row identity-row"><label for="quick-identity">Identity file:</label><div class="input-action"><input id="quick-identity" maxlength="4096" placeholder="Use SSH agent" spellcheck="false" autocapitalize="off"><button id="quick-choose-identity" type="button">Browse…</button></div></div>
+            <p id="quick-auth-note" class="field-note"></p>
+          </div>
+          <div id="quick-serial-label" class="form-row" hidden><label for="quick-serial">Serial port:</label><input id="quick-serial" list="serial-port-options" maxlength="4096" spellcheck="false" autocapitalize="off"><datalist id="serial-port-options"></datalist></div>
+          <div id="quick-cwd-label" class="form-row" hidden><label for="quick-cwd">Directory:</label><input id="quick-cwd" maxlength="4096" spellcheck="false" autocapitalize="off"></div>
+          <div class="connection-options"><label class="check-label"><input id="quick-startup" type="checkbox">Show Quick Connect on startup</label><label class="check-label"><input id="quick-save" type="checkbox">Save session</label></div>
+          <div id="quick-name-label" class="form-row" hidden><label for="quick-name">Session name:</label><input id="quick-name" maxlength="120"></div>
+          <p id="quick-destination-note" class="field-note destination-note">Opens in a terminal tab.</p>
+        </fieldset>
+        <p id="quick-status" class="field-note" role="status">Loading connection settings…</p>
+        <div id="quick-error" class="form-error" role="alert" hidden></div>
+      </main>
+      <footer class="connection-footer"><button id="quick-cancel" type="button">Cancel</button><button id="quick-submit" type="submit" class="default-button" disabled>Connect</button></footer>
+    </form>
+  </body>
+</html>

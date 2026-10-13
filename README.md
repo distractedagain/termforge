@@ -26,6 +26,16 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## In development for 0.10 — Native Quick Connect window
+
+Quick Connect now opens in its own movable, resizable desktop window with a standard operating-system title bar. On macOS, the window uses native close, minimize and zoom controls; Windows and Linux use their own window controls. The terminal workspace stays open behind it, and opening Quick Connect again brings back the same form.
+
+The layout follows the familiar connection workflow: protocol, hostname/port, username or named credentials, ordered authentication, identity file, startup preference and optional session saving. Credential management returns to the same connection draft. Terminal connections open in the main workspace, and SFTP opens the existing graphical file browser. Cancel or Escape dismisses an unsubmitted form without connecting.
+
+The auxiliary window has a restricted bridge, and its connection requests are validated before the main workspace accepts them. Duplicate requests cannot create multiple connections; a failed save or unavailable workspace leaves an error on the form for retry.
+
+Local focused tests pass. Cross-platform CI, the native Linux window smoke and installer builds are still pending for this source; **v0.9.0 remains the published download above**. Native macOS title-bar appearance and installed-package interaction have not been checked. See [0.10 release notes](docs/RELEASE-v0.10.0.md) and the [0.10 verification record](docs/VERIFICATION-v0.10.0.md).
+
 ## New in 0.9 — Credentials and file transfer
 
 ![Quick Connect with named credentials and ordered authentication](docs/images/quick-connect-v0.9.png)
