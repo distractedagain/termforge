@@ -29,6 +29,6 @@ This order is an engineering recommendation based on ForgeCRT's current architec
 
 ## Evidence boundaries
 
-Version 0.16 source changes require new platform/native release evidence before distribution. Version 0.15's [verification record](VERIFICATION-v0.15.0.md) distinguishes local tests, headless UI, native Linux IPC, platform builds and installed-app behavior. See [file-transfer limits](SECURE-CONNECTIONS.md) and the broader [feature inventory](FEATURES.md).
+Version 0.16 passed all four source CI jobs and installer builds, 300 headless interface checks, and native Linux checks for folder recovery, two-way conflict choices, reviewed mirroring and FTP/FTPS. The public release source tag, thirteen assets and twelve checksum entries were verified. The [0.16 verification record](VERIFICATION-v0.16.0.md) distinguishes local tests, headless UI, native Linux IPC, platform builds and remaining installed-app/credential-storage gaps. See [file-transfer limits](SECURE-CONNECTIONS.md) and the broader [feature inventory](FEATURES.md).
 
 Focused static analysis of user-supplied SecureFX artifacts can help identify observable workflows, but it does not establish runtime behavior, complete implementation coverage or compatibility. Reference binaries, raw decompilation and proprietary artwork are kept outside the ForgeCRT repository. Feature implementations and tests are original.

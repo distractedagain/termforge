@@ -2,7 +2,7 @@
 
 ForgeCRT is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original workspace includes a separate native Quick Connect window and docked manager layout informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — ForgeCRT 0.16.0 (release verification pending)
+## Current release scope — ForgeCRT 0.16.0
 
 | Workflow | ForgeCRT implementation | Limits |
 | --- | --- | --- |
@@ -63,6 +63,8 @@ The limited INI reader imports nonsecret SSH2 connection metadata, not passwords
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+Version 0.16.0 adopts the ForgeCRT name and adds durable SFTP folder recovery, hybrid SCP/SFTP recovery, explicit two-way synchronization, reviewed mirroring and FTP/FTPS individual-file transfers. All four source CI jobs and installer builds passed at `cab6f7edc9d6cddf20381f822b2dc3da95f17026`. Both Macs and Linux passed 550 backend tests each; Windows passed 532 with 18 expected skips. Linux passed 300 interface checks and native Electron transfer, branding and storage-identity checks. [ForgeCRT v0.16.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.16.0); anonymous verification confirmed its source tag, thirteen assets and twelve checksum entries. See [0.16 verification](VERIFICATION-v0.16.0.md) for completed checks and explicit installed-app/credential-storage limits.
 
 Version 0.15.0 adds resumable individual SFTP files, reviewed folder merging, one-way content synchronization and bounded remote text editing. All four source CI jobs and installer builds passed at `4b850a26f4c56b416406f1a939cbc115ad8318a9`. Both Macs and Linux passed 475 backend tests each; Windows passed 460 with 15 expected skips. Linux passed 284 interface checks and native Electron tests for all four new workflows. [Version 0.15.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.15.0); anonymous verification confirmed the source tag, thirteen assets and twelve checksum entries. See [0.15 verification](VERIFICATION-v0.15.0.md) for provenance and explicit limits.
 

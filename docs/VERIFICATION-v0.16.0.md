@@ -1,6 +1,6 @@
 # ForgeCRT 0.16.0 verification
 
-Status: local validation completed; corrected platform CI, packaging, native Linux smoke and publication are pending. Version 0.15.0 remains the latest verified public release until those gates pass.
+Status: [ForgeCRT v0.16.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.16.0). Local validation, all four platform CI jobs, installer packaging, native Linux smoke and independent public-asset verification passed.
 
 ## Scope
 
@@ -22,9 +22,24 @@ Initial CI passed 547 backend tests on both Macs and Linux, plus all 300 Linux i
 
 The corrected source passed all 550 backend tests on both Macs and 532 with 18 expected platform skips on Windows. Apple Silicon, Windows and Linux packaging passed, but the Intel packaging runner exposed two lost-response tests whose injected 50 ms deadline could expire during successful setup. Those fixtures now allow a bounded two-second RPC deadline, deliberately delay ordinary reads beyond the old threshold, and assert that the intended missing OPEN/RENAME response was actually reached. Their nine-test wire suite passed locally; production timeouts remain unchanged. Final builds and CI must include this fixture correction.
 
-## Pending platform and publication evidence
+## Final platform evidence
 
-All four source CI and installer packaging jobs must pass against one source commit before publishing. Linux native smoke adds folder recovery, two-way conflict decisions, mirror decline/apply, FTP/FTPS through real preload IPC and preserved storage-identity assertions. That smoke has been authored and syntax-checked but has not run locally. Public release hashes and provenance have not yet been verified for this version.
+The release tag points to tested source `cab6f7edc9d6cddf20381f822b2dc3da95f17026`. All four [source CI jobs](https://github.com/distractedagain/termforge/actions/runs/38479293855) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38479293220) passed at that exact commit.
+
+| Platform | Backend tests passed | Expected skips | Failures |
+| --- | ---: | ---: | ---: |
+| macOS Apple Silicon | 550 | 0 | 0 |
+| macOS Intel | 550 | 0 | 0 |
+| Linux x64 | 550 | 0 | 0 |
+| Windows x64 | 532 | 18 | 0 |
+
+Linux passed all 300 headless interface checks and seven localhost Ansible checks. Both Macs also passed the seven localhost Ansible checks. Production audits reported zero vulnerabilities. Both macOS application bundles passed strict ad-hoc signature integrity verification; this is not Apple notarization.
+
+The final native Linux Electron run passed folder recovery, two-way conflict choices, mirror decline/apply, FTP/explicit FTPS/implicit FTPS round trips, control/data certificate rejection, and masked FTP authentication through the real preload boundary. Existing SSH host verification, SFTP file/remote-edit workflows, native Quick Connect, menu routing, PTY, editor and import checks also passed. The runtime name, native userData path, Chromium session-data path, isolated configuration override and ForgeCRT display branding were verified. Linux's insecure `basic_text` credential backend was correctly refused; a successful OS keyring unlock was not exercised.
+
+## Publication
+
+The [publisher](https://github.com/distractedagain/termforge/actions/runs/38480241621) passed after validating the eight packages and four platform build records. Public release ID `412173744` is a published preview. Anonymous verification completed at `2026-10-13T22:50:04.934Z`: the exact source tag, all thirteen public assets and twelve manifest entries matched. The checksum manifest and four build records were downloaded anonymously and independently hashed. Eight installer hashes were compared against GitHub's recorded SHA-256 asset digests; installer bytes were not downloaded or independently rehashed again during that separate public check.
 
 ## Evidence boundaries
 
