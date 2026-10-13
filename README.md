@@ -2,15 +2,15 @@
 
 A free, open-source desktop terminal and automation client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, Python automation, and a local project editor with reviewed Ansible runs. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
 
-![TermForge modern dark workspace with illustrative saved sessions](docs/images/modern-welcome-dark.png)
+![TermForge project editor in the modern dark interface](docs/images/project-workspace-dark.png)
 
-This 0.7 preview uses synthetic saved sessions; no device is connected. It was captured in a headless browser, so native macOS window controls are not shown.
+This 0.8 preview uses a temporary localhost project; no device is connected. It was captured in a headless browser, so native window controls are not shown.
 
 ## Download
 
-[Download the TermForge v0.7.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.7.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+[Download the TermForge v0.8.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.8.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
 
-Earlier previews remain available: [TermForge v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
+Earlier previews remain available: [TermForge v0.7.0](https://github.com/distractedagain/termforge/releases/tag/v0.7.0), [v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. Core terminal features require no subscription, activation, account, or cloud service. Optional free online AI requires your own OpenRouter account and API key; local AI uses a separately installed Ollama model.
 
@@ -26,7 +26,7 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.8 source — Project workspace
+## New in 0.8 — Project workspace
 
 Edit automation files alongside your terminal sessions with the locally bundled Monaco editor. File tabs, YAML diagnostics and Ansible snippets, JSON language services, and Python/Jinja editing support a complete edit/review/save workflow. Git status and diffs are read-only. Saves detect external changes and retain up to twenty private backup versions per file outside the project.
 
@@ -36,7 +36,9 @@ The local 0.8 source passed **200/200 backend tests** with no skips, **97/97 exi
 
 At source `c2d00e3c9284a6c304f821cf2698a50f46dce847`, all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38342881401) and all four [packaging jobs](https://github.com/distractedagain/termforge/actions/runs/38342904453) passed; packaging succeeded on its first attempt. Both Macs and Linux passed 200 backend tests each plus 7 real localhost Ansible checks; Windows passed 195 backend tests with five expected platform-specific skips. Both Mac packages passed strict recursive ad-hoc signature checks. Linux also passed the 97 interface and 13 project checks plus a real Electron source-app smoke: native clipboard completion, YAML/JSON file saves, a working custom-protocol JSON worker, no CSP violations and no terminal writes from editor actions. Folder selection was stubbed. See [verification details](docs/UI-VERIFICATION.md).
 
-No Electron window was launched on the development laptop. Packaged interactive behavior, real WSL, device collections and live AI inference remain unverified. The download above remains v0.7 until the new preview is published.
+No Electron window was launched on the development laptop. Packaged interactive behavior, real WSL, device collections and live AI inference remain unverified.
+
+The [v0.8.0 publisher](https://github.com/distractedagain/termforge/actions/runs/38343844109) verified all eight packages, four build records and the checksum manifest before publication. All thirteen public assets match GitHub's SHA-256 digests, and all twelve manifest entries match their assets. Anonymous downloads of the manifest and four build records confirmed the tagged source; the installers were not downloaded again during that public verification.
 
 ## Modern workspace added in 0.7
 
