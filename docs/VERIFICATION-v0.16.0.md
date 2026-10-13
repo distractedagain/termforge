@@ -9,7 +9,7 @@ ForgeCRT display-name transition; durable SFTP folder copy/merge/one-way synchro
 ## Local evidence
 
 - Complete backend suite: 546 passed, zero failures/skips, bounded concurrency. A subsequent real-SFTP mirror regression also passed with 22 targeted mirror/two-way checks, bringing the final source suite to 547 tests.
-- New protocol coverage includes 48 recovery tests, 61 folder tests and 25 FTP/FTPS tests. These use isolated temporary files and real loopback SSH/SFTP/FTP/TLS sockets where specified; SCP initial payload and resumed suffix are checked separately in both directions.
+- Final protocol coverage includes 51 recovery tests, 61 folder tests and 25 FTP/FTPS tests. These use isolated temporary files and real loopback SSH/SFTP/FTP/TLS sockets where specified; SCP initial payload and resumed suffix are checked separately in both directions.
 - All 300 headless interface checks passed: 242 across the eight existing main/project/security/Quick Connect/menu/key/import/remote-operation suites plus the 58 transfer checks below.
 - Transfer UI suites passed 19 folder, 23 existing workflow and 16 new advanced workflow checks in headless Chromium. The advanced suite covers protocol capability gating, explicit conflict review, exact mirror deletions, folder/SCP recovery labels, early completion, queued FTP refresh, late connection-close events and narrow-window focus/layout.
 - Renderer builds, syntax checks and diff validation passed. Production dependency audit found zero vulnerabilities.
@@ -19,6 +19,8 @@ ForgeCRT display-name transition; durable SFTP folder copy/merge/one-way synchro
 ## Platform issues corrected before publication
 
 Initial CI passed 547 backend tests on both Macs and Linux, plus all 300 Linux interface checks and seven localhost Ansible checks. Windows exposed large numeric filesystem identifiers in recovery metadata and a transient SCP staging-file lock; focused regression fixes passed 51 local recovery tests, including an opaque filesystem-ID fixture and transient/persistent lock cases. The final bounded SCP reopen checks also passed 3/3. The initial packaging hook referenced a nonexistent optional notice; it now packages the dependency’s actual LICENSE.txt, and the complete license-copy hook passes locally. The expanded native smoke reached successful folder recovery before its old two-minute suite timeout; its overall budget is now five minutes, with individual operation deadlines unchanged. No initial-run artifacts were published.
+
+The corrected source passed all 550 backend tests on both Macs and 532 with 18 expected platform skips on Windows. Apple Silicon, Windows and Linux packaging passed, but the Intel packaging runner exposed two lost-response tests whose injected 50 ms deadline could expire during successful setup. Those fixtures now allow a bounded two-second RPC deadline, deliberately delay ordinary reads beyond the old threshold, and assert that the intended missing OPEN/RENAME response was actually reached. Their nine-test wire suite passed locally; production timeouts remain unchanged. Final builds and CI must include this fixture correction.
 
 ## Pending platform and publication evidence
 

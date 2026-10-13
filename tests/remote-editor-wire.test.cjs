@@ -150,20 +150,46 @@ test('real SFTP remote editor retains staged edit and changed destination on com
   assert.equal(await fsp.readFile(path.join(f.remote, 'home', stages[0]), 'utf8'), 'proposed\n');
 });
 
-test('real SFTP lost staging open acknowledgment reports possible file path without changing original', async t => {
-  const f = await fixture(t, { commitTimeoutMs: 50, afterOpen: async ({ flags }) => flags & OPEN_MODE.WRITE ? false : undefined });
+// These are lost-response tests, not 50 ms latency tests. Give successful RPCs
+// room to complete on a loaded runner, and deliberately delay ordinary reads
+// beyond the old timeout so setup cannot accidentally be the tested failure.
+const lostAcknowledgmentTimeoutMs = 2000;
+
+test('real SFTP lost staging open acknowledgment reports possible file path without changing original', { timeout: 20000 }, async t => {
+  let droppedOpen = null;
+  const f = await fixture(t, {
+    commitTimeoutMs: lostAcknowledgmentTimeoutMs, onRead: () => pause(75),
+    afterOpen: async ({ name, flags }) => { if (flags & OPEN_MODE.WRITE) { assert.equal(droppedOpen, null); droppedOpen = name; return false; } },
+  });
   await source(f); const plan = await f.prepare(await f.open());
-  await assert.rejects(f.manager.remoteEditSave({ planId: plan.planId }), /staging file may remain at .*\.part/);
+  await assert.rejects(f.manager.remoteEditSave({ planId: plan.planId }), error => {
+    assert.match(droppedOpen || '', /^\/home\/\.termforge-.*\.part$/, 'The missing staging OPEN response must be reached before timeout');
+    assert.equal(error.code, 'TRANSFER_TIMEOUT');
+    assert.match(error.message, /staging file may remain at .*\.part/);
+    return true;
+  });
   assert.equal(await fsp.readFile(path.join(f.remote, 'home', 'config.txt'), 'utf8'), 'original\n');
+  assert.equal((await fsp.stat(path.join(f.remote, droppedOpen))).size, 0);
+  assert.deepEqual(f.mutations, [['open', droppedOpen]], 'An unacknowledged OPEN must not trigger writes or cleanup');
 });
 
-test('real SFTP lost final rename acknowledgment reports uncertainty and never deletes saved data', async t => {
-  const f = await fixture(t, { commitTimeoutMs: 50, afterRename: async ({ to }) => to === '/home/config.txt' ? false : undefined });
+test('real SFTP lost final rename acknowledgment reports uncertainty and never deletes saved data', { timeout: 20000 }, async t => {
+  let droppedRename = null;
+  const f = await fixture(t, {
+    commitTimeoutMs: lostAcknowledgmentTimeoutMs, onRead: () => pause(75),
+    afterRename: async ({ from, to }) => { if (to === '/home/config.txt') { assert.equal(droppedRename, null); droppedRename = [from, to]; return false; } },
+  });
   await source(f); const plan = await f.prepare(await f.open(), 'committed replacement\n');
-  await assert.rejects(f.manager.remoteEditSave({ planId: plan.planId }), /outcome could not be verified/);
+  await assert.rejects(f.manager.remoteEditSave({ planId: plan.planId }), error => {
+    assert.equal(droppedRename?.[1], '/home/config.txt', 'The missing final RENAME response must be reached before timeout');
+    assert.equal(error.indeterminate, true);
+    assert.match(error.message, /outcome could not be verified.*operation timed out/s);
+    return true;
+  });
   assert.equal(await fsp.readFile(path.join(f.remote, 'home', 'config.txt'), 'utf8'), 'committed replacement\n');
   const recovery = (await fsp.readdir(path.join(f.remote, 'home'))).filter(name => name.endsWith('.recovery')); assert.equal(recovery.length, 1);
   assert.equal(await fsp.readFile(path.join(f.remote, 'home', recovery[0]), 'utf8'), 'original\n');
+  assert.deepEqual(f.mutations.at(-1), ['rename', ...droppedRename], 'An unacknowledged final RENAME must not trigger rollback or cleanup');
 });
 
 test('real SFTP editor reservation blocks competing mutations and disconnect aborts approval', async t => {
