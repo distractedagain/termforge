@@ -10,10 +10,14 @@ const MAX_RECORDS = 100;
 const NOFOLLOW = fs.constants.O_NOFOLLOW || 0;
 
 function cleanSnapshot(value) {
+  // Node's numeric Stats can expose Windows filesystem IDs above 2^53.
+  // Treat ino/dev as opaque integer identity values, matching the planner;
+  // sizes and counts remain safe integers because transfer arithmetic uses them.
   if (value === null) return null;
   if (!value || !['file', 'directory'].includes(value.type) || !Number.isSafeInteger(value.size) || value.size < 0
     || !Number.isFinite(value.mtime) || !Number.isSafeInteger(value.mode)
-    || ['uid','gid','ino','dev'].some(key=>value[key]!==undefined&&!Number.isSafeInteger(value[key]))
+    || ['uid','gid'].some(key=>value[key]!==undefined&&!Number.isSafeInteger(value[key]))
+    || ['ino','dev'].some(key=>value[key]!==undefined&&!Number.isInteger(value[key]))
     || (value.ctime!==undefined&&!Number.isFinite(value.ctime)) || (value.permissions!==undefined&&!/^[0-7]{3}$/.test(value.permissions))) throw new Error('Invalid folder recovery metadata.');
   return Object.fromEntries(['type','size','mtime','mode','permissions','uid','gid','ino','dev','ctime'].filter(key => value[key] !== undefined).map(key => [key,value[key]]));
 }

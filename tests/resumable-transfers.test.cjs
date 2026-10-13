@@ -51,6 +51,7 @@ async function fixture(t, options = {}) {
           entries.length ? stream.name(id, entries) : stream.status(id, STATUS_CODE.EOF);
         });
         action('OPEN', async (id, name, flags, attr) => {
+          await options.onOpen?.({ name, flags, local, remote });
           let openFlags = flags & OPEN_MODE.WRITE ? (flags & OPEN_MODE.READ ? fs.constants.O_RDWR : fs.constants.O_WRONLY) : fs.constants.O_RDONLY;
           if (flags & OPEN_MODE.CREAT) openFlags |= fs.constants.O_CREAT;
           if (flags & OPEN_MODE.EXCL) openFlags |= fs.constants.O_EXCL;
@@ -378,6 +379,31 @@ for(const direction of ['upload','download']) test(`SCP ${direction} sends initi
   await f.manager.closeAll();const restored=f.createManager();await restored.initializeRecovery();assert.equal(restored.listJobs()[0].protocol,'scp');const connection=await restored.open(f.endpoint);
   await restored.resume({transferId:job.transferId,id:connection.id});const done=await waitStatus(restored,job.transferId,['completed','interrupted','failed']);assert.equal(done.status,'completed',done.error);assert.equal(f.commands.length,1);
   assert.deepEqual(await fsp.readFile(direction==='upload'?path.join(f.remote,'file'):filename),payload);
+});
+
+for (const permanent of [false, true]) test(`SCP upload read-only verification ${permanent ? 'retains recovery after persistent' : 'retries transient'} Windows file-lock errors`, {skip:spawnSync('scp',['-V']).error?.code==='ENOENT',timeout:30000}, async t => {
+  let asked=false, attempts=0, busy=true;
+  const f=await fixture(t, {
+    onEvent(event,manager) { if(event.status==='running'&&event.bytes>0&&!asked) { asked=true;void manager.pause(event.transferId); } },
+    onOpen({name,flags}) {
+      if(busy && name.endsWith('.part') && flags===OPEN_MODE.READ) {
+        attempts++;
+        if(permanent || attempts<=2) throw Object.assign(new Error('EBUSY: resource busy or locked'), {code:'EBUSY'});
+      }
+    }
+  });
+  const payload=Buffer.alloc(2*1024*1024,71),filename=path.join(f.local,'file');await fsp.writeFile(filename,payload);
+  const started=f.manager.start({id:f.connection.id,direction:'upload',protocol:'scp',resumable:true,localPath:filename,remotePath:'/file'});
+  const retained=await waitStatus(f.manager,started.transferId,['paused','interrupted','failed','completed']);
+  assert.equal(retained.status,permanent?'interrupted':'paused',retained.error);
+  assert.equal(attempts,permanent?8:3);assert.equal(retained.resumeAvailable,true);
+  assert.equal(f.commands.length,1);assert.equal((await fsp.readdir(f.recoveryDirectory)).length,1);
+  assert.equal((await fsp.readdir(f.remote)).filter(name=>name.endsWith('.part')).length,1);
+  await assert.rejects(fsp.stat(path.join(f.remote,'file')),/ENOENT/);
+  busy=false;await f.manager.resume({transferId:started.transferId,id:f.connection.id});
+  const completed=await waitStatus(f.manager,started.transferId,['completed','interrupted','failed']);
+  assert.equal(completed.status,'completed',completed.error);assert.equal(f.commands.length,1);
+  assert.deepEqual(await fsp.readFile(path.join(f.remote,'file')),payload);
 });
 
 async function pausedFolder(t,direction,options={}) {

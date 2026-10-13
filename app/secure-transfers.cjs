@@ -666,7 +666,19 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
       if(initialScp) {
         if(upload) await closeTarget();
         await scp(job,session,upload?source:target,upload?checkpoint.stagePath:job.remotePath,upload,true);
-        if(upload)target=await call(session.sftp,'open',[checkpoint.stagePath,'r+'],signal);
+        if(upload) {
+          // Some Windows SCP sinks release their file lock just after channel
+          // closure. Only retry this read-only reopen, never a payload/commit.
+          const reopenDeadline=Date.now()+3000;
+          for(let attempt=0;;attempt++) {
+            try { target=await call(session.sftp,'open',[checkpoint.stagePath,'r'],signal,Math.max(1,reopenDeadline-Date.now()));break; }
+            catch(error) {
+              const busy=error.code==='EBUSY'||error.code===4&&/\b(?:EBUSY|resource busy|locked)\b/i.test(error.message||'');
+              if(!busy||attempt>=7||Date.now()>=reopenDeadline)throw error;
+              await bounded(new Promise(resolve=>setTimeout(resolve,Math.min(250,25*2**attempt,reopenDeadline-Date.now()))),signal);
+            }
+          }
+        }
         else await target.sync();
         const actual=readableFile(upload?await call(session.sftp,'fstat',[target],signal):await target.stat());
         if(actual.size>job.total || !equalParents(stageIdentity(actual,upload),checkpoint.stageIdentity))throw new Error('The SCP staging identity or size changed.');

@@ -27,7 +27,6 @@ module.exports = async () => {
     ['serialport/LICENSE', 'serialport.txt'],
     ['ssh2/LICENSE', 'ssh2.txt'],
     ['basic-ftp/LICENSE.txt', 'basic-ftp.txt'],
-    ['basic-ftp/NOTICE.txt', 'basic-ftp-notice.txt'],
     ['asn1/LICENSE', 'asn1.txt'],
     ['bcrypt-pbkdf/LICENSE', 'bcrypt-pbkdf.txt'],
     ['tweetnacl/LICENSE', 'tweetnacl.txt'],

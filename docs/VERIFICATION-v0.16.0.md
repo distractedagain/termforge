@@ -1,6 +1,6 @@
 # ForgeCRT 0.16.0 verification
 
-Status: local validation completed; platform CI, packaging, native Linux smoke and publication are pending. Version 0.15.0 remains the latest verified public release until those gates pass.
+Status: local validation completed; corrected platform CI, packaging, native Linux smoke and publication are pending. Version 0.15.0 remains the latest verified public release until those gates pass.
 
 ## Scope
 
@@ -15,6 +15,10 @@ ForgeCRT display-name transition; durable SFTP folder copy/merge/one-way synchro
 - Renderer builds, syntax checks and diff validation passed. Production dependency audit found zero vulnerabilities.
 - Independent reviews fixed disconnected FTP cleanup ownership, source/target validation order before mirror deletion, premature queue refresh, one-sided refresh after fast two-way completion and stale connection state after a close event raced the open reply.
 - Wide dark conflict-review and narrow FTP-form screenshots were visually inspected. No Electron process was launched on the development laptop.
+
+## Platform issues corrected before publication
+
+Initial CI passed 547 backend tests on both Macs and Linux, plus all 300 Linux interface checks and seven localhost Ansible checks. Windows exposed large numeric filesystem identifiers in recovery metadata and a transient SCP staging-file lock; focused regression fixes passed 51 local recovery tests, including an opaque filesystem-ID fixture and transient/persistent lock cases. The final bounded SCP reopen checks also passed 3/3. The initial packaging hook referenced a nonexistent optional notice; it now packages the dependency’s actual LICENSE.txt, and the complete license-copy hook passes locally. The expanded native smoke reached successful folder recovery before its old two-minute suite timeout; its overall budget is now five minutes, with individual operation deadlines unchanged. No initial-run artifacts were published.
 
 ## Pending platform and publication evidence
 
