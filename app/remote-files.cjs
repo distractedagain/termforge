@@ -61,7 +61,7 @@ function createRemoteFiles({ getSession, isTransferring, call, stat, summary, co
     } else if (!target || !['file', 'directory'].includes(target.type)) {
       throw new Error('Only existing regular files and directories can be changed; symbolic links are not followed.');
     }
-    if (plan.review.operation === 'chmod' && (target.mode & 0o7000)) throw new Error('This item has special permission bits (setuid, setgid, or sticky). Change them with a dedicated administration tool; TermForge will not silently clear them.');
+    if (plan.review.operation === 'chmod' && (target.mode & 0o7000)) throw new Error('This item has special permission bits (setuid, setgid, or sticky). Change them with a dedicated administration tool; ForgeCRT will not silently clear them.');
     if (plan.review.destination && await stat(sftp, plan.review.destination, signal)) throw new Error('The remote destination already exists. Rename never overwrites a target.');
     if (plan.review.operation === 'delete' && target.type === 'directory') {
       const entries = await call(sftp, 'readdir', [plan.review.path], signal);

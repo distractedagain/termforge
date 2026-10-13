@@ -38,7 +38,7 @@ function createTerminalManager({ spawn, transport = createTransport, managedTran
     catch (error) {
       try { stopOutput(entry, field); } catch { /* Preserve the terminal after a file I/O error. */ }
       const label = field === 'capture' ? 'ASCII receive' : 'output logging';
-      emitData({ id: entry.id, data: `\r\n[TermForge: ${label} stopped ${error.code === 'OUTPUT_LIMIT' ? 'at the 128 MiB limit' : 'because the file could not be written'}.]\r\n` });
+      emitData({ id: entry.id, data: `\r\n[ForgeCRT: ${label} stopped ${error.code === 'OUTPUT_LIMIT' ? 'at the 128 MiB limit' : 'because the file could not be written'}.]\r\n` });
     }
   }
   function send(entry, data) {

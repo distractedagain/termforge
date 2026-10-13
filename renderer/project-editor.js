@@ -29,7 +29,7 @@ globalThis.MonacoEnvironment = {
 jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: false, enableSchemaRequest: false, schemas: [] });
 
 const snippets = [
-  ['playbook', 'Ansible playbook', '---\n- name: ${1:Describe this play}\n  hosts: ${2:all}\n  gather_facts: false\n  tasks:\n    - name: ${3:Describe the task}\n      ansible.builtin.debug:\n        msg: "${4:Hello from TermForge}"\n'],
+  ['playbook', 'Ansible playbook', '---\n- name: ${1:Describe this play}\n  hosts: ${2:all}\n  gather_facts: false\n  tasks:\n    - name: ${3:Describe the task}\n      ansible.builtin.debug:\n        msg: "${4:Hello from ForgeCRT}"\n'],
   ['task', 'Named Ansible task', '- name: ${1:Describe the task}\n  ansible.builtin.${2:debug}:\n    ${3:msg}: ${4:value}\n'],
   ['template', 'Render a Jinja template', '- name: ${1:Render configuration}\n  ansible.builtin.template:\n    src: ${2:templates/config.j2}\n    dest: ${3:/etc/example.conf}\n    mode: "0644"\n'],
   ['copy', 'Copy a file with an explicit mode', '- name: ${1:Copy configuration}\n  ansible.builtin.copy:\n    src: ${2:files/config.conf}\n    dest: ${3:/etc/example.conf}\n    mode: "0644"\n'],

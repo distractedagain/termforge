@@ -17,7 +17,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
 async function fixture(t, options = {}) {
-  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'termforge-transfer-'));
+  const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'termforge-transfer-')));
   const remote = path.join(directory, 'remote'); const local = path.join(directory, 'local');
   await fsp.mkdir(remote); await fsp.mkdir(local);
   const clients = new Set(); const commands = []; const events = []; const children = new Set();
@@ -72,6 +72,8 @@ async function fixture(t, options = {}) {
           stream.status(id, STATUS_CODE.OK);
         });
         action('CLOSE', async (id, handle) => { const item = lookup(handle); handles.delete(handle.readUInt32BE()); await item.file?.close(); stream.status(id, STATUS_CODE.OK); });
+        action('MKDIR', async(id,name,attr)=>{await fsp.mkdir(remoteFile(name),{mode:attr.mode||0o700});if(options.afterMkdir&&await options.afterMkdir({name,remote})===false)return;stream.status(id,STATUS_CODE.OK);});
+        action('SETSTAT', async(id,name,attr)=>{if(attr.mode!==undefined)await fsp.chmod(remoteFile(name),attr.mode&0o7777);stream.status(id,STATUS_CODE.OK);});
         action('REMOVE', async (id, name) => { await fsp.unlink(remoteFile(name)); stream.status(id, STATUS_CODE.OK); });
         action('RENAME', async (id, from, to) => {
           const source = remoteFile(from); const target = remoteFile(to);
@@ -110,7 +112,7 @@ async function fixture(t, options = {}) {
   function createManager(overrides = {}) {
     const manager = createSecureTransfers({ home: local, recoveryDirectory,
       emit: event => { events.push(event); options.onEvent?.(event, manager); },
-      confirmOverwrite: options.confirmOverwrite || (async () => true), confirmResume: options.confirmResume || (async () => true),
+      confirmFolderTransfer: async()=>true, confirmOverwrite: options.confirmOverwrite || (async () => true), confirmResume: options.confirmResume || (async () => true),
       confirmDiscardPartial: options.confirmDiscardPartial || (async () => true),
       getConnectionIdentity: () => ({...identity}), commitTimeoutMs: options.commitTimeoutMs || 30000,
       connect: () => new Promise((resolve, reject) => {
@@ -364,4 +366,70 @@ for(const pass of [1,2]) test(`shutdown aborts ${pass===1?'completed-stage':'reo
   const restored=f.createManager();await restored.initializeRecovery();const connection=await restored.open(f.endpoint);
   await restored.resume({transferId:job.transferId,id:connection.id});const done=await waitStatus(restored,job.transferId,['completed','interrupted','failed']);assert.equal(done.status,'completed',done.error);
   assert.deepEqual(await fsp.readFile(path.join(f.remote,'file')),payload);
+});
+
+
+for(const direction of ['upload','download']) test(`SCP ${direction} sends initial payload over SCP and resumes verified suffix over SFTP`,{skip:spawnSync('scp',['-V']).error?.code==='ENOENT',timeout:25000},async t=>{
+  let asked=false;const f=await fixture(t,{onEvent(event,manager){if(event.status==='running'&&event.bytes>0&&!asked){asked=true;void manager.pause(event.transferId);}}});
+  const payload=Buffer.alloc(2*1024*1024);for(let i=0;i<payload.length;i++)payload[i]=i%251;
+  const filename=path.join(f.local,'file');await fsp.writeFile(direction==='upload'?filename:path.join(f.remote,'file'),payload);
+  const job=f.manager.start({id:f.connection.id,direction,protocol:'scp',resumable:true,localPath:filename,remotePath:'/file'});
+  const paused=await waitStatus(f.manager,job.transferId,['paused','interrupted','failed','completed']);assert.equal(paused.status,'paused',paused.error);assert.equal(paused.protocol,'scp');assert.equal(paused.hybridResume,true);assert.equal(paused.resumeTransport,'sftp');assert.equal(f.commands.length,1);assert.ok(f.commands[0].startsWith('scp '));assert.ok(paused.retainedBytes<payload.length);
+  await f.manager.closeAll();const restored=f.createManager();await restored.initializeRecovery();assert.equal(restored.listJobs()[0].protocol,'scp');const connection=await restored.open(f.endpoint);
+  await restored.resume({transferId:job.transferId,id:connection.id});const done=await waitStatus(restored,job.transferId,['completed','interrupted','failed']);assert.equal(done.status,'completed',done.error);assert.equal(f.commands.length,1);
+  assert.deepEqual(await fsp.readFile(direction==='upload'?path.join(f.remote,'file'):filename),payload);
+});
+
+async function pausedFolder(t,direction,options={}) {
+  let asked=false;const f=await fixture(t,{...options,onEvent(event,manager){if(event.kind==='folder'&&event.status==='running'&&event.filesCompleted>=1&&event.bytes>=65536&&!asked){asked=true;void manager.pause(event.transferId);}options.onEvent?.(event,manager);}});
+  const source=path.join(direction==='upload'?f.local:f.remote,'source');await fsp.mkdir(source);await fsp.mkdir(path.join(source,'nested'));
+  const small=Buffer.from('completed first file'),large=Buffer.alloc(300000,9);await fsp.writeFile(path.join(source,'a'),small);await fsp.writeFile(path.join(source,'nested','b'),large);
+  const localPath=direction==='upload'?source:path.join(f.local,'target'),remotePath=direction==='upload'?'/target':'/source';
+  await options.setup?.({source,target:direction==='upload'?path.join(f.remote,'target'):localPath,local:f.local,remote:f.remote});
+  const plan=await f.manager.prepareFolderTransfer({id:f.connection.id,direction,localPath,remotePath,resumable:true,mode:options.mode||'copy',conflictPolicy:options.conflictPolicy||'skip'});assert.equal(plan.resumable,true);
+  const started=await f.manager.startFolderTransfer({planId:plan.planId});const job=await waitStatus(f.manager,started.transferId,['paused','interrupted','failed','completed']);assert.equal(job.status,'paused',job.error);assert.equal(job.filesCompleted,1);assert.ok(job.retainedBytes>small.length);assert.equal(job.kind,'folder');
+  return {...f,job,source,small,large,localPath,remotePath};
+}
+for(const direction of ['upload','download']) test(`folder ${direction} restores completed files and partial child after restart`,{timeout:40000},async t=>{
+  const f=await pausedFolder(t,direction);await f.manager.closeAll();const json=await fsp.readFile(path.join(f.recoveryDirectory,(await fsp.readdir(f.recoveryDirectory))[0]),'utf8');assert.ok(!json.includes('test-only'));assert.ok(!json.includes('fixture-user'));
+  const restored=f.createManager();await restored.initializeRecovery();const recovered=restored.listJobs()[0];assert.equal(recovered.kind,'folder');assert.equal(recovered.filesCompleted,1);const connection=await restored.open(f.endpoint);
+  await restored.resume({transferId:f.job.transferId,id:connection.id});const done=await waitStatus(restored,f.job.transferId,['completed','interrupted','failed']);assert.equal(done.status,'completed',done.error);assert.equal(done.filesCompleted,2);assert.equal(done.directoriesCreated,2);
+  const target=direction==='upload'?path.join(f.remote,'target'):f.localPath;assert.deepEqual(await fsp.readFile(path.join(target,'a')),f.small);assert.deepEqual(await fsp.readFile(path.join(target,'nested','b')),f.large);assert.deepEqual(await fsp.readdir(f.recoveryDirectory),[]);
+});
+for(const mutation of ['changed-source','added-source','completed-destination','added-destination'])test(`folder resume refuses ${mutation} and retains completed output`,{timeout:30000},async t=>{
+  const f=await pausedFolder(t,'upload');const destination=path.join(f.remote,'target');
+  if(mutation==='changed-source')await fsp.writeFile(path.join(f.source,'a'),'different content');
+  if(mutation==='added-source')await fsp.writeFile(path.join(f.source,'extra'),'extra');
+  if(mutation==='completed-destination')await fsp.writeFile(path.join(destination,'a'),'externally changed');
+  if(mutation==='added-destination')await fsp.writeFile(path.join(destination,'extra'),'extra');
+  const before=await fsp.readFile(path.join(destination,'a'));await f.manager.resume({transferId:f.job.transferId,id:f.connection.id});const result=await waitStatus(f.manager,f.job.transferId,['interrupted','failed']);assert.match(result.error,/changed/);assert.deepEqual(await fsp.readFile(path.join(destination,'a')),before);assert.equal(result.resumeAvailable,true);
+});
+test('forgetting folder recovery keeps completed children and partial staging files',{timeout:30000},async t=>{
+  const f=await pausedFolder(t,'upload');const before=await fsp.readdir(path.join(f.remote,'target','nested'));assert.equal(f.job.forgetOnly,true);const result=await f.manager.discardPartial({transferId:f.job.transferId,id:f.connection.id});assert.equal(result.discarded,true);assert.ok(result.retainedFiles.length);assert.deepEqual(await fsp.readdir(path.join(f.remote,'target','nested')),before);assert.deepEqual(await fsp.readFile(path.join(f.remote,'target','a')),f.small);assert.deepEqual(await fsp.readdir(f.recoveryDirectory),[]);
+});
+
+for(const direction of ['upload','download'])for(const mode of ['merge','sync'])test(`resumable ${direction} folder ${mode} preserves reviewed replacements and destination-only files`,{timeout:30000},async t=>{
+  const f=await pausedFolder(t,direction,{mode,conflictPolicy:'replace',setup:async({target})=>{await fsp.mkdir(target);await fsp.mkdir(path.join(target,'nested'));await fsp.writeFile(path.join(target,'a'),'old');await fsp.writeFile(path.join(target,'nested','b'),'older');await fsp.writeFile(path.join(target,'keep'),'keep this');}});
+  await f.manager.closeAll();const restored=f.createManager();await restored.initializeRecovery();const connection=await restored.open(f.endpoint);await restored.resume({transferId:f.job.transferId,id:connection.id});
+  const done=await waitStatus(restored,f.job.transferId,['completed','interrupted','failed']);assert.equal(done.status,'completed',done.error);const target=direction==='upload'?path.join(f.remote,'target'):f.localPath;
+  assert.equal(await fsp.readFile(path.join(target,'keep'),'utf8'),'keep this');assert.deepEqual(await fsp.readFile(path.join(target,'a')),f.small);assert.deepEqual(await fsp.readFile(path.join(target,'nested','b')),f.large);
+});
+for(const mutation of ['mkdir','rename'])test(`folder ${mutation} acknowledgement uncertainty disables resume and preserves output`,{timeout:10000},async t=>{
+  const f=await fixture(t,{commitTimeoutMs:30,...(mutation==='mkdir'?{afterMkdir:async()=>false}:{afterRename:async()=>false})});const source=path.join(f.local,'source');await fsp.mkdir(source);await fsp.writeFile(path.join(source,'file'),'payload');
+  const review=await f.manager.prepareFolderTransfer({id:f.connection.id,direction:'upload',localPath:source,remotePath:'/target',resumable:true});const job=await f.manager.startFolderTransfer({planId:review.planId});const result=await waitStatus(f.manager,job.transferId,['interrupted','failed']);assert.equal(result.status,'interrupted',result.error);assert.equal(result.resumeAvailable,false);assert.equal(result.forgetOnly,true);
+  await assert.rejects(f.manager.resume({transferId:job.transferId,id:f.connection.id}),/no resumable|session is closed/);const discard=await f.manager.discardPartial({transferId:job.transferId});assert.equal(discard.discarded,true);assert.ok(await fsp.stat(path.join(f.remote,'target')));if(mutation==='rename')assert.equal(await fsp.readFile(path.join(f.remote,'target','file'),'utf8'),'payload');
+});
+test('folder resume refuses a corrupted nested partial and leaves it intact',{timeout:25000},async t=>{
+  const f=await pausedFolder(t,'upload');const record=JSON.parse(await fsp.readFile(path.join(f.recoveryDirectory,(await fsp.readdir(f.recoveryDirectory))[0]),'utf8'));const filename=path.join(f.remote,...record.child.stagePath.split('/').filter(Boolean));const buffer=await fsp.readFile(filename);buffer[0]^=255;await fsp.writeFile(filename,buffer);await f.manager.resume({transferId:f.job.transferId,id:f.connection.id});const result=await waitStatus(f.manager,f.job.transferId,['interrupted','failed']);assert.match(result.error,/partial bytes/);assert.deepEqual(await fsp.readFile(filename),buffer);
+});
+test('folder recovery loader rejects a child checkpoint outside the reviewed tree',{timeout:25000},async t=>{
+  const f=await pausedFolder(t,'upload');const filename=path.join(f.recoveryDirectory,(await fsp.readdir(f.recoveryDirectory))[0]);const cp=JSON.parse(await fsp.readFile(filename,'utf8'));cp.child.remotePath='/unrelated';await fsp.writeFile(filename,JSON.stringify(cp),{mode:0o600});const restored=f.createManager();assert.match((await restored.initializeRecovery()).error,/outside/);assert.deepEqual(restored.listJobs(),[]);
+});
+
+test('folder pause at a completed-child boundary retains no duplicate child and resumes the remaining entries',{timeout:25000},async t=>{
+  let asked=false;const f=await fixture(t,{onEvent(event,manager){if(event.kind==='folder'&&event.status==='running'&&event.filesCompleted===1&&!asked){asked=true;void manager.pause(event.transferId);}}});
+  const source=path.join(f.local,'source');await fsp.mkdir(source);await fsp.writeFile(path.join(source,'a'),'a');await fsp.writeFile(path.join(source,'b'),'b');
+  const review=await f.manager.prepareFolderTransfer({id:f.connection.id,direction:'upload',localPath:source,remotePath:'/target',resumable:true});const job=await f.manager.startFolderTransfer({planId:review.planId});const paused=await waitStatus(f.manager,job.transferId,['paused','interrupted','failed','completed']);assert.equal(paused.status,'paused',paused.error);assert.equal(paused.filesCompleted,1);
+  const cp=JSON.parse(await fsp.readFile(path.join(f.recoveryDirectory,(await fsp.readdir(f.recoveryDirectory))[0]),'utf8'));assert.equal(cp.child,null);assert.equal(cp.completed.length,1);assert.throws(()=>f.manager.assertExternalAvailable(),/retained/);
+  await f.manager.resume({transferId:job.transferId,id:f.connection.id});const done=await waitStatus(f.manager,job.transferId,['completed','failed','interrupted']);assert.equal(done.status,'completed',done.error);assert.equal(done.filesCompleted,2);assert.equal(await fsp.readFile(path.join(f.remote,'target','a'),'utf8'),'a');assert.equal(await fsp.readFile(path.join(f.remote,'target','b'),'utf8'),'b');f.manager.assertExternalAvailable();
 });

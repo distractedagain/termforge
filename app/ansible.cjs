@@ -86,7 +86,7 @@ function createAnsibleManager({ projects, send = () => {}, dataDirectory = path.
         forceTimer = setTimeout(() => signal('SIGKILL'), 250);
         exitTimer = setTimeout(() => {
           done = true; entry.unverified = true;
-          const failure = new Error('Controller probe or stop-helper shutdown could not be verified. Keep TermForge open and check controller processes.');
+          const failure = new Error('Controller probe or stop-helper shutdown could not be verified. Keep ForgeCRT open and check controller processes.');
           failure.shutdownUnverified = true; resolveExit(false); reject(failure);
         }, 1500);
         signal('SIGTERM');
@@ -131,7 +131,7 @@ function createAnsibleManager({ projects, send = () => {}, dataDirectory = path.
       return { ...options, available: result.code === 0 && answer.available === true, runnerVersion: text(answer.runnerVersion, 120), ansibleVersion: text(answer.ansibleVersion, 120), pythonVersion: text(answer.pythonVersion, 120), ...(answer.error ? { error: text(answer.error), hint: text(answer.hint) } : {}) };
     } catch (error) {
       retainDirectory = error.shutdownUnverified === true;
-      return { ...options, available: false, error: text(error.message), hint: options.controller === 'wsl' ? 'Install WSL with a Linux distribution, then install Python, ansible-core and ansible-runner inside that distribution. Select its Python executable. TermForge does not install packages automatically.' : 'Install ansible-core and ansible-runner in a Python virtual environment, then select that environment’s Python executable. TermForge does not install packages automatically.' };
+      return { ...options, available: false, error: text(error.message), hint: options.controller === 'wsl' ? 'Install WSL with a Linux distribution, then install Python, ansible-core and ansible-runner inside that distribution. Select its Python executable. ForgeCRT does not install packages automatically.' : 'Install ansible-core and ansible-runner in a Python virtual environment, then select that environment’s Python executable. ForgeCRT does not install packages automatically.' };
     } finally { if (!retainDirectory) await fs.rm(directory, { recursive: true, force: true }); }
   }
   async function reviewedFile(projectId, root, filename) {
@@ -289,9 +289,9 @@ function createAnsibleManager({ projects, send = () => {}, dataDirectory = path.
     const entries = [...running.values()]; for (const entry of entries) { entry.cancelled = true; stop(entry); }
     let timer;
     try {
-      const results = await Promise.race([Promise.all(entries.map(entry => entry.exited)), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Controller shutdown could not be verified. Keep TermForge open and check the controller processes.')), cancelGraceMs + 12000); })]);
+      const results = await Promise.race([Promise.all(entries.map(entry => entry.exited)), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Controller shutdown could not be verified. Keep ForgeCRT open and check the controller processes.')), cancelGraceMs + 12000); })]);
       const capturesVerified = await Promise.all(captures.map(entry => entry.exited));
-      if (results.some(result => result.shutdownUnverified) || capturesVerified.some(verified => !verified)) throw new Error('Controller process-tree shutdown could not be verified. Keep TermForge open and check the controller processes.');
+      if (results.some(result => result.shutdownUnverified) || capturesVerified.some(verified => !verified)) throw new Error('Controller process-tree shutdown could not be verified. Keep ForgeCRT open and check the controller processes.');
     } finally { clearTimeout(timer); }
   }
   return { probe, prepare, start, cancel, closeAll, hasProject(projectId) { return startingPlan?.projectId === projectId || [...running.values()].some(entry => entry.plan.projectId === projectId); }, get activeProjectId() { return startingPlan?.projectId || [...running.values()][0]?.plan.projectId || null; }, get count() { return running.size || Number(starting) || probes.size; } };

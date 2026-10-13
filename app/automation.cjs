@@ -32,7 +32,7 @@ function recordedInputToPython(events) {
   });
   // JSON data is loaded from a quoted string, never interpolated as Python code.
   const literal = JSON.stringify(JSON.stringify(normalized));
-  return `# $language = "Python3"\n# $interface = "1.0"\n# Recorded explicitly in TermForge. Review commands before running.\n# This replays input and pauses; it does not infer authenticated prompts.\nimport json\n\n_events = json.loads(${literal})\nfor _event in _events:\n    if _event["delayMs"]:\n        crt.Sleep(_event["delayMs"])\n    crt.Screen.Send(_event["data"])\n`;
+  return `# $language = "Python3"\n# $interface = "1.0"\n# Recorded explicitly in ForgeCRT. Review commands before running.\n# This replays input and pauses; it does not infer authenticated prompts.\nimport json\n\n_events = json.loads(${literal})\nfor _event in _events:\n    if _event["delayMs"]:\n        crt.Sleep(_event["delayMs"])\n    crt.Screen.Send(_event["data"])\n`;
 }
 
 function createAutomationManager({ getSessionProfiles = () => [], openSession, closeSession, writeTerminal, getActiveTerminalId = () => null, getTerminalIds, getTerminalDetails, getScreen, activateTerminal, emitOutput = () => {}, emitStatus = () => {}, spawn = spawnChild } = {}) {
@@ -259,7 +259,7 @@ function createAutomationManager({ getSessionProfiles = () => [], openSession, c
         entry.sleep = { ...pending, timer: setTimeout(() => { entry.sleep = null; pending.resolve(null); }, Math.ceil(params.milliseconds)) };
         return pending.promise;
       }
-      default: throw new Error(`Unsupported TermForge scripting method: ${method}`);
+      default: throw new Error(`Unsupported ForgeCRT scripting method: ${method}`);
     }
   }
   function handleFrame(entry, frame) {

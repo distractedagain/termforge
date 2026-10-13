@@ -81,7 +81,7 @@ async function hashFile(filename) {
 }
 
 function validateBuildInfo(info, spec, sha, version, files) {
-  assert(info.name === 'TermForge' && info.version === version && info.commit === sha, `Build provenance mismatch for ${spec.label}.`);
+  assert(info.name === 'ForgeCRT' && info.version === version && info.commit === sha, `Build provenance mismatch for ${spec.label}.`);
   assert(info.platform === spec.platform && info.architecture === spec.arch, `Platform/architecture mismatch for ${spec.label}.`);
   assert(info.backendUnitTestsPassed === true && info.rendererBuildPassed === true, `Required build checks did not pass for ${spec.label}.`);
   assert(info.desktopRuntimeTested === false, `Unexpected desktop runtime claim for ${spec.label}.`);
@@ -98,7 +98,7 @@ function normalizedBinaryName(filename, spec, version) {
   assert(new RegExp(`(?:^|[- _])${escaped}(?:$|[- _.])`).test(filename), 'Installer filename does not match the selected version.');
   const extension = filename.split('.').at(-1);
   assert(spec.extensions.includes(extension), `Unexpected installer type for ${spec.label}.`);
-  const stem = `TermForge-${version}-${spec.slug}`;
+  const stem = `ForgeCRT-${version}-${spec.slug}`;
   if (spec.platform === 'win32') return `${stem}-${/setup/i.test(filename) ? 'setup' : 'portable'}.exe`;
   return `${stem}.${extension}`;
 }
@@ -125,7 +125,7 @@ async function verifyAndStage(directory, spec, sha, version, staging) {
     await fsp.copyFile(path.join(directory, filename), destination, fs.constants.COPYFILE_EXCL);
     assets.push({ name, path: destination, hash: checksums.get(filename), size: (await fsp.stat(destination)).size });
   }
-  const name = `TermForge-${version}-${spec.slug}-BUILD_INFO.json`;
+  const name = `ForgeCRT-${version}-${spec.slug}-BUILD_INFO.json`;
   const destination = path.join(staging, name);
   await fsp.copyFile(path.join(directory, 'BUILD_INFO.json'), destination, fs.constants.COPYFILE_EXCL);
   assets.push({ name, path: destination, hash: await hashFile(destination), size: (await fsp.stat(destination)).size });
@@ -196,8 +196,8 @@ async function main({ env = process.env, runCommand = execute } = {}) {
     assets.push(...await verifyAndStage(directory, spec, sha, version, staging));
   }
   const expectedNames = PLATFORMS.flatMap(spec => spec.platform === 'win32'
-    ? [`TermForge-${version}-${spec.slug}-setup.exe`, `TermForge-${version}-${spec.slug}-portable.exe`]
-    : spec.extensions.map(extension => `TermForge-${version}-${spec.slug}.${extension}`));
+    ? [`ForgeCRT-${version}-${spec.slug}-setup.exe`, `ForgeCRT-${version}-${spec.slug}-portable.exe`]
+    : spec.extensions.map(extension => `ForgeCRT-${version}-${spec.slug}.${extension}`));
   assert(expectedNames.length === 8 && expectedNames.every(name => assets.some(asset => asset.name === name)), 'The eight expected binary targets are not all present.');
   assert(assets.length === 12 && new Set(assets.map(asset => asset.name)).size === assets.length, 'Missing or duplicate final release assets.');
   assets.sort((a, b) => a.name.localeCompare(b.name, 'en'));
@@ -212,7 +212,7 @@ async function main({ env = process.env, runCommand = execute } = {}) {
   const creationPayload = path.join(temporary, 'create-release.json');
   await fsp.writeFile(creationPayload, JSON.stringify({
     tag_name: tag,
-    name: `TermForge ${tag} — public preview`,
+    name: `ForgeCRT ${tag} — public preview`,
     body: notes,
     draft: true,
     prerelease: true,
@@ -240,7 +240,7 @@ async function main({ env = process.env, runCommand = execute } = {}) {
   const url = `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`;
   assert(published.html_url === url, 'Unexpected published release URL.');
   if (env.GITHUB_OUTPUT) await fsp.appendFile(env.GITHUB_OUTPUT, `release_url=${url}\ncommit=${sha}\n`);
-  if (env.GITHUB_STEP_SUMMARY) await fsp.appendFile(env.GITHUB_STEP_SUMMARY, `Published [TermForge ${tag}](${url}) from commit \`${sha}\`.\n\nAll eight binary packages, four build-provenance files, and combined SHA-256 checksums were verified. Desktop runtime testing remains pending; macOS builds use ad-hoc signatures and are unnotarized.\n`);
+  if (env.GITHUB_STEP_SUMMARY) await fsp.appendFile(env.GITHUB_STEP_SUMMARY, `Published [ForgeCRT ${tag}](${url}) from commit \`${sha}\`.\n\nAll eight binary packages, four build-provenance files, and combined SHA-256 checksums were verified. Desktop runtime testing remains pending; macOS builds use ad-hoc signatures and are unnotarized.\n`);
   process.stdout.write(`Published public preview: ${url}\n`);
   return { url, sha, assets: assets.map(asset => asset.name) };
 }

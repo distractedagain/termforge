@@ -20,7 +20,7 @@ function createAuthPrompts({ send, timeoutMs = 120000 } = {}) {
         const timer = setTimeout(abort, timeoutMs); timer.unref?.();
         pending.set(id, { resolve, timer, signal: input.signal, abort, count: input.prompts.length });
         input.signal?.addEventListener('abort', abort, { once: true });
-        try { send('authPrompt', { id, host: label(input.host, 253), port: input.port, kind: label(input.kind, 32), username: label(input.username, 128), instructions: label(input.instructions, 2048), prompts: input.prompts.map(item => ({ prompt: label(item.prompt, 512), echo: item.echo === true })) }); }
+        try { send('authPrompt', { id, host: label(input.host, 253), port: input.port, kind: label(input.kind, 32), protocol: ['ftp', 'ftps', 'ftps-implicit'].includes(input.protocol) ? input.protocol : 'ssh', username: label(input.username, 128), instructions: label(input.instructions, 2048), prompts: input.prompts.map(item => ({ prompt: label(item.prompt, 512), echo: item.echo === true })) }); }
         catch { finish(id, null); }
       });
     },

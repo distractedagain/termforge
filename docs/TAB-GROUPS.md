@@ -1,6 +1,6 @@
 # Tab groups and snapshots
 
-TermForge 0.5 adds independent tab groups. Each group shows its selected terminal; the focused group determines where keyboard input and active-session commands go. The existing broadcast control still targets all live connections after review.
+ForgeCRT 0.5 adds independent tab groups. Each group shows its selected terminal; the focused group determines where keyboard input and active-session commands go. The existing broadcast control still targets all live connections after review.
 
 ## Arrange terminals
 
@@ -24,6 +24,6 @@ Snapshots hold up to 32 saved connections. Unsaved quick connections and local s
 
 **Select** highlights the snapshot's profiles in the Session Manager without connecting or rearranging open terminals. **Connect…** shows the connection targets for review and opens each instance after confirmation. The restored layout is added beside existing tabs. If a connection fails to open, the others remain available; empty groups are removed and the result reports the number opened and failed. Authentication or later transport failures still appear in their respective terminals.
 
-Existing snapshots remain readable. Older snapshots contain one connection per profile and their original basic tile settings; they cannot recover instances or geometry that were never saved. Saving them again by the same name replaces them with the richer format after confirmation. Deleting a profile removes its instances from stored snapshots and repairs the remaining layout. JSON import remaps colliding profile IDs in every instance. TermForge 0.4 and earlier cannot read the new snapshot fields, so retain a configuration export from the older version if you plan to downgrade.
+Existing snapshots remain readable. Older snapshots contain one connection per profile and their original basic tile settings; they cannot recover instances or geometry that were never saved. Saving them again by the same name replaces them with the richer format after confirmation. Deleting a profile removes its instances from stored snapshots and repairs the remaining layout. JSON import remaps colliding profile IDs in every instance. ForgeCRT 0.4 and earlier cannot read the new snapshot fields, so retain a configuration export from the older version if you plan to downgrade.
 
 This is an independent implementation. Moving live tabs between application windows, selected-group command broadcasting, automatic workspace restoration at startup, floating managers, and complete SecureCRT layout equivalence remain outside this version.

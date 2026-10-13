@@ -321,7 +321,7 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
   async function agentList() {
     return exclusive(async () => {
       const result = await runTool('ssh-add', ['-l', '-E', 'sha256'], '', [0, 1, 2]);
-      if (result.code === 2) return { available: false, keys: [], message: 'No SSH authentication agent is available to TermForge.' };
+      if (result.code === 2) return { available: false, keys: [], message: 'No SSH authentication agent is available to ForgeCRT.' };
       if (result.code === 1) return { available: true, keys: [], message: 'The SSH agent has no identities.' };
       const keys = result.output.split(/\r?\n/u).filter(Boolean).slice(0, 128).map(line => {
         const match = /^(\d+) (SHA256:[A-Za-z0-9+/]+) (.*) \(([^()]*)\)$/u.exec(line);

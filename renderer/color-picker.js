@@ -131,7 +131,7 @@ export function createColorPicker({ getSettings, saveSettings }) {
   const schemeTitle = make('h3', 'color-scheme-selection-title');
   const description = make('p', 'color-scheme-description');
   const previewFrame = make('div', 'color-scheme-preview-frame');
-  const previewBar = make('div', 'color-scheme-preview-bar', 'TermForge — sample session');
+  const previewBar = make('div', 'color-scheme-preview-bar', 'ForgeCRT — sample session');
   const host = make('div', 'scheme-ansi-preview'); host.id = 'color-scheme-preview';
   previewFrame.append(previewBar, host);
   const sampleNote = make('p', 'field-note color-scheme-sample-note', 'Local ANSI sample. No connection is opened.');

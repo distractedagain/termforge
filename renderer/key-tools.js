@@ -21,7 +21,7 @@ export function initKeyTools({ api, toast = () => {} }) {
   const pass = secretField('key-tools-passphrase', 'New passphrase');
   const confirm = secretField('key-tools-confirm-passphrase', 'Confirm new passphrase');
   const choice = element('label', 'option-check'); const unencrypted = element('input'); unencrypted.type = 'checkbox'; unencrypted.id = 'key-tools-unencrypted'; choice.append(unencrypted, element('span', '', 'Save without a passphrase (unencrypted private key)'));
-  const privacy = element('p', 'field-note', 'Choose a new private-key filename in the next step. A matching .pub file is saved beside it. Existing files are never overwritten. Passphrases are used for this operation and are not saved in TermForge.');
+  const privacy = element('p', 'field-note', 'Choose a new private-key filename in the next step. A matching .pub file is saved beside it. Existing files are never overwritten. Passphrases are used for this operation and are not saved in ForgeCRT.');
   const result = element('pre', 'key-tools-result'); result.id = 'key-tools-result'; result.hidden = true; result.setAttribute('role', 'status'); result.tabIndex = 0;
   const error = element('p', 'form-error'); error.id = 'key-tools-error'; error.hidden = true; error.setAttribute('role', 'alert');
   const controls = element('div', 'key-tools-fields'); controls.append(generatedFields, old.label, pass.label, confirm.label, choice, privacy);

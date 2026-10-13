@@ -159,9 +159,9 @@ export function createLocalAiUi({ api, getConnection, stageCommand, reviewFileEd
       if (models.some((item) => item.name === previous)) model.value = previous;
       modelsPort = value;
       const excluded = Number(result.excluded) || 0;
-      modelStatus.textContent = online ? 'OpenRouter chooses an available free model. Free quota limits stop the request; TermForge never falls back to paid models.' : models.length
+      modelStatus.textContent = online ? 'OpenRouter chooses an available free model. Free quota limits stop the request; ForgeCRT never falls back to paid models.' : models.length
         ? `${models.length} installed local model${models.length === 1 ? '' : 's'}${excluded ? ` · ${excluded} unsupported or nonlocal model${excluded === 1 ? '' : 's'} hidden` : ''}.`
-        : 'No local models installed. Install a model in Ollama, then choose Refresh models. TermForge does not download models.';
+        : 'No local models installed. Install a model in Ollama, then choose Refresh models. ForgeCRT does not download models.';
     } catch (failure) {
       if (epoch !== refreshEpoch) return;
       modelStatus.textContent = online ? 'The free model route is unavailable. Choose Refresh models to try again.' : 'Start Ollama on this computer, then choose Refresh models. Models stay on this computer.';

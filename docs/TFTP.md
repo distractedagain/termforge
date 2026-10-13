@@ -1,6 +1,6 @@
 # TFTP server
 
-TermForge's TFTP backend is an original implementation of [RFC 1350](https://www.rfc-editor.org/info/rfc1350/). It serves octet (binary) files in 512-byte blocks, with separate UDP transfer ports, acknowledgments, retransmission limits, duplicate handling, and a final zero-length block when a file's size is a multiple of 512 bytes. A completed upload briefly keeps its transfer socket open so it can repeat the final ACK if the client lost it.
+ForgeCRT's TFTP backend is an original implementation of [RFC 1350](https://www.rfc-editor.org/info/rfc1350/). It serves octet (binary) files in 512-byte blocks, with separate UDP transfer ports, acknowledgments, retransmission limits, duplicate handling, and a final zero-length block when a file's size is a multiple of 512 bytes. A completed upload briefly keeps its transfer socket open so it can repeat the final ACK if the client lost it.
 
 The server starts only when explicitly requested. It defaults to loopback address `127.0.0.1`, UDP port `6969`, downloads only, and one explicitly allowed client IP. A network device must support a custom server port to use the default port; standard UDP port 69 may require elevated operating-system privileges. Each transfer uses an additional ephemeral UDP port on the selected bind address. Hostnames, wildcard client addresses, and multicast client addresses are rejected.
 

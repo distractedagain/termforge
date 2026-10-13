@@ -270,30 +270,30 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
     }
     function flush() {
       try { while (!stopped && channel && !blocked && queue.length) { const value = queue.shift(); queuedBytes -= Buffer.byteLength(value); blocked = !channel.write(value); } }
-      catch { output('\r\n[TermForge: The SSH terminal could not send input.]\r\n'); finish({ exitCode: 1, signal: 'error' }); }
+      catch { output('\r\n[ForgeCRT: The SSH terminal could not send input.]\r\n'); finish({ exitCode: 1, signal: 'error' }); }
     }
     queueMicrotask(async () => {
       try {
         client = await connect(profile, { signal: abort.signal });
         if (stopped) { client.destroy(); return; }
-        client.on('error', () => { output('\r\n[TermForge: SSH connection failed.]\r\n'); finish({ exitCode: 1, signal: 'error' }); });
+        client.on('error', () => { output('\r\n[ForgeCRT: SSH connection failed.]\r\n'); finish({ exitCode: 1, signal: 'error' }); });
         client.on('close', () => finish());
         const window = { term: profile.terminal.terminalType, cols, rows, width: 0, height: 0 };
         const ready = (error, stream) => {
-          if (error) { output('\r\n[TermForge: The SSH server could not open the terminal.]\r\n'); finish({ exitCode: 1, signal: 'error' }); return; }
+          if (error) { output('\r\n[ForgeCRT: The SSH server could not open the terminal.]\r\n'); finish({ exitCode: 1, signal: 'error' }); return; }
           if (stopped) { stream.destroy(); return; }
           channel = stream;
           stream.on('data', bytes => receiveBytes(bytes, decoder));
           stream.stderr.on('data', bytes => receiveBytes(bytes, errorDecoder));
           stream.on('drain', () => { blocked = false; flush(); });
-          stream.on('error', () => { output('\r\n[TermForge: The SSH terminal stream failed.]\r\n'); finish({ exitCode: 1, signal: 'error' }); });
+          stream.on('error', () => { output('\r\n[ForgeCRT: The SSH terminal stream failed.]\r\n'); finish({ exitCode: 1, signal: 'error' }); });
           stream.on('close', (code, signal) => finish({ exitCode: Number.isInteger(code) ? code : 0, signal: typeof signal === 'string' ? text(signal, 32) : null }));
           try { stream.setWindow(rows, cols, 0, 0); flush(); } catch { finish({ exitCode: 1, signal: 'error' }); }
         };
         if (profile.ssh.remoteCommand) client.exec(profile.ssh.remoteCommand, { pty: window }, ready);
         else client.shell(window, ready);
       } catch (error) {
-        if (!stopped) { output(`\r\n[TermForge: ${safeError(error).message}]\r\n`); finish({ exitCode: error.code === 'SSH_CANCELLED' ? 0 : 1, signal: error.code === 'SSH_CANCELLED' ? 'closed' : 'error' }); }
+        if (!stopped) { output(`\r\n[ForgeCRT: ${safeError(error).message}]\r\n`); finish({ exitCode: error.code === 'SSH_CANCELLED' ? 0 : 1, signal: error.code === 'SSH_CANCELLED' ? 'closed' : 'error' }); }
       }
     });
     return {

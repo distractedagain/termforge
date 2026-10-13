@@ -1,11 +1,11 @@
 {
   "name": "termforge",
-  "productName": "TermForge",
-  "version": "0.15.0",
+  "productName": "ForgeCRT",
+  "version": "0.16.0",
   "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",
-  "author": "TermForge contributors",
+  "author": "ForgeCRT contributors",
   "homepage": "https://github.com/distractedagain/termforge",
   "repository": {
     "type": "git",
@@ -32,12 +32,14 @@
     "test:session-import-ui": "node scripts/session-import-ui-check.cjs",
     "test:remote-files-ui": "node scripts/remote-files-ui-check.cjs",
     "test:folder-transfers-ui": "node scripts/folder-transfer-ui-check.cjs",
-    "test:transfer-workflows-ui": "node scripts/transfer-workflows-ui-check.cjs"
+    "test:transfer-workflows-ui": "node scripts/transfer-workflows-ui-check.cjs",
+    "test:advanced-transfers-ui": "node scripts/advanced-transfers-ui-check.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^6.0.0",
+    "basic-ftp": "6.2.3",
     "monaco-editor": "0.57.0",
     "node-pty": "1.1.0",
     "serialport": "^13.0.0",
@@ -52,7 +54,7 @@
   },
   "build": {
     "appId": "org.termforge.desktop",
-    "productName": "TermForge",
+    "productName": "ForgeCRT",
     "icon": "build/icon.png",
     "beforePack": "scripts/package-licenses.cjs",
     "directories": {
@@ -97,7 +99,8 @@
         "deb"
       ],
       "category": "Development",
-      "maintainer": "TermForge contributors"
+      "maintainer": "ForgeCRT contributors",
+      "executableName": "termforge"
     },
     "nsis": {
       "oneClick": false,
@@ -110,5 +113,6 @@
   "overrides": {
     "global-agent": "4.1.3",
     "dompurify": "3.4.17"
-  }
+  },
+  "desktopName": "termforge.desktop"
 }

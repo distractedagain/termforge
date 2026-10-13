@@ -3,7 +3,7 @@ const { buildMenus, sanitizeMenuState, findMenuAction, NATIVE_ACTIONS } = requir
 
 // Electron is injected so the menu lifecycle can be checked without starting an
 // application or touching a real keychain, clipboard or terminal.
-function createNativeMenu({ Menu, platform = process.platform, appName = 'TermForge', dispatch, runNative, getContext = () => ({}), onError = () => {} }) {
+function createNativeMenu({ Menu, platform = process.platform, appName = 'ForgeCRT', dispatch, runNative, getContext = () => ({}), onError = () => {} }) {
   if (!Menu || typeof Menu.buildFromTemplate !== 'function' || typeof Menu.setApplicationMenu !== 'function' || typeof dispatch !== 'function') throw new TypeError('Native menu dependencies are required.');
   let state = sanitizeMenuState(), signature = '', menus = [], disposed = false;
   function snapshot() {
@@ -44,8 +44,8 @@ function createNativeMenu({ Menu, platform = process.platform, appName = 'TermFo
     const next = snapshot(), nextSignature = JSON.stringify(next);
     if (signature === nextSignature) return false;
     const appMenu = platform === 'darwin' ? [{ label: appName, submenu: [
-      { role: 'about' }, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
-      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }
+      { role: 'about', label: `About ${appName}` }, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      { role: 'hide', label: `Hide ${appName}` }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit', label: `Quit ${appName}` }
     ] }] : [];
     const built = Menu.buildFromTemplate([...appMenu, ...template(next)]);
     Menu.setApplicationMenu(built);

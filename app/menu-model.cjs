@@ -5,7 +5,7 @@
 // script paths or connection profiles. Backend IPC remains the authority for work.
 const BASE_ACTIONS = new Set([
   'connect', 'quick-connect', 'local-shell', 'new-session', 'open-project', 'save-project-file',
-  'snapshots', 'reconnect', 'disconnect', 'clone-session', 'sftp', 'close-tab', 'log', 'pause-log',
+  'snapshots', 'reconnect', 'disconnect', 'clone-session', 'sftp', 'ftp-connect', 'close-tab', 'log', 'pause-log',
   'undo', 'redo', 'cut', 'copy', 'paste', 'select-all', 'find', 'clear-screen', 'reset-terminal', 'send-break',
   'show-command-window', 'show-button-bar', 'show-session-manager', 'show-command-manager', 'show-active-sessions',
   'connect-bar', 'project-workspace', 'local-ai', 'settings', 'session-options', 'snippets', 'color-schemes',
@@ -120,7 +120,7 @@ function buildMenus(input = {}, platform = 'linux') {
       item('Send Binary…', 'send-binary', alive), null,
       ...['Kermit', 'Xmodem', 'Ymodem'].flatMap(protocol => [unavailable(`Send ${protocol}…`, `send-${protocol.toLowerCase()}`, `${protocol} transfers are not implemented.`), unavailable(`Receive ${protocol}…`, `receive-${protocol.toLowerCase()}`, `${protocol} transfers are not implemented.`), null]),
       unavailable('Zmodem Upload List…', 'zmodem-list', 'Zmodem transfers are not implemented.'), unavailable('Start Zmodem Upload', 'zmodem-upload', 'Zmodem transfers are not implemented.'), null,
-      item(s.tftpRunning ? 'TFTP Server…' : 'Start TFTP Server…', 'tftp-server'), null, item('SFTP / SCP File Transfer…', 'sftp')
+      item(s.tftpRunning ? 'TFTP Server…' : 'Start TFTP Server…', 'tftp-server'), null, item('SFTP / SCP File Transfer…', 'sftp'), item('FTP / FTPS Connection…', 'ftp-connect')
     ] },
     { id: 'script', label: 'Script', submenu: [
       item('Run…', 'script-run'), item('Cancel', 'script-cancel', s.scriptRunning), null,
@@ -132,11 +132,11 @@ function buildMenus(input = {}, platform = 'linux') {
       item('Create Public Key…', 'create-public-key'), item('Convert Private Key to OpenSSH Format…', 'convert-private-key'),
       unavailable('Public-Key Assistant…', 'public-key-assistant', 'Remote authorized_keys installation is not implemented.'), null,
       item('Manage Agent Keys…', 'agent-keys'), item('Manage Saved Credentials…', 'credentials'),
-      unavailable('Change Credentials Password', 'credentials-password', 'Credentials use the operating system protected store; there is no TermForge master password.'), null,
+      unavailable('Change Credentials Password', 'credentials-password', 'Credentials use the operating system protected store; there is no ForgeCRT master password.'), null,
       unavailable('Change Configuration Passphrase…', 'configuration-passphrase', 'Configuration encryption with a master passphrase is not implemented.'), null,
       item('Export Settings…', 'export-settings'), unavailable('Import Settings from XML File…', 'import-xml', 'SecureCRT XML configuration is not supported. Import session INI files instead.'),
       item('Import Settings from Text File…', 'import-text'), null,
-      item('Import TermForge Settings…', 'import-json'), item('Import SecureCRT Sessions…', 'import-securecrt'), item('Trusted SSH Hosts…', 'ssh-hosts'), item('Clear Command History…', 'clear-history')
+      item('Import ForgeCRT Settings…', 'import-json'), item('Import SecureCRT Sessions…', 'import-securecrt'), item('Trusted SSH Hosts…', 'ssh-hosts'), item('Clear Command History…', 'clear-history')
     ] },
     { id: 'window', label: 'Window', submenu: [
       item('Tabs', 'tabbed', true, undefined, s.layout === 'tabs'), item('Tile Vertically', 'tile-vertical', multi, undefined, s.layout === 'vertical'), item('Tile Horizontally', 'tile-horizontal', multi, undefined, s.layout === 'horizontal'),
@@ -147,12 +147,12 @@ function buildMenus(input = {}, platform = 'linux') {
       unavailable('Move Tab/Tile to New Window', 'detach-tab', 'Detaching a live session into another window is not implemented.'), null,
       item('Bring All to Front', 'bring-all-front'), null,
       ...s.connections.map(connection => ({ label: connection.title, action: `activate:${encodeURIComponent(connection.id)}`, enabled: !blocked('activate'), checked: connection.id === current?.id })),
-      ...(!s.connections.length ? [{ label: 'Not connected — TermForge', enabled: false, checked: true }] : []), null,
+      ...(!s.connections.length ? [{ label: 'Not connected — ForgeCRT', enabled: false, checked: true }] : []), null,
       item('New Vertical Tab Group', 'group-vertical', group), item('New Horizontal Tab Group', 'group-horizontal', group), item('Move Tab to Next Group', 'group-move-next', s.groupCount > 1), item('Tile as Grid', 'tile-grid', multi), item('Close Window', 'close-window', true, 'CommandOrControl+Shift+W')
     ] },
     { id: 'help', label: 'Help', submenu: [
-      item('Help Topics…', 'help'), null, item('TermForge Web Page', 'help-web'), submenu('Update', [item('View Releases…', 'help-updates')]), item('Report an Issue…', 'help-support'), null,
-      item('Feature Availability…', 'feature-availability'), item('About TermForge…', 'about')
+      item('Help Topics…', 'help'), null, item('ForgeCRT Web Page', 'help-web'), submenu('Update', [item('View Releases…', 'help-updates')]), item('Report an Issue…', 'help-support'), null,
+      item('Feature Availability…', 'feature-availability'), item('About ForgeCRT…', 'about')
     ] }
   ];
   return menus;

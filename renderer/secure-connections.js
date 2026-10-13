@@ -69,7 +69,8 @@ export function createSecureConnections({ api, toast, confirmAction }) {
   function nextAuth() {
     if (activeAuth || !pendingAuth.length) return;
     activeAuth = pendingAuth.shift();
-    $('auth-title').textContent = activeAuth.kind === 'username' ? 'SSH username' : ['passphrase','key-passphrase'].includes(activeAuth.kind) ? 'Unlock private key' : 'SSH authentication';
+    const transportLabel = activeAuth.protocol === 'ftp' ? 'FTP (unencrypted)' : ['ftps','ftps-implicit'].includes(activeAuth.protocol) ? 'FTPS' : 'SSH';
+    $('auth-title').textContent = activeAuth.kind === 'username' ? `${transportLabel} username` : ['passphrase','key-passphrase'].includes(activeAuth.kind) ? 'Unlock private key' : `${transportLabel} authentication`;
     $('auth-target').textContent = `${activeAuth.username ? `${activeAuth.username}@` : ''}${activeAuth.host}:${activeAuth.port}`;
     $('auth-instructions').textContent = activeAuth.instructions || 'Respond to this server’s authentication request.';
     $('auth-fields').replaceChildren();

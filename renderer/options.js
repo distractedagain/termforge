@@ -1,4 +1,4 @@
-// Original category dialogs, with only controls that TermForge can apply.
+// Original category dialogs, with only controls that ForgeCRT can apply.
 import { createAuthOrder } from './secure-connections.js';
 import { COLOR_SCHEMES } from '../app/color-schemes.cjs';
 import { createSchemePreview } from './color-picker.js';
@@ -89,7 +89,7 @@ export function installOptionDialogs({ getSettings = () => ({}), secureConnectio
     { id: 'connection', label: 'Connection', elements: [] },
     { id: 'ssh', label: 'SSH2', child: true, title: 'SSH2 — Authentication and advanced', elements: ssh },
     { id: 'serial', label: 'Serial', child: true, elements: [serial] },
-    { id: 'emulation', label: 'Terminal', title: 'Terminal — Emulation', elements: [field('profile-terminal-type', 'Terminal type advertised to the server', 'select', { values: ['xterm-256color', 'xterm', 'vt100', 'vt220', 'ansi'] }), node('p', 'field-note', 'TermForge uses the xterm terminal engine. The terminal type controls TERM and protocol negotiation; it does not provide a separate Wyse, TN3270, or VT220 emulator.'), field('profile-scrollback', 'Scrollback lines (0 uses Global Options)', 'number', { min: 0, max: 128000 }), field('profile-local-echo', 'Local echo', 'checkbox')] },
+    { id: 'emulation', label: 'Terminal', title: 'Terminal — Emulation', elements: [field('profile-terminal-type', 'Terminal type advertised to the server', 'select', { values: ['xterm-256color', 'xterm', 'vt100', 'vt220', 'ansi'] }), node('p', 'field-note', 'ForgeCRT uses the xterm terminal engine. The terminal type controls TERM and protocol negotiation; it does not provide a separate Wyse, TN3270, or VT220 emulator.'), field('profile-scrollback', 'Scrollback lines (0 uses Global Options)', 'number', { min: 0, max: 128000 }), field('profile-local-echo', 'Local echo', 'checkbox')] },
     { id: 'appearance', label: 'Appearance', child: true, elements: [field('profile-font-family', 'Font family (empty uses Global Options)'), field('profile-font-size', 'Font size (0 uses Global Options)', 'number', { min: 0, max: 72 }), field('profile-color-scheme', 'Color scheme', 'select', { values: schemes }), field('profile-cursor', 'Cursor', 'select', { values: [['', 'Use Global Options'], ['block', 'Block'], ['bar', 'Vertical bar'], ['underline', 'Underline']] }), field('profile-cursor-blink', 'Cursor blinking', 'select', { values: [['inherit', 'Use Global Options'], ['true', 'Blink'], ['false', 'Steady']] })] },
     { id: 'keyboard', label: 'Keyboard', child: true, elements: [field('profile-backspace', 'Backspace sends', 'select', { values: [['del', 'DEL (0x7F)'], ['bs', 'BS (0x08)']] }), field('profile-delete', 'Delete sends', 'select', { values: [['escape', 'Escape sequence'], ['del', 'DEL (0x7F)']] }), field('profile-emacs', 'Use Option / Alt as Meta (Emacs mode)', 'checkbox'), (() => { const container = node('div'); container.id = 'profile-mapped-keys'; return container; })()] }
   ]);

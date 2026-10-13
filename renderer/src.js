@@ -1418,6 +1418,7 @@ async function performAction(action, editTarget = null) {
     case 'show-command-window': setPane('commandWindow', !panes.commandWindow); break;
     case 'show-button-bar': setPane('buttonBar', !panes.buttonBar); break;
     case 'sftp': openSftp(); break;
+    case 'ftp-connect': secureTransfers.showFtp(); break;
     case 'next-tab': case 'previous-tab': {
       const ids = [...connections.keys()]; const index = ids.indexOf(activeId);
       if (ids.length) activate(ids[(index + (action === 'next-tab' ? 1 : -1) + ids.length) % ids.length]);
@@ -1681,7 +1682,7 @@ function setupHandlers() {
 async function init() {
   setupHandlers();
   if (!api) {
-    toast('The native TermForge bridge is unavailable. Start TermForge using the desktop application.', true);
+    toast('The native ForgeCRT bridge is unavailable. Start ForgeCRT using the desktop application.', true);
     for (const button of document.querySelectorAll('button')) button.disabled = true;
     renderSessions(); renderSnippets(); renderTabs();
     return;

@@ -8,7 +8,7 @@ const HELP_URLS = Object.freeze({
 const escapeHtml = text => text.replace(/[&<>"']/g, value => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[value]));
 function printDocument(input) {
   if (!input || typeof input.text !== 'string' || Buffer.byteLength(input.text) > 2 * 1024 * 1024 || !input.text.trim()) throw new Error('Choose up to 2 MiB of terminal text to print.');
-  const title = typeof input.title === 'string' ? input.title.slice(0, 200) : 'TermForge';
+  const title = typeof input.title === 'string' ? input.title.slice(0, 200) : 'ForgeCRT';
   const pageSize = ['A4', 'Letter', 'Legal'].includes(input.pageSize) ? input.pageSize : 'Letter';
   const landscape = input.landscape === true;
   return { html: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${escapeHtml(title)}</title><style>body{color:#000;background:#fff;font:11px monospace}h1{font:14px sans-serif}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(input.text)}</pre></body></html>`, options: { silent: false, printBackground: false, landscape, pageSize, margins: { marginType: 'default' } } };

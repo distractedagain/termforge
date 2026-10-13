@@ -125,6 +125,12 @@ module.exports = async ({ window, terminals, directory }) => {
         if (allowFolder) folderApprovals++;
         return { response: allowFolder ? 1 : 0 };
       }
+      if (['Apply reviewed mirror','Apply reviewed two-way synchronization'].includes(options.title)) {
+        assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
+        if(options.title==='Apply reviewed mirror'){assert.match(options.detail,/permanently deleted/);assert.match(options.detail,/Delete files: 1/);assert.match(options.detail,/Delete folders: 1/);}
+        else assert.match(options.detail,/Both local and remote folders may change/);
+        if(allowFolder)folderApprovals++;return {response:allowFolder?1:0};
+      }
       if (options.title === 'Resume retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Retained bytes: [1-9][0-9]*/); if (allowResume) resumeApprovals++; return { response: allowResume ? 1 : 0 }; }
       if (options.title === 'Discard retained transfer') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Partial:/); if (allowDiscard) discardApprovals++; return { response: allowDiscard ? 1 : 0 }; }
       if (options.title === 'Save remote file') { assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`)); assert.match(options.detail, /Path: \/folder-copy\/zero\.txt/); assert.match(options.detail, /Before: [0-9]+ bytes/); assert.match(options.detail, /After: [0-9]+ bytes/); if (allowEdit) editApprovals++; return { response: allowEdit ? 1 : 0 }; }
@@ -364,6 +370,60 @@ module.exports = async ({ window, terminals, directory }) => {
     fixture.controls.writeDelayMs = 0;
     assert.deepEqual(await fsp.readFile(path.join(fixture.remote, 'resumed.bin')), resumePayload);
     assert.equal((await fsp.readdir(path.join(profileDirectory, 'transfer-recovery'))).filter(name => name.endsWith('.json')).length, 0);
+    const resumeFolder = path.join(fixture.local,'resume-folder-source');
+    await fsp.mkdir(path.join(resumeFolder,'nested'),{recursive:true});await fsp.mkdir(path.join(resumeFolder,'empty'));
+    await fsp.writeFile(path.join(resumeFolder,'a.txt'),'abc');await fsp.writeFile(path.join(resumeFolder,'nested','b.bin'),payload.subarray(3));
+    fixture.controls.writeDelayMs=30;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke,id=state.folderConnection;
+      const plan=await window.termforge.transferPrepareFolder({id,direction:'upload',localPath:${JSON.stringify(resumeFolder)},remotePath:'/resumed-folder',resumable:true});
+      if(!plan.resumable)throw new Error('Folder review did not expose durable recovery');
+      const job=await window.termforge.transferStartFolder({planId:plan.planId});state.folderRecoveryId=job.transferId;
+      await wait(()=>state.jobs[job.transferId]?.status==='running'&&state.jobs[job.transferId].filesCompleted===1&&state.jobs[job.transferId].bytes>3,'partial folder after completed child');
+      if(!await window.termforge.transferPause(job.transferId))throw new Error('Native folder did not pause');
+      const paused=(await window.termforge.transferListJobs()).find(item=>item.transferId===job.transferId);
+      if(paused.kind!=='folder'||!paused.resumeAvailable||paused.filesCompleted!==1||paused.retainedBytes>=paused.total)throw new Error('Native folder recovery state is incorrect: '+JSON.stringify(paused));
+    `);
+    assert.equal((await fsp.readdir(path.join(profileDirectory,'transfer-recovery'))).filter(name=>name.endsWith('.json')).length,1);
+    assert.equal(await fsp.readFile(path.join(fixture.remote,'resumed-folder','a.txt'),'utf8'),'abc');
+    await assert.rejects(fsp.stat(path.join(fixture.remote,'resumed-folder','nested','b.bin')),{code:'ENOENT'});
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke;await window.termforge.transferResume({transferId:state.folderRecoveryId,id:state.folderConnection});
+      await wait(()=>['completed','failed','interrupted'].includes(state.jobs[state.folderRecoveryId]?.status),'native verified folder resume',30000);
+      const done=state.jobs[state.folderRecoveryId];if(done.status!=='completed'||done.filesCompleted!==2||done.directoriesCreated!==3)throw new Error('Native folder resume failed: '+JSON.stringify(done));
+    `);
+    fixture.controls.writeDelayMs=0;
+    assert.deepEqual(await fsp.readFile(path.join(fixture.remote,'resumed-folder','nested','b.bin')),payload.subarray(3));
+    assert.equal((await fsp.readdir(path.join(profileDirectory,'transfer-recovery'))).filter(name=>name.endsWith('.json')).length,0);
+    report.nativeFolderResume=true;console.log('PASS native folder recovery retains completed children and verifies the resumed partial');
+    const syncLocal=path.join(fixture.local,'two-way'),syncRemote=path.join(fixture.remote,'two-way');
+    await fsp.mkdir(syncLocal);await fsp.mkdir(syncRemote);await fsp.writeFile(path.join(syncLocal,'local.txt'),'local-only');await fsp.writeFile(path.join(syncRemote,'remote.txt'),'remote-only');
+    await fsp.writeFile(path.join(syncLocal,'conflict.txt'),'local conflict');await fsp.writeFile(path.join(syncRemote,'conflict.txt'),'remote winner');
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke,id=state.folderConnection,input={id,direction:'upload',mode:'two-way',localPath:${JSON.stringify(syncLocal)},remotePath:'/two-way'};
+      const unresolved=await window.termforge.transferPrepareFolder(input);if(unresolved.unresolved!==1)throw new Error('Native two-way conflict was not detected');
+      let refused=false;try{await window.termforge.transferStartFolder({planId:unresolved.planId});}catch{refused=true;}if(!refused)throw new Error('Unresolved two-way conflict was applied');
+      const review=await window.termforge.transferPrepareFolder({...input,resolutions:[{relativePath:'conflict.txt',source:'remote'}]});
+      const job=await window.termforge.transferStartFolder({planId:review.planId});await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'native two-way sync');
+      if(state.jobs[job.transferId].status!=='completed'||state.jobs[job.transferId].filesCompleted!==3)throw new Error('Native two-way sync failed: '+JSON.stringify(state.jobs[job.transferId]));
+    `);
+    for(const root of [syncLocal,syncRemote]){assert.equal(await fsp.readFile(path.join(root,'local.txt'),'utf8'),'local-only');assert.equal(await fsp.readFile(path.join(root,'remote.txt'),'utf8'),'remote-only');assert.equal(await fsp.readFile(path.join(root,'conflict.txt'),'utf8'),'remote winner');}
+    await fsp.mkdir(path.join(syncRemote,'remove'));await fsp.writeFile(path.join(syncRemote,'remove','extra.txt'),'delete this');await fsp.writeFile(path.join(syncLocal,'local.txt'),'updated source');
+    allowFolder=false;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke,review=await window.termforge.transferPrepareFolder({id:state.folderConnection,direction:'upload',mode:'mirror',localPath:${JSON.stringify(syncLocal)},remotePath:'/two-way'});
+      if(review.deletedFiles!==1||review.deletedDirectories!==1)throw new Error('Native mirror deletion inventory is incorrect');const result=await window.termforge.transferStartFolder({planId:review.planId});if(!result.cancelled)throw new Error('Native mirror decline was ignored');
+    `);
+    assert.equal(await fsp.readFile(path.join(syncRemote,'remove','extra.txt'),'utf8'),'delete this');assert.equal(await fsp.readFile(path.join(syncRemote,'local.txt'),'utf8'),'local-only');
+    allowFolder=true;
+    await evaluate(`
+      const state=window.__termforgeSecureSmoke,review=await window.termforge.transferPrepareFolder({id:state.folderConnection,direction:'upload',mode:'mirror',localPath:${JSON.stringify(syncLocal)},remotePath:'/two-way'});
+      const job=await window.termforge.transferStartFolder({planId:review.planId});await wait(()=>['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status),'native reviewed mirror');
+      const done=state.jobs[job.transferId];if(done.status!=='completed'||done.deletedFiles!==1||done.deletedDirectories!==1)throw new Error('Native mirror failed: '+JSON.stringify(done));
+    `);
+    assert.equal(await fsp.readFile(path.join(syncRemote,'local.txt'),'utf8'),'updated source');await assert.rejects(fsp.stat(path.join(syncRemote,'remove')),{code:'ENOENT'});
+    report.nativeTwoWaySynchronization=true;report.nativeTwoWayExplicitConflict=true;report.nativeMirror=true;report.nativeMirrorNativeDecline=true;
+    console.log('PASS native two-way direction choices and reviewed mirror deletions with decline');
     fixture.controls.readDelayMs = 10;
     await evaluate(`
       const state = window.__termforgeSecureSmoke;
@@ -382,7 +442,7 @@ module.exports = async ({ window, terminals, directory }) => {
     assert.equal((await fsp.readdir(path.join(profileDirectory, 'transfer-recovery'))).filter(name => name.endsWith('.json')).length, 0);
     await assert.rejects(fsp.stat(resumeDownload), { code: 'ENOENT' });
     assert.ok(!(await fsp.readdir(fixture.local)).some(name => name.startsWith('.termforge-')), 'Native partial cleanup left a local staging file');
-    assert.equal(resumeApprovals, 1); assert.equal(discardApprovals, 1);
+    assert.equal(resumeApprovals, 2); assert.equal(discardApprovals, 1);
     report.nativeResumableUpload = true; report.nativePausedDownloadDiscard = true; report.nativeRecoveryNativeDecline = true;
     console.log('PASS native durable pause, verified SFTP resume, native approval decline and offline local partial cleanup');
     const authBeforeCancel = fixture.authentication.length;
@@ -416,6 +476,7 @@ module.exports = async ({ window, terminals, directory }) => {
     assert.equal(writes.length, 1, 'Only the explicit command probe may reach terminalWrite'); assert.equal(writes[0].data, 'native-managed-probe\r');
     report.nativeManagedSsh = true; report.nativeHostVerificationBeforeAuthentication = true; report.nativeChangedHostBlocked = true;
     report.nativeAuthPromptCleared = true; report.nativeAuthCancellation = true; report.nativeNoPasswordTerminalWrite = true;
+    Object.assign(report, await require('./ftp-smoke.cjs')({ window, directory }));
     await fsp.writeFile(path.join(directory, 'secure-native.json'), JSON.stringify(report, null, 2));
     console.log('PASS native cancelled authentication cleanup, changed host refusal, and no password terminal writes');
     return report;

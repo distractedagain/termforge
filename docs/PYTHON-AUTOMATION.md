@@ -1,19 +1,19 @@
 # Python automation
 
-TermForge runs a local `.py` file selected by the user with an installed Python 3 interpreter. The original TermForge bridge supplies a small `crt` API with familiar method names. This is an initial automation subsystem, not full SecureCRT script compatibility.
+ForgeCRT runs a local `.py` file selected by the user with an installed Python 3 interpreter. The original ForgeCRT bridge supplies a small `crt` API with familiar method names. This is an initial automation subsystem, not full SecureCRT script compatibility.
 
-Scripts execute as ordinary local Python programs with the user's permissions. They can read or change local files, start other programs, and use the network through Python. Run scripts you trust. Python is not bundled. The default executable is `python3` on macOS/Linux and `python` on Windows; an absolute interpreter path can be supplied by the host integration. One script may run at a time. Cancelling stops the interpreter, and an unresponsive interpreter receives a forced termination after one second. Independently detached subprocesses started by a script are not managed by TermForge.
+Scripts execute as ordinary local Python programs with the user's permissions. They can read or change local files, start other programs, and use the network through Python. Run scripts you trust. Python is not bundled. The default executable is `python3` on macOS/Linux and `python` on Windows; an absolute interpreter path can be supplied by the host integration. One script may run at a time. Cancelling stops the interpreter, and an unresponsive interpreter receives a forced termination after one second. Independently detached subprocesses started by a script are not managed by ForgeCRT.
 
 The script remains bound to the terminal selected when it starts, even when another tab becomes active. `crt.GetScriptTab().Screen` and `.Session` expose the same objects as `crt.Screen` and `crt.Session`. Scripts can obtain other actual terminal tabs through the tab collection. Each tab has its own screen and session context, and a Python tab reference remains usable after reconnecting its session. `crt` is available as a script global and as an importable module.
 
-| API | TermForge behavior |
+| API | ForgeCRT behavior |
 | --- | --- |
 | `crt.Screen.Send(text)` | Writes text to the bound terminal. Use `\r` explicitly to send Enter. Maximum 256 KiB in UTF-8 per call. |
 | `crt.Screen.WaitForString(text, timeout=0, bCaseInsensitive=False)` | Returns `True` on a match, `False` on timeout. Timeout is in seconds. |
 | `crt.Screen.WaitForStrings(strings, timeout=0, bCaseInsensitive=False)` | Takes a string or list/tuple of strings. Returns the first matching string's one-based index, or zero on timeout. Matches the earliest occurrence in received text; ties use list order. |
 | `crt.Screen.ReadString(strings, timeout=0, bCaseInsensitive=False)` | Returns received text preceding the matching delimiter, consuming the delimiter. On timeout it returns the buffered text received so far. |
 | `crt.Screen.MatchIndex` | One-based index of the most recent wait/read match, or zero after timeout. |
-| `crt.Screen.Synchronous` | Boolean, initially `False`. `True` retains newly received terminal output between waits; `False` retains output only during a pending wait. TermForge always displays terminal output immediately. |
+| `crt.Screen.Synchronous` | Boolean, initially `False`. `True` retains newly received terminal output between waits; `False` retains output only during a pending wait. ForgeCRT always displays terminal output immediately. |
 | `crt.Screen.Get(startRow, startColumn, endRow, endColumn)` | Reads an inclusive rectangle from the terminal renderer's actual screen. Coordinates are one-based and must be inside the screen. This uses the host screen callback rather than the byte wait buffer. |
 | `crt.Screen.Rows`, `.Columns`, `.CurrentRow`, `.CurrentColumn` | Reads actual dimensions and one-based cursor coordinates from the renderer through the host callback. Missing or invalid screen data raises an error. |
 | `crt.Session.Connected` | Whether the bound terminal is open. For SSH, this does not establish that authentication succeeded; scripts must wait for the expected authenticated prompt. |
@@ -53,7 +53,7 @@ if crt.Screen.MatchIndex == 0:
 print(output)
 ```
 
-This example is original TermForge code. Replace the full prompt and command with those appropriate for a terminal you intend to automate. A distinctive full prompt reduces false matches inside command output.
+This example is original ForgeCRT code. Replace the full prompt and command with those appropriate for a terminal you intend to automate. A distinctive full prompt reduces false matches inside command output.
 
 Public API names and the general send/wait/read model were reviewed against VanDyke's [scripting FAQ](https://www.vandyke.com/support/securecrt/scripting_faq.html), [ReadString tip](https://www.vandyke.com/support/tips/readstring.html), [tab scripting tip](https://www.vandyke.com/support/tips/tabscripts.html), and [scripting guide](https://www.vandyke.com/support/tips/scripting/index.html). The bridge implementation and example above are independently written.
 

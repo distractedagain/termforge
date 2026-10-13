@@ -75,7 +75,7 @@ module.exports = async ({ window, terminals, directory }) => {
     `);
     window.focus();
     await wait(() => find('Options', 'Global Options…')?.enabled, 'renderer state synchronized to actual native menu');
-    const names = Menu.getApplicationMenu().items.map(item => item.label).filter(label => label !== 'TermForge');
+    const names = Menu.getApplicationMenu().items.map(item => item.label).filter(label => label !== 'ForgeCRT');
     assert.deepEqual(names, ['File', 'Edit', 'View', 'Options', 'Transfer', 'Script', 'Tools', 'Window', 'Help']);
     assert.deepEqual(find('File').submenu.items.slice(0, 4).map(item => item.label), ['Connect…', 'Quick Connect…', 'Connect In Tab/Tile…', 'Connect Local Shell']);
     for (const [group, label] of [['Transfer', /^Send Kermit/], ['Transfer', /^Receive Xmodem/], ['Window', /^Cascade/], ['File', /^Lock Session/]]) assert.equal(find(group, label)?.enabled, false, label.toString());

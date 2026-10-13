@@ -1,6 +1,6 @@
-# TermForge interface
+# ForgeCRT interface
 
-TermForge's 0.7 interface uses an original slate and teal design with consistent vector icons, readable controls and a terminal-centered layout. The session-management workflows remain familiar while the visual design follows TermForge's own identity.
+ForgeCRT's 0.7 interface uses an original slate and teal design with consistent vector icons, readable controls and a terminal-centered layout. The session-management workflows remain familiar while the visual design follows ForgeCRT's own identity.
 
 ![Modern dark workspace](images/modern-welcome-dark.png)
 

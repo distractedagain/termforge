@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('termforge', {
   onAuthPrompt: subscribe('authPrompt'),
   onAuthPromptClosed: subscribe('authPromptClosed'),
   transferOpen: invoke('transferOpen'),
+  ftpOpen: invoke('ftpOpen'),
   transferClose: invoke('transferClose'),
   transferListRemote: invoke('transferListRemote'),
   transferListLocal: invoke('transferListLocal'),

@@ -45,7 +45,7 @@ async function fixture(t, options = {}) {
         entries.length ? stream.name(id, entries) : stream.status(id, STATUS_CODE.EOF);
       });
       action('OPEN', async (id, name, flags, attributes) => {
-        let mode = flags & OPEN_MODE.WRITE ? fs.constants.O_WRONLY : fs.constants.O_RDONLY;
+        let mode = flags & OPEN_MODE.WRITE ? (flags & OPEN_MODE.READ ? fs.constants.O_RDWR : fs.constants.O_WRONLY) : fs.constants.O_RDONLY;
         if (flags & OPEN_MODE.CREAT) mode |= fs.constants.O_CREAT;
         if (flags & OPEN_MODE.EXCL) mode |= fs.constants.O_EXCL;
         if (flags & OPEN_MODE.TRUNC) mode |= fs.constants.O_TRUNC;
@@ -68,7 +68,8 @@ async function fixture(t, options = {}) {
         if (options.afterMkdir && await options.afterMkdir({ local, remote, name }) === false) return;
         stream.status(id, STATUS_CODE.OK);
       });
-      action('REMOVE', async (id, name) => { mutations.push(['remove', name]); await fsp.unlink(target(name)); stream.status(id, STATUS_CODE.OK); });
+      action('REMOVE', async (id, name) => { mutations.push(['remove', name]); await options.onRemove?.({ local, remote, name }); await fsp.unlink(target(name)); if (options.afterRemove && await options.afterRemove({ local, remote, name }) === false) return; stream.status(id, STATUS_CODE.OK); });
+      action('RMDIR', async (id, name) => { mutations.push(['rmdir', name]); await fsp.rmdir(target(name)); stream.status(id, STATUS_CODE.OK); });
       action('RENAME', async (id, from, to) => {
         mutations.push(['rename', from, to]); await options.onRename?.({ local, remote, from, to });
         await fsp.link(target(from), target(to)); await fsp.unlink(target(from));
@@ -194,7 +195,7 @@ test('source and ancestor symbolic links are refused without following them', { 
 test('nested files cannot replace a competing destination created during copying', async t => {
   let once = false; const f = await fixture(t, { onWrite: async ({ remote }) => { if (!once) { once = true; await fsp.writeFile(path.join(remote, 'copy', 'nested', 'payload'), 'competing'); } } });
   await tree(f.local); const result = await f.run(await f.plan());
-  assert.equal(result.status, 'failed'); assert.match(result.error, /destination changed|appeared/); assert.match(result.warning, /Partial folder copy/);
+  assert.equal(result.status, 'failed'); assert.match(result.error, /destination changed|appeared/); assert.match(result.warning, /Partial folder (copy|operation)/);
   assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'nested', 'payload'), 'utf8'), 'competing');
   assert((await fsp.readdir(path.join(f.remote, 'copy', 'nested'))).every(name => !name.endsWith('.part')));
 });
@@ -300,7 +301,7 @@ test('cancellation waits for an issued mkdir and reports retained folders', asyn
   let stopped = false; const stopping = f.manager.cancel(started.transferId).then(() => { stopped = true; });
   await pause(20); assert.equal(stopped, false); release(); await stopping;
   const job = await f.waitJob(started.transferId); assert.equal(job.status, 'cancelled'); assert.equal(job.directoriesCreated, 1);
-  assert.match(job.warning, /folders remain/); assert((await fsp.stat(path.join(f.remote, 'copy'))).isDirectory());
+  assert.match(job.warning, /folders remain|operations remain/); assert((await fsp.stat(path.join(f.remote, 'copy'))).isDirectory());
 });
 
 test('closing during the final file commit waits for acknowledgment and reports completed bytes', async t => {
@@ -376,7 +377,7 @@ test('merge and sync reject file-directory conflicts and invalid policies before
   const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.writeFile(path.join(f.local, 'source', 'conflict'), 'file');
   await fsp.mkdir(path.join(f.remote, 'copy', 'conflict'), { recursive: true });
   for (const mode of ['merge', 'sync']) await assert.rejects(f.plan('upload', 'source', 'copy', { mode }), /conflicts with a destination/);
-  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'mirror' }), /supported folder operation/);
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'unsupported-mode' }), /supported folder operation/);
   await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'merge', conflictPolicy: 'newer' }), /supported folder operation/);
   assert.deepEqual(f.mutations, []);
 });
@@ -475,4 +476,213 @@ test('merge Replace changed files skips content-identical existing files', async
   const result = await f.run(plan); assert.equal(result.status, 'completed', result.error);
   assert.equal(f.mutations.filter(entry => entry[0] === 'rename' && entry[2] === '/copy/same').length, 0);
   assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'same'), 'utf8'), 'identical bytes');
+});
+
+async function advancedTrees(f) {
+  await fsp.mkdir(path.join(f.local, 'source', 'local-empty'), { recursive: true });
+  await fsp.mkdir(path.join(f.remote, 'copy', 'remote-empty'), { recursive: true });
+  await fsp.writeFile(path.join(f.local, 'source', 'local-only'), 'local payload');
+  await fsp.writeFile(path.join(f.remote, 'copy', 'remote-only'), 'remote payload');
+  for (const root of [path.join(f.local, 'source'), path.join(f.remote, 'copy')]) await fsp.writeFile(path.join(root, 'same'), 'same content');
+}
+
+test('two-way copies missing files and empty directories in both directions without deleting', async t => {
+  const f = await fixture(t); await advancedTrees(f);
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'two-way' });
+  assert.equal(plan.copied, 2); assert.equal(plan.directories, 2); assert.equal(plan.skipped, 1); assert.equal(plan.unresolved, 0);
+  assert.equal(plan.entries.find(e => e.relativePath === 'remote-only').direction, 'download');
+  assert.equal(plan.entries.find(e => e.relativePath === 'local-only').direction, 'upload');
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error);
+  for (const root of [path.join(f.local, 'source'), path.join(f.remote, 'copy')]) {
+    assert.equal(await fsp.readFile(path.join(root, 'local-only'), 'utf8'), 'local payload');
+    assert.equal(await fsp.readFile(path.join(root, 'remote-only'), 'utf8'), 'remote payload');
+    assert.deepEqual(await fsp.readdir(path.join(root, 'local-empty')), []);
+    assert.deepEqual(await fsp.readdir(path.join(root, 'remote-empty')), []);
+  }
+  assert.equal(f.mutations.filter(e => e[0] === 'remove' || e[0] === 'rmdir').length, 0);
+});
+
+test('two-way conflicts never choose a winner implicitly and applying an unresolved plan performs no mutation', async t => {
+  const f = await fixture(t); await advancedTrees(f);
+  await fsp.writeFile(path.join(f.local, 'source', 'different'), 'local'); await fsp.writeFile(path.join(f.remote, 'copy', 'different'), 'remote');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'two-way', conflictPolicy: 'replace' });
+  assert.equal(plan.conflicts, 1); assert.equal(plan.unresolved, 1); assert.equal(plan.entries.find(e => e.relativePath === 'different').action, 'conflict');
+  await assert.rejects(f.manager.startFolderTransfer({ planId: plan.planId }), /Resolve|conflict/);
+  assert.deepEqual(f.mutations, []); assert.equal(f.approvals.length, 0);
+});
+
+test('two-way explicit local, remote, and skip choices only replace the reviewed selected files', async t => {
+  const f = await fixture(t); await advancedTrees(f);
+  for (const name of ['choose-local', 'choose-remote', 'skip']) {
+    await fsp.writeFile(path.join(f.local, 'source', name), 'left'); await fsp.writeFile(path.join(f.remote, 'copy', name), 'right');
+  }
+  const resolutions = [{ relativePath: 'choose-local', source: 'local' }, { relativePath: 'choose-remote', source: 'remote' }, { relativePath: 'skip', source: 'skip' }];
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'two-way', resolutions });
+  assert.equal(plan.conflicts, 3); assert.equal(plan.unresolved, 0); assert.equal(plan.replaced, 2);
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error);
+  for (const root of [path.join(f.local, 'source'), path.join(f.remote, 'copy')]) {
+    assert.equal(await fsp.readFile(path.join(root, 'choose-local'), 'utf8'), 'left');
+    assert.equal(await fsp.readFile(path.join(root, 'choose-remote'), 'utf8'), 'right');
+  }
+  assert.equal(await fsp.readFile(path.join(f.local, 'source', 'skip'), 'utf8'), 'left');
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'skip'), 'utf8'), 'right');
+});
+
+test('two-way can create either missing root from the existing peer', async t => {
+  const f = await fixture(t); await tree(f.local);
+  const first = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'two-way' })); assert.equal(first.status, 'completed', first.error);
+  const second = await f.run(await f.plan('download', 'copy', 'fresh', { mode: 'two-way' })); assert.equal(second.status, 'completed', second.error);
+  assert.deepEqual(await fsp.readFile(path.join(f.local, 'fresh', 'nested', 'payload')), Buffer.alloc(150000, 67));
+});
+
+test('two-way rejects malformed, duplicate, stale and unrelated conflict resolutions', async t => {
+  const f = await fixture(t); await advancedTrees(f);
+  for (const resolutions of [[{ relativePath: '../escape', source: 'local' }], [{ relativePath: 'same', source: 'newest' }],
+    [{ relativePath: 'same', source: 'local' }, { relativePath: 'same', source: 'remote' }], [{ relativePath: 'same', source: 'skip' }]]) {
+    await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'two-way', resolutions }), /resolution|conflicting/);
+  }
+  assert.deepEqual(f.mutations, []);
+});
+
+test('two-way native denial and edits during approval leave trees unmodified by the transfer', async t => {
+  let accepted = false; const f = await fixture(t, { confirm: async (_, __, { remote }) => {
+    if (!accepted) return false; await fsp.writeFile(path.join(remote, 'copy', 'remote-only'), 'external change'); return true;
+  } }); await advancedTrees(f);
+  const first = await f.plan('upload', 'source', 'copy', { mode: 'two-way' });
+  assert.deepEqual(await f.manager.startFolderTransfer({ planId: first.planId }), { cancelled: true });
+  accepted = true; const second = await f.plan('upload', 'source', 'copy', { mode: 'two-way' });
+  await assert.rejects(f.manager.startFolderTransfer({ planId: second.planId }), /changed after review/);
+  assert.deepEqual(f.mutations, []);
+});
+
+test('two-way refuses type conflicts and missing trees before mutation', async t => {
+  const f = await fixture(t); await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'two-way' }), /already exist/);
+  await advancedTrees(f); await fsp.mkdir(path.join(f.local, 'source', 'collision')); await fsp.writeFile(path.join(f.remote, 'copy', 'collision'), 'file');
+  await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'two-way' }), /conflicts/); assert.deepEqual(f.mutations, []);
+});
+
+for (const direction of ['upload', 'download']) test(`mirror ${direction} previews replacements and deletes target-only files and folders postorder`, async t => {
+  const f = await fixture(t); const source = path.join(direction === 'upload' ? f.local : f.remote, 'source'); const target = path.join(direction === 'upload' ? f.remote : f.local, 'copy');
+  await fsp.mkdir(path.join(source, 'kept'), { recursive: true }); await fsp.mkdir(path.join(target, 'extra', 'nested'), { recursive: true });
+  await fsp.writeFile(path.join(source, 'changed'), 'replacement'); await fsp.writeFile(path.join(target, 'changed'), 'original');
+  await fsp.writeFile(path.join(target, 'extra', 'nested', 'delete'), 'reviewed deletion'); await fsp.writeFile(path.join(target, 'extra-file'), 'delete');
+  const plan = await f.plan(direction, 'source', 'copy', { mode: 'mirror' });
+  assert.equal(plan.deletedFiles, 2); assert.equal(plan.deletedDirectories, 2); assert.equal(plan.replaced, 1); assert.equal(plan.kept, 0);
+  const deletions = plan.entries.filter(e => e.action.startsWith('delete-'));
+  assert(deletions.findIndex(e => e.relativePath === 'extra/nested/delete') < deletions.findIndex(e => e.relativePath === 'extra/nested'));
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error);
+  assert.deepEqual(await fsp.readdir(target), ['changed', 'kept']); assert.equal(await fsp.readFile(path.join(target, 'changed'), 'utf8'), 'replacement');
+  assert.equal(f.approvals[0].deletedFiles, 2);
+});
+
+test('mirror with an empty source removes only reviewed target descendants and retains the root', async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy', 'extra'), { recursive: true }); await fsp.writeFile(path.join(f.remote, 'copy', 'extra', 'file'), 'remove');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'mirror' }); assert.equal(plan.files, 0); assert.equal(plan.deletedFiles, 1);
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error); assert.deepEqual(await fsp.readdir(path.join(f.remote, 'copy')), []);
+});
+
+test('mirror native decline never deletes reviewed data', async t => {
+  const f = await fixture(t, { defaultDeny: true }); await advancedTrees(f); const plan = await f.plan('upload', 'source', 'copy', { mode: 'mirror' });
+  assert.equal(plan.deletedFiles, 1); assert.deepEqual(await f.manager.startFolderTransfer({ planId: plan.planId }), { cancelled: true });
+  assert.deepEqual(f.mutations, []); assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'remote-only'), 'utf8'), 'remote payload');
+});
+
+test('mirror rejects target content changed during native approval including restored size and mtime', async t => {
+  const f = await fixture(t, { confirm: async (_, __, { remote }) => { const file = path.join(remote, 'copy', 'extra'); const info = await fsp.stat(file); await fsp.writeFile(file, 'change'); await fsp.utimes(file, info.atime, info.mtime); return true; } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.remote, 'copy', 'extra'), 'before');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'mirror' }); await assert.rejects(f.manager.startFolderTransfer({ planId: plan.planId }), /changed after review/); assert.deepEqual(f.mutations, []);
+});
+
+test('mirror stops before deletion when destination content changes during preceding copy', async t => {
+  let changed = false; const f = await fixture(t, { onWrite: async ({ remote }) => { if (!changed) { changed = true; const file = path.join(remote, 'copy', 'extra'); const stat = await fsp.stat(file); await fsp.writeFile(file, 'change'); await fsp.utimes(file, stat.atime, stat.mtime); } } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.local, 'source', 'copy-first'), 'payload'); await fsp.writeFile(path.join(f.remote, 'copy', 'extra'), 'before');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'mirror' })); assert.equal(result.status, 'failed'); assert.match(result.error, /destination file content changed/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'extra'), 'utf8'), 'change'); assert.equal(f.mutations.filter(e => e[0] === 'remove').length, 0);
+});
+
+test('mirror retains newly added contents instead of recursively deleting an expanded directory', async t => {
+  const f = await fixture(t, { onRemove: async ({ remote }) => { await fsp.writeFile(path.join(remote, 'copy', 'extra', 'new'), 'keep'); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy', 'extra'), { recursive: true }); await fsp.writeFile(path.join(f.remote, 'copy', 'extra', 'old'), 'reviewed');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'mirror' })); assert.equal(result.status, 'failed'); assert.match(result.error, /no longer empty/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'extra', 'new'), 'utf8'), 'keep'); assert.equal(f.mutations.filter(e => e[0] === 'rmdir').length, 0);
+});
+
+test('mirror refuses target deletion when a matching source path appeared during the operation', async t => {
+  const f = await fixture(t, { onWrite: async ({ local }) => { await fsp.writeFile(path.join(local, 'source', 'extra'), 'new source'); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.local, 'source', 'copy-first'), 'payload'); await fsp.writeFile(path.join(f.remote, 'copy', 'extra'), 'retain');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'mirror' })); assert.equal(result.status, 'failed'); assert.match(result.error, /source path appeared/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'extra'), 'utf8'), 'retain'); assert.equal(f.mutations.filter(e => e[0] === 'remove').length, 0);
+});
+
+test('mirror deletion with missing acknowledgement closes the session and reports unknown outcome', async t => {
+  const f = await fixture(t, { commitTimeoutMs: 50, afterRemove: async () => false }); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.remote, 'copy', 'extra'), 'delete');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'mirror' })); assert.equal(result.status, 'failed'); assert.match(result.error, /outcome is unknown/);
+  await assert.rejects(f.manager.listRemote({ id: f.connection.id, path: '/copy' }), /closed/);
+});
+
+test('advanced destructive and bidirectional plans explicitly reject folder resume', async t => {
+  const f = await fixture(t); await advancedTrees(f);
+  for (const mode of ['mirror', 'two-way']) await assert.rejects(f.plan('upload', 'source', 'copy', { mode, resumable: true }), /Resumable folder/);
+  assert.deepEqual(f.mutations, []);
+});
+
+test('mirror cancellation waits for an issued deletion and reports completed irreversible work', async t => {
+  let released; let entered; const pending = new Promise(resolve => { entered = resolve; });
+  const f = await fixture(t, { afterRemove: async () => { entered(); await new Promise(resolve => { released = resolve; }); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.remote, 'copy', 'a'), 'delete first'); await fsp.writeFile(path.join(f.remote, 'copy', 'b'), 'retain later');
+  const prepared = await f.plan('upload', 'source', 'copy', { mode: 'mirror' }); const started = await f.manager.startFolderTransfer({ planId: prepared.planId });
+  await pending; let cancelled = false; const stopping = f.manager.cancel(started.transferId).then(() => { cancelled = true; });
+  await pause(20); assert.equal(cancelled, false); released(); await stopping;
+  const result = await f.waitJob(started.transferId); assert.equal(result.status, 'cancelled'); assert.equal(result.deletedFiles, 1); assert.match(result.warning, /1 files.*deleted/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'b'), 'utf8'), 'retain later');
+});
+
+test('mirror refuses a symlink at a deletion candidate and never follows target-only links', { skip: process.platform === 'win32' && 'Windows symlink creation requires a platform privilege' }, async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.remote, 'outside'), 'outside bytes');
+  await fsp.symlink('../outside', path.join(f.remote, 'copy', 'link')); await assert.rejects(f.plan('upload', 'source', 'copy', { mode: 'mirror' }), /symbolic links/);
+  assert.deepEqual(f.mutations, []); assert.equal(await fsp.readFile(path.join(f.remote, 'outside'), 'utf8'), 'outside bytes');
+});
+
+test('mirror refuses a destination link substituted during preceding transfer', { skip: process.platform === 'win32' && 'Windows symlink creation requires a platform privilege' }, async t => {
+  let changed = false; const f = await fixture(t, { onWrite: async ({ remote }) => { if (changed) return; changed = true; await fsp.unlink(path.join(remote, 'copy', 'extra')); await fsp.symlink('../outside', path.join(remote, 'copy', 'extra')); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.local, 'source', 'copy-first'), 'copy'); await fsp.writeFile(path.join(f.remote, 'copy', 'extra'), 'original'); await fsp.writeFile(path.join(f.remote, 'outside'), 'keep');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'mirror' })); assert.equal(result.status, 'failed'); assert.match(result.error, /destination file changed/);
+  assert.equal(await fsp.readFile(path.join(f.remote, 'outside'), 'utf8'), 'keep'); assert.equal(f.mutations.filter(e => e[0] === 'remove').length, 0);
+});
+
+test('two-way replaced file choices detect content changes during payload transfer', async t => {
+  let changed = false; const f = await fixture(t, { onWrite: async ({ remote }) => { if (changed) return; changed = true; const name = path.join(remote, 'copy', 'conflict'); const info = await fsp.stat(name); await fsp.writeFile(name, 'third'); await fsp.utimes(name, info.atime, info.mtime); } });
+  await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy')); await fsp.writeFile(path.join(f.local, 'source', 'conflict'), 'first'); await fsp.writeFile(path.join(f.remote, 'copy', 'conflict'), 'other');
+  const result = await f.run(await f.plan('upload', 'source', 'copy', { mode: 'two-way', resolutions: [{ relativePath: 'conflict', source: 'local' }] }));
+  assert.equal(result.status, 'failed'); assert.match(result.error, /destination file content changed/); assert.equal(await fsp.readFile(path.join(f.remote, 'copy', 'conflict'), 'utf8'), 'third');
+});
+
+test('two-way skips identical files with zero mutation on an already converged tree', async t => {
+  const f = await fixture(t); await fsp.mkdir(path.join(f.local, 'source')); await fsp.mkdir(path.join(f.remote, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'source', 'same'), 'same'); await fsp.writeFile(path.join(f.remote, 'copy', 'same'), 'same');
+  const plan = await f.plan('upload', 'source', 'copy', { mode: 'two-way' }); assert.equal(plan.files, 0); assert.equal(plan.conflicts, 0);
+  const result = await f.run(plan); assert.equal(result.status, 'completed', result.error); assert.deepEqual(f.mutations, []);
+});
+
+test('mirror rechecks deletion target after the remote source-absence probe and retains concurrent edits', async t => {
+  let edited = false;
+  const f = await fixture(t, { onStat: async ({ name, local }) => {
+    if (name !== '/source/extra' || edited) return;
+    edited = true;
+    const target = path.join(local, 'copy', 'extra');
+    const before = await fsp.stat(target);
+    await fsp.writeFile(target, 'edited!!');
+    await fsp.utimes(target, before.atime, before.mtime);
+  } });
+  await fsp.mkdir(path.join(f.remote, 'source'));
+  await fsp.mkdir(path.join(f.local, 'copy'));
+  await fsp.writeFile(path.join(f.local, 'copy', 'extra'), 'original');
+  const prepared = await f.plan('download', 'source', 'copy', { mode: 'mirror' });
+  assert.equal(prepared.deletedFiles, 1);
+  const result = await f.run(prepared);
+  assert.equal(edited, true, 'The fixture must edit the target during the real SFTP absence probe.');
+  assert.equal(result.status, 'failed', result.error);
+  assert.match(result.error, /destination file (?:content )?changed/);
+  assert.equal(result.deletedFiles, 0);
+  assert.equal(await fsp.readFile(path.join(f.local, 'copy', 'extra'), 'utf8'), 'edited!!');
 });

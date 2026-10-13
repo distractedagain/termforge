@@ -1,6 +1,6 @@
 # Import sessions from text
 
-TermForge 0.13 enables **Tools → Import Settings from Text File** and **Import & export → Import sessions from CSV or text**. This wizard imports connection profiles; it does not import all SecureCRT settings or encrypted secrets.
+ForgeCRT 0.13 enables **Tools → Import Settings from Text File** and **Import & export → Import sessions from CSV or text**. This wizard imports connection profiles; it does not import all SecureCRT settings or encrypted secrets.
 
 Choose a regular UTF-8 file, including UTF-8 with a BOM. Select comma, tab or semicolon delimiters and whether the first row contains column names. Quoted fields support escaped quotes and embedded line breaks. A one-column host list also works: turn off the header option and map that column to Host. Missing session names use the hostname.
 

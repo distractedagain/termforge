@@ -159,7 +159,7 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
     else {
       const size = Buffer.byteLength(text, 'utf8');
       // A late subscriber can recover startup messages without unbounded data.
-      if (earlyBytes + size > MAX_QUEUED_BYTES) { earlyOutput = ['\r\n[TermForge: output before subscription exceeded 1 MiB.]\r\n']; earlyBytes = 64; }
+      if (earlyBytes + size > MAX_QUEUED_BYTES) { earlyOutput = ['\r\n[ForgeCRT: output before subscription exceeded 1 MiB.]\r\n']; earlyBytes = 64; }
       else { earlyOutput.push(text); earlyBytes += size; }
     }
   }
@@ -167,7 +167,7 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
     for (const callback of [...rawListeners]) callback(Buffer.from(bytes));
     output(decoder.write(bytes));
   }
-  const status = message => output(`\r\n[TermForge: ${message}]\r\n`);
+  const status = message => output(`\r\n[ForgeCRT: ${message}]\r\n`);
   function detach() {
     if (!stream) return;
     for (const [event, callback] of listeners.splice(0)) stream.removeListener(event, callback);

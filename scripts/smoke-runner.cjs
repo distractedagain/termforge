@@ -24,7 +24,7 @@ async function screenshot(window, directory, name) {
 async function projectSmoke(window, terminals, directory) {
   const { clipboard, dialog } = require('electron');
   const project = await fs.mkdtemp(path.join(directory, 'project-fixture-'));
-  const playbook = '---\n- name: TermForge desktop fixture\n  hosts: localhost\n  gather_facts: false\n  tasks:\n    - name: Show fixture text\n      ansible.builtin.debug:\n        msg: Original fixture\n';
+  const playbook = '---\n- name: ForgeCRT desktop fixture\n  hosts: localhost\n  gather_facts: false\n  tasks:\n    - name: Show fixture text\n      ansible.builtin.debug:\n        msg: Original fixture\n';
   const editedPlaybook = playbook.replace('Original fixture', 'Edited through native clipboard');
   const validJson = '{"smoke":true,"savedFrom":"native editor"}\n';
   await fs.writeFile(path.join(project, 'playbook.yml'), playbook);
@@ -147,6 +147,17 @@ async function projectSmoke(window, terminals, directory) {
 }
 
 module.exports = async ({ window, terminals, store }) => {
+  const { app } = require('electron');
+  const packageInfo = require('../package.json');
+  const { resolveDataDirectory } = require('../app/files.cjs');
+  assert.equal(app.getName(), 'TermForge', 'Branding must retain the runtime name used for native credential-store lookup');
+  assert.equal(path.resolve(app.getPath('userData')), path.resolve(app.getPath('appData'), 'TermForge'), 'Branding must retain the established Electron userData directory');
+  assert.equal(path.resolve(app.getPath('sessionData')), path.resolve(app.getPath('userData')), 'Chromium Local State must keep the established encryption-state location');
+  assert.equal(packageInfo.productName, 'ForgeCRT', 'The desktop display product is ForgeCRT');
+  assert.equal(packageInfo.build.appId, 'org.termforge.desktop', 'The installed application identity must remain stable');
+  assert.ok(process.env.TERMFORGE_DATA_DIR && path.isAbsolute(process.env.TERMFORGE_DATA_DIR), 'Native smoke requires an isolated configuration override');
+  const isolatedProfile = path.resolve(process.env.TERMFORGE_DATA_DIR);
+  assert.equal(path.resolve(resolveDataDirectory(app.getPath('appData'), app.getPath('userData'))), isolatedProfile, 'The legacy configuration override must still control application files');
   const errors = [];
   window.webContents.on('console-message', (details) => { if (details.level === 'error' || /Could not create web worker|Falling back to loading web worker/i.test(details.message)) errors.push(details.message); });
   console.log('START native isolation, PTY, terminal UI, broadcast, and preferences checks');
@@ -209,6 +220,13 @@ module.exports = async ({ window, terminals, store }) => {
     return {platform:state.platform,version:state.version,nodeIsolated:true,profileRoundTrip:true,realPTY:true,terminalUI:true,tileView:true,broadcastConfirmation:true,broadcastDelivery:true,preferencesPersist:true};
   })()`);
   assert.equal(result.realPTY, true);
+  const isolatedConfig = JSON.parse(await fs.readFile(path.join(isolatedProfile, 'config.json'), 'utf8'));
+  assert.equal(isolatedConfig.settings.fontSize, 16, 'Native preference writes must reach the existing configuration override');
+  const displayedTitle = await window.webContents.executeJavaScript('document.title');
+  assert.match(displayedTitle, /ForgeCRT/, 'Visible document title must use the new product name');
+  Object.assign(result, { runtimeIdentityPreserved: true, nativeUserDataIdentityPreserved: true, chromiumSessionIdentityPreserved: true,
+    isolatedConfigOverrideVerified: true, brandDisplayVerified: true, installedCredentialMigrationVerified: false });
+  console.log('PASS native display branding, retained runtime/storage identities and isolated configuration persistence');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('PASS native isolation, PTY, terminal UI, broadcast, and preferences checks');
   await new Promise((resolve) => setTimeout(resolve, 350));
@@ -242,5 +260,5 @@ module.exports = async ({ window, terminals, store }) => {
   report.screenshots.projectEditor = await screenshot(window, directory, 'project-editor.png');
   report.screenshotCaptured = Object.values(report.screenshots).every(capture => capture.screenshotCaptured);
   await persist();
-  console.log('TermForge desktop smoke behavioral checks passed: ' + JSON.stringify(report));
+  console.log('ForgeCRT desktop smoke behavioral checks passed: ' + JSON.stringify(report));
 };

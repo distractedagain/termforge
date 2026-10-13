@@ -1,6 +1,6 @@
 # SecureCRT 9.7 feature parity ledger
 
-TermForge's current direction is an **original modern interface**, as selected by the user for 0.7. This supersedes the earlier request to closely reproduce **SecureCRT 9.7 on macOS** visually. The overall project goal remains every applicable SecureCRT feature across **macOS, Windows, and Linux**. This is a development ledger, not a claim of complete feature or script compatibility. Visual identity is now TermForge's own; historical reference comparisons below retain their original evidence boundaries.
+ForgeCRT's current direction is an **original modern interface**, as selected by the user for 0.7. This supersedes the earlier request to closely reproduce **SecureCRT 9.7 on macOS** visually. The overall project goal remains every applicable SecureCRT feature across **macOS, Windows, and Linux**. This is a development ledger, not a claim of complete feature or script compatibility. Visual identity is now ForgeCRT's own; historical reference comparisons below retain their original evidence boundaries.
 
 Reference checked October 12, 2026. VanDyke's [macOS product page](https://www.vandyke.com/products/securecrt/mac.html) identifies the 9.7 family; its [release history](https://www.vandyke.com/products/history.php?prod=securecrt) currently lists 9.7.3. The [platform feature grid](https://www.vandyke.com/products/securecrt/features.html) supplies platform applicability. Public documentation is incomplete: exact dialog inventories, defaults, shortcuts, and interaction details still need comparison with an authorized running 9.7 macOS installation. No proprietary code or artwork is used.
 
@@ -13,7 +13,7 @@ The baseline columns below describe the **published Harbor v0.2.0 source**, comm
 - **Missing** means no app implementation was found in the baseline. Showing a label or saving an unused option does not count as implementation.
 - **Not applicable to macOS** means VanDyke marks the capability Windows-only; it remains a requirement on Windows within the overall project goal. Separate-product integration remains a compatibility gap. Commercial license enforcement and purchased support terms do not apply to a free MIT project.
 
-Every acceptance gate is an original TermForge engineering requirement. These are test plans, not results. A row can advance only when its implementation, repeatable test, platform, and remaining limits are recorded. Do not compute a percentage from rows: an entire protocol engine and a small menu action are not equal units of work.
+Every acceptance gate is an original ForgeCRT engineering requirement. These are test plans, not results. A row can advance only when its implementation, repeatable test, platform, and remaining limits are recorded. Do not compute a percentage from rows: an entire protocol engine and a small menu action are not equal units of work.
 
 ## Existing evidence
 
@@ -30,9 +30,9 @@ Every acceptance gate is an original TermForge engineering requirement. These ar
 
 Sources: [macOS overview and screenshots](https://www.vandyke.com/products/securecrt/mac.html), [Session Manager pin/auto-hide behavior](https://www.vandyke.com/support/tips/toggle-session-manager-between-pinned-and-auto-hide-states.html), [moving tabs](https://www.vandyke.com/support/tips/dragouttabs.html), [9.7 changes](https://www.vandyke.com/products/securecrt/new-in.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
-| UI-01 | macOS window and menus | Partial; E4/E5, native menu plus an in-window menu row | Verify action coverage, native titlebar/menu integration, enabled states, readable toolbars/tabs/status, keyboard focus and accessible light/dark layouts in TermForge's original design. Exact SecureCRT geometry and styling are no longer acceptance requirements. |
+| UI-01 | macOS window and menus | Partial; E4/E5, native menu plus an in-window menu row | Verify action coverage, native titlebar/menu integration, enabled states, readable toolbars/tabs/status, keyboard focus and accessible light/dark layouts in ForgeCRT's original design. Exact SecureCRT geometry and styling are no longer acceptance requirements. |
 | UI-02 | Session Manager | Partial; E4, nested tree/filter and selection/open behavior | Match tree controls, context menu, pinned/auto-hide state, four docking edges, floating pane, and saved layout. |
 | UI-03 | Active Sessions Manager | Missing; E5 | List all open sessions with active/count/state indicators; filter, multi-select, activate, disconnect, close, lock, and SFTP actions. |
 | UI-04 | Tab groups and tiling | Partial; E3/E4, one tab strip or automatic tile grid | Independent horizontal/vertical groups with selectable tabs in each group; drag/reorder, resize, and restore grouping without recreating PTYs. |
@@ -48,7 +48,7 @@ Sources: [macOS overview and screenshots](https://www.vandyke.com/products/secur
 
 Sources: [session-management capabilities](https://www.vandyke.com/products/securecrt/key_features.html), [Connect Bar syntax](https://www.vandyke.com/support/tips/connectbar.html), [text import wizard](https://www.vandyke.com/support/tips/import-securecrt-sessions-from-csv-or-text-file-data-using-text-import-wizard.html), [9.7 release history](https://www.vandyke.com/products/history.php?prod=securecrt).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | SM-01 | Named profiles and nested folders | Partial; E1/E4, up to 1,000 profiles, folders inferred from paths | Explicit empty folders; rename/move/copy/paste/duplicate sessions and folders; drag/drop; preserve references and test a large database. |
 | SM-02 | Session search and refresh | Partial; E4, simple filter | Saved search options, manual refresh, path copying, and changes visible across app windows. |
@@ -68,7 +68,7 @@ Sources: [session-management capabilities](https://www.vandyke.com/products/secu
 
 Sources: [macOS SSH coverage](https://www.vandyke.com/products/securecrt/ssh_mac_terminal.html), [SSH/security feature grid](https://www.vandyke.com/products/securecrt/features.html), [host-key management](https://www.vandyke.com/support/tips/009.html), [agent behavior on macOS](https://www.vandyke.com/support/howto/002.html), [X11 forwarding](https://www.vandyke.com/support/tips/configuring-x11-forwarding-in-securecrt.html), [credential sets](https://www.vandyke.com/support/tips/how-to-manage-credentials-in-securecrt-securefx.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | PR-01 | SSH2 transport | Partial; E1/E3, external OpenSSH | Version/capability discovery, explicit supported algorithms/options, accurate authentication state, connection diagnostics, cancellation, reconnect, and platform integration tests. |
 | PR-02 | SSH1 | Missing; E5 | A separately selectable, explicitly identified legacy transport with fixture-based interoperability and no automatic downgrade from SSH2. |
@@ -97,7 +97,7 @@ Sources: [macOS SSH coverage](https://www.vandyke.com/products/securecrt/ssh_mac
 
 Source: [firewall categories and dependent sessions](https://www.vandyke.com/products/securecrt/features.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | FW-01 | Named proxy/firewall configurations | Missing; E5 | Reusable references, explicit edit propagation, secret separation, and per-session selection. |
 | FW-02 | SOCKS4 / SOCKS5 | Missing; E5 | Version selection, DNS mode, SOCKS5 authentication, IPv6 compatibility, rejection and timeout tests. |
@@ -110,7 +110,7 @@ Source: [firewall categories and dependent sessions](https://www.vandyke.com/pro
 
 Sources: [macOS terminal families](https://www.vandyke.com/products/securecrt/ssh_mac_terminal.html), [emulation feature grid](https://www.vandyke.com/products/securecrt/features.html), [mouse support](https://www.vandyke.com/support/tips/mousesupport.html), [color configuration](https://www.vandyke.com/support/tips/colorconfig.html), [key mapping](https://www.vandyke.com/support/tips/map-keyboard-shortcut-to-perform-menu-toolbar-function-securecrt.html), [keyword definitions](https://www.vandyke.com/support/scripting/scripting-examples/import-keyword-highlighting-ini-files.html), [9.7 additions](https://www.vandyke.com/products/securecrt/new-in.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | TE-01 | Xterm and extensions | Partial; E4/E5, xterm.js default | Golden sequence tests for title, mouse, 256/24-bit color, alternate screen, and Xterm 216+/R6 keyboard modes. |
 | TE-02 | VT100/102/220/320 | Missing as distinct emulations; E5 | Each mode must pass an independent sequence/key/character-set corpus; changing TERM alone is insufficient. |
@@ -132,7 +132,7 @@ Sources: [macOS terminal families](https://www.vandyke.com/products/securecrt/ss
 
 Sources: [Command Window](https://www.vandyke.com/support/tips/chatsendcom.html), [Button Bar functions](https://www.vandyke.com/support/tips/buttonbar.html), [session-specific bars](https://www.vandyke.com/support/tips/button_bar.html), [Command Manager interoperability](https://www.vandyke.com/support/tips/transfer-button-bars-to-the-securecrt-command-manager.html), [copy/paste mouse options](https://www.vandyke.com/support/howto/010.html), [general behavior grid](https://www.vandyke.com/products/securecrt/features.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | CO-01 | Command Window targets | Partial; E3/E4, active/all-live with confirmation | Active/all/selected-group/visible targeting, locked-session exclusion, and exact target preview; retain explicit safeguards for multi-session sends. |
 | CO-02 | Command history / immediate characters | Missing; E5 | Configurable persistent history and edit/recall; optional live characters, Ctrl+C, escape and completion forwarded to explicit targets. |
@@ -152,7 +152,7 @@ Sources: [Command Window](https://www.vandyke.com/support/tips/chatsendcom.html)
 
 Sources: [SSH transfer options](https://www.vandyke.com/products/securecrt/ssh_file_transfer.html), [SFTP tab escape sequence](https://www.vandyke.com/support/tips/sftptab.html), [9.7 SFTP changes](https://www.vandyke.com/products/securecrt/new-in.html), [TFTP details](https://www.vandyke.com/support/tips/securecrt-tftp-server.html), [SecureCRT/SecureFX installation on macOS](https://www.vandyke.com/support/tips/install-securecrt-and-securefx-on-a-macos-machine.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | FT-01 | Interactive SFTP tab / direct open | Partial; E1/E4, separate system `sftp` process | Real upload/download/list/path/completion tests; open saved SSH session directly as SFTP; report actual authentication state. |
 | FT-02 | SFTP shared transport | Missing; E5, SSH multiplexing disabled | Reuse an authenticated SSH transport without reprompting; manage lifetime and working-directory handoff predictably. |
@@ -167,7 +167,7 @@ Sources: [SSH transfer options](https://www.vandyke.com/products/securecrt/ssh_f
 
 Sources: [Python on macOS](https://www.vandyke.com/support/tips/how-to-use-python-scripting-securecrt-on-macos.html), [scripting objects](https://www.vandyke.com/support/scripting/scripting-examples/python-importing-custom-modules-referencing-the-crt-object.html), [automated logging](https://www.vandyke.com/support/tips/configure-automated-logging-in-securecrt.html), [trace logging](https://www.vandyke.com/support/tips/configure-trace-options-debug-logging-in-securecrt.html), [9.7 log pause/import changes](https://www.vandyke.com/products/history.php?prod=securecrt), [printing/application grid](https://www.vandyke.com/products/securecrt/features.html).
 
-| ID | Capability | v0.2 status / evidence | TermForge acceptance gate still required |
+| ID | Capability | v0.2 status / evidence | ForgeCRT acceptance gate still required |
 | --- | --- | --- | --- |
 | AU-01 | Python automation | Missing; E5 | External runtime discovery, safe process ownership, run/cancel/status, script arguments and error reporting on macOS. Validate supported runtime versions explicitly. |
 | AU-02 | Session/screen/tab/config/dialog/file API | Missing; E5 | Document an independent API for connect, send, read/wait/prompt, tabs, settings, dialogs, transfers, and cancellation; separately test any intended `crt` compatibility rather than assuming it. |
@@ -187,7 +187,7 @@ Sources: [Python on macOS](https://www.vandyke.com/support/tips/how-to-use-pytho
 
 ## Platform-specific requirements and product integration
 
-The [official platform grid](https://www.vandyke.com/products/securecrt/features.html) and [key-feature footnote](https://www.vandyke.com/products/securecrt/key_features.html) identify these distinctions. TermForge's independent visual design does not change the project's feature scope. Windows-only capabilities below are missing Windows requirements, and integration with a separate product remains a compatibility gap where applicable. Their absence cannot be treated as completion of the overall goal.
+The [official platform grid](https://www.vandyke.com/products/securecrt/features.html) and [key-feature footnote](https://www.vandyke.com/products/securecrt/key_features.html) identify these distinctions. ForgeCRT's independent visual design does not change the project's feature scope. Windows-only capabilities below are missing Windows requirements, and integration with a separate product remains a compatibility gap where applicable. Their absence cannot be treated as completion of the overall goal.
 
 | Capability | SecureCRT applicability | Harbor v0.2 status | Tracking decision |
 | --- | --- | --- | --- |
@@ -198,7 +198,7 @@ The [official platform grid](https://www.vandyke.com/products/securecrt/features
 | ActiveX languages / COM VRALib | Windows | Missing | Separate Windows compatibility scope; macOS automation target is Python. |
 | Graphical keymap editor | Windows | Missing | Separate Windows convenience; macOS mapped-key functionality still required. |
 | Drag/customizable menu and toolbar, file-based UI customization | Windows | Missing | Separate Windows target; native menu integration and usability remain UI-01. |
-| Colored tab backgrounds | Windows | Missing | Track configurable tab colors separately from status indicators; TermForge's visual design is independent of the historical macOS reference. |
+| Colored tab backgrounds | Windows | Missing | Track configurable tab colors separately from status indicators; ForgeCRT's visual design is independent of the historical macOS reference. |
 | Double-width/height font attributes | Windows | Missing | Separate Windows emulation extension. |
 | Environment-variable paths | Windows in feature grid | Missing | Separate Windows option; verify individual macOS log/path behavior from its own documentation. |
 | FIPS 140-2 mode / validated library | Windows | Missing | No Harbor validation claim; selecting algorithms never establishes certification. |
@@ -208,9 +208,9 @@ The [official platform grid](https://www.vandyke.com/products/securecrt/features
 | SecureFX protocols and graphical file management | Separate application on all desktop platforms | Missing | Track session/trust/authentication handoff as an integration compatibility gap; separately distinguish SecureFX's full feature catalog from features native to SecureCRT. An independent file component does not establish actual SecureFX interoperability. |
 | Trial/registration, purchased updates/support/maintenance | Commercial service | Not applicable | Harbor is MIT/free; do not reproduce license enforcement or promise vendor support. |
 
-## Released preview: TermForge v0.3.0
+## Released preview: ForgeCRT v0.3.0
 
-The current project is named TermForge. This addendum was inspected on October 12, 2026 and describes the preview released from commit `09abaaefbb440d0600647ac389e32f72dca98700`; it does **not** change the v0.2 baseline above or the public v0.2 release. Interactive native Electron runtime testing of 0.3 remains pending on every platform. Socket/Python tests, headless renderer checks and native packaging verify different boundaries, stated below.
+The current project is named ForgeCRT. This addendum was inspected on October 12, 2026 and describes the preview released from commit `09abaaefbb440d0600647ac389e32f72dca98700`; it does **not** change the v0.2 baseline above or the public v0.2 release. Interactive native Electron runtime testing of 0.3 remains pending on every platform. Socket/Python tests, headless renderer checks and native packaging verify different boundaries, stated below.
 
 ### New evidence
 
@@ -237,7 +237,7 @@ Each row remains **Partial** for the complete referenced requirement. The narrow
 | UI-06 | Snapshots save ordered references to saved sessions, tile orientation and active profile; select without connecting, then explicit reviewed connect | N4/N5/N6 | Clones with the same profile ID are deduplicated; unsaved connections excluded. No tab groups, repeated profile instances, pane sizes, or complete workspace restoration. |
 | SM-03 | Multi-selection, reviewed folder/selection connect, atomic bulk updates of selected folder/username/font/color fields | N4/N5/N6 | Bulk edit covers only those fields; no full mixed-value settings editor or explicit empty-folder management. |
 | SM-05, SM-06 | Dedicated Quick Connect with opt-in save; Connect Bar accepts saved names and basic SSH/Telnet/Raw address forms | N5/N6 | Does not implement the complete SecureCRT command-line language, multiple connect expressions, all shortcut variants, or OS URI-handler registration. Embedded passwords are deliberately rejected. |
-| SM-10 | Version-1 configuration migrates in memory to version 2; TermForge JSON includes advanced settings/commands/history/snapshots and remaps imported references | N4/N6 | Limited nonsecret INI importer remains SSH2-only. CSV/text wizard, proprietary XML settings compatibility, selected-category exports, and full conflict policies remain missing. |
+| SM-10 | Version-1 configuration migrates in memory to version 2; ForgeCRT JSON includes advanced settings/commands/history/snapshots and remaps imported references | N4/N6 | Limited nonsecret INI importer remains SSH2-only. CSV/text wizard, proprietary XML settings compatibility, selected-category exports, and full conflict policies remain missing. |
 | PR-03 | Actual Telnet and Raw TCP adapters replace subprocess placeholders; Telnet handles terminal type, NAWS, echo, IAC, fragmented negotiation/NVT state, and break | N1/N6 | RLogin missing. No separate raw diagnostic/byte display, TLS, proxy support, or every Telnet option. Text API decodes UTF-8; it is not a byte-exact binary transport API. |
 | PR-04 | Serial device enumeration and configurable baud/data/stop/parity/flow settings, input/output, and break. Closing waits for confirmed release; failed native closes remain tracked and retryable | N1/N4/N5/N6 | Physical serial adapters, permission/device-removal cases, platform-native runtime, separate serial default profiles, modem-signal control UI, and Hex View remain unverified/missing. |
 | SH-02–04, SH-10, SH-14–15, CO-09, CO-11 | SSH options for certificate path, preferred authentication, cipher/KEX/MAC names, agent/X11 forwarding, compression, server keepalive, timeout, and remote command produce separate OpenSSH arguments | N4/N5/N6 | Installed OpenSSH determines capabilities. No dynamic capability discovery or verified GSSAPI/KEX/token/certificate/X11/agent/remote-command integration; no credentials vault or authentication-state detector. Keepalive applies to SSH, not every protocol. |
@@ -262,7 +262,7 @@ Each row remains **Partial** for the complete referenced requirement. The narrow
 
 Local verification at this checkpoint: **84/84 backend tests and 46/46 headless renderer checks passed**. Native CI, packaging and public v0.3 publication were verified at the exact released commit, as recorded in N7/N8. Interactive packaged runtime and the remaining acceptance gates are still pending. Keep version-specific verification boundaries; neither a test count nor a successful screenshot is a feature-parity certification.
 
-## Color-scheme update: TermForge 0.4 preview
+## Color-scheme update: ForgeCRT 0.4 preview
 
 The shared palette catalogue now supplies seven named presets, including canonical Solarized Dark and Light. Every preset defines foreground/background, all sixteen ANSI slots, cursor/accent and active/inactive selection colors. Options → Color Schemes and a palette toolbar button expose preview-only selection, keyboard navigation, Apply/Cancel and recoverable save errors. Global and per-session appearance pages share the same catalogue and ANSI previews; Multiple Session Options offers every preset for future connections.
 
@@ -274,7 +274,7 @@ Version 0.4 [native CI](https://github.com/distractedagain/termforge/actions/run
 
 Separately, the user reported that installed v0.3 opened on macOS and that local-shell and SSH use worked. This is limited user-reported runtime evidence, not a full native test matrix or evidence for v0.4.
 
-## Tab groups and snapshots: TermForge 0.5 preview
+## Tab groups and snapshots: ForgeCRT 0.5 preview
 
 UI-04 and SM-07 advance with independently selected tab groups, nested vertical/horizontal splits, pointer/keyboard divider resizing, tab drag between groups, edge-drop splitting, group collapse and reconnection in place. Existing tile commands create one group per connection. The same terminal objects and processes are retained during rearrangement.
 
@@ -286,15 +286,15 @@ These rows remain partial: live tab movement across windows, selected-group comm
 
 Version 0.5 [native CI](https://github.com/distractedagain/termforge/actions/runs/38328313996), [packaging](https://github.com/distractedagain/termforge/actions/runs/38328332260), and [publication](https://github.com/distractedagain/termforge/actions/runs/38328921919) passed first attempt at `a3697bcbb7c803edfde80d23e5c5769c621671ba`: both Macs and Linux passed 115 tests, Windows passed 112 with three POSIX-only skips, and Linux passed 72 headless checks. Both Mac package signatures passed strict recursive ad-hoc verification. All thirteen public assets were checked against the manifest and public digests; anonymous build-record downloads matched the tagged source. Interactive packaged behavior remains unverified.
 
-## Current visual direction: TermForge 0.7 source
+## Current visual direction: ForgeCRT 0.7 source
 
 The 0.7 source introduces an original slate/teal workspace, horizontal manager switcher, vector icons and app mark, welcome actions, and refined dialogs and AI Assistant. Light/dark modes and optional matching palettes remain available. Existing session, tab-group, command and explicit AI-review workflows remain in scope; the redesign does not complete missing feature rows. See [the interface guide](MODERN-INTERFACE.md).
 
 The current source passed **156 backend tests**. Final interface verification, native packaging and publication are pending. Visual-equivalence requirements in the historical 0.3–0.5 notes are superseded by the current UI-01 and completion gates below; their recorded results remain unchanged.
 
-## Credentials and graphical transfers: TermForge 0.9 source
+## Credentials and graphical transfers: ForgeCRT 0.9 source
 
-This source addendum advances the rows below without changing the historical release records above. The user's SecureCRT 9.7 macOS Quick Connect screenshot informed the connection controls and workflow; TermForge retains its own modern layout and artwork. It does not establish visual equivalence or complete feature parity. See [Saved credentials and file transfers](SECURE-CONNECTIONS.md) for operation, security boundaries and limitations.
+This source addendum advances the rows below without changing the historical release records above. The user's SecureCRT 9.7 macOS Quick Connect screenshot informed the connection controls and workflow; ForgeCRT retains its own modern layout and artwork. It does not establish visual equivalence or complete feature parity. See [Saved credentials and file transfers](SECURE-CONNECTIONS.md) for operation, security boundaries and limitations.
 
 | Related IDs | Implemented in 0.9 source | Remaining differences / next gate |
 | --- | --- | --- |
@@ -302,7 +302,7 @@ This source addendum advances the rows below without changing the historical rel
 | SH-01, SH-02, SH-05 | Managed SSH supports named username/password credentials, explicit private keys with passphrase prompts, a bounded system agent, ordered password/public-key/keyboard-interactive authentication, and separate masked challenge dialogs. | Still Partial. Keyboard-interactive always requests fresh answers; it never automatically substitutes a saved password. Credential actions from every key/button/command, key creation/conversion, certificates, tokens and the complete authentication matrix remain open. |
 | SH-05, SH-06 | The main-process vault encrypts usernames, passwords and host grants through OS storage. Profiles retain identifiers; imports/exports clear those references. Insecure or unavailable Linux storage is refused. | This is not a complete password/passphrase lifecycle. No app-level vault lock/master password, biometric unlock, passphrase caching, recovery or encrypted vault export. Native provider behavior and interoperability require platform-specific verification; OS protection does not defend a compromised unlocked account. |
 | SH-11 | Managed SSH requires fingerprint approval before reading credentials/private keys, pins the host/port key, blocks changed keys, and provides a reviewed forget action. First credential use also requires approval for the host, port and verified key. | Still Partial. Managed pins are separate from OpenSSH known_hosts; host-key import/export, full hashed-host compatibility and the complete vendor key-management workflow are absent. |
-| SH-03, SH-09–10, SH-12–14 | Existing system OpenSSH terminal sessions and their advanced options remain available alongside managed SSH. | Managed SSH explicitly rejects jump hosts, port forwarding, agent forwarding, certificates, GSSAPI and X11. Saved TermForge passwords cannot authenticate the external OpenSSH process. The external client's capabilities do not establish app-level agent/token management or tested parity for those options. |
+| SH-03, SH-09–10, SH-12–14 | Existing system OpenSSH terminal sessions and their advanced options remain available alongside managed SSH. | Managed SSH explicitly rejects jump hosts, port forwarding, agent forwarding, certificates, GSSAPI and X11. Saved ForgeCRT passwords cannot authenticate the external OpenSSH process. The external client's capabilities do not establish app-level agent/token management or tested parity for those options. |
 | FT-01, FT-08 | An independent two-pane workspace browses local/remote directories and queues selected regular files for SFTP or actual SCP payload transfer, with progress, cancellation and reviewed replacement of existing files. | Still Partial. SCP mode requires SFTP for browsing, checks, staging and commit, plus remote scp support. SCP-only servers, recursive folders, link copying, resume, synchronization, remote editing, drag/drop and permission/time preservation are absent. This does not add SecureFX's FTP/FTPS/HTTPS/S3/WebDAV catalog or establish SecureFX interoperability. |
 | FT-02 | A terminal profile and named credential can open the graphical transfer workspace. | Shared live terminal transport remains missing: File Transfer opens a separately authenticated SSH connection. Neither channel reuse nor complete directory/lifetime handoff is implemented. |
 
@@ -310,7 +310,7 @@ The source includes vault/authentication coverage in `tests/credentials.test.cjs
 
 The full requested feature inventory remains a development goal. Rows not advanced here retain their earlier gaps, including specialized terminal emulations and encodings, legacy transfer protocols, broader scripting compatibility, richer logging, platform-specific integrations and the completion gates below. This addendum is not a claim that every SecureCRT or SecureFX feature is implemented.
 
-## Session migration and remote file management: TermForge 0.13
+## Session migration and remote file management: ForgeCRT 0.13
 
 SM-11 advances with an independent UTF-8 CSV/TSV/semicolon import wizard, header/field mapping, line diagnostics, explicit invalid-row exclusion, skip/rename/replace policies and reviewed atomic saving. Replacements preserve saved profile IDs and snapshot references; credentials are not imported and connections are not opened. SM-10 remains partial: this imports connection metadata, not the full XML/settings catalog. See [the import guide](SESSION-IMPORT.md).
 
@@ -321,12 +321,12 @@ Local and version-specific platform evidence belongs in [0.13 verification](VERI
 ## Required comparison and completion gates
 
 1. Inventory remaining SecureCRT 9.7 actions, defaults and shortcuts from public documentation or an authorized running installation, including applicable platform differences. Reference captures support functional analysis; redact user data and do not bundle reference artwork.
-2. Attach each action/default/shortcut to a row. Verify TermForge's original interface with synthetic profiles/output at desktop and compact sizes, in light/dark and matching palettes. Check readable text, reachable controls, keyboard focus, accessibility and state changes. Exact reference positions, dimensions and styling are not completion gates.
+2. Attach each action/default/shortcut to a row. Verify ForgeCRT's original interface with synthetic profiles/output at desktop and compact sizes, in light/dark and matching palettes. Check readable text, reachable controls, keyboard focus, accessibility and state changes. Exact reference positions, dimensions and styling are not completion gates.
 3. Use real isolated servers, loopback sockets, serial emulators, and transfer fixtures for behavior. Cover success, cancellation, rejection, timeout, reconnect, malformed data, and binary fidelity on applicable platforms.
 4. Record original implementation and repeatable evidence for every requested row and its variations on each applicable platform, including the Windows-specific section. Obtain independent terminal/security review before production claims. Mark intentionally unsupported legacy/security combinations visibly rather than hiding the gap.
 5. Publish only accurate version-specific release notes. Until these gates are met, the description remains **an independent terminal application with an original modern interface, being developed toward SecureCRT 9.7 feature parity across macOS, Windows, and Linux**.
 
-## TermForge 0.15 file workspace update
+## ForgeCRT 0.15 file workspace update
 
 FT-08 advances with independently implemented durable individual-file SFTP pause/resume, reviewed folder merge policies, one-way content synchronization and bounded UTF-8 remote editing. Recovery binds the authenticated server/account and verifies the source and partial contents. Folder plans expose copy/replace/skip/create actions and keep destination-only entries. Remote edits use explicit review, native save approval and content-revision checks.
 

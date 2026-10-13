@@ -1,10 +1,12 @@
-# TermForge
+# ForgeCRT
 
-A free, open-source desktop terminal and automation client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, Python automation, and a local project editor with reviewed Ansible runs. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
+A free, open-source desktop terminal and automation client for macOS, Windows, and Linux. ForgeCRT combines saved sessions, terminal connections, reusable commands, Python automation, and a local project editor with reviewed Ansible runs. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
 
 ![TermForge project editor in the modern dark interface](docs/images/project-workspace-dark.png)
 
 This 0.8 preview uses a temporary localhost project; no device is connected. It was captured in a headless browser, so native window controls are not shown.
+
+ForgeCRT is the new name for TermForge starting with v0.16. The GitHub repository and internal storage identifiers remain `termforge` so existing profiles, trusted hosts, recovery checkpoints and credentials stay in their established location. ForgeCRT is independent of VanDyke Software.
 
 ## Download
 
@@ -25,6 +27,12 @@ If macOS says it cannot verify the developer or check TermForge for malware, the
 This creates an exception for this app. Follow [Apple's opening instructions](https://support.apple.com/en-us/102445); these steps concern an unidentified developer or missing notarization, not a warning that an app will damage your computer.
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
+
+## In development for 0.16 — ForgeCRT and expanded file workflows
+
+The next preview adopts the **ForgeCRT** display name and adds durable SFTP folder recovery, SCP transfers that resume verified suffixes over SFTP, additive two-way synchronization with explicit conflict choices, and reviewed one-way mirroring. FTP, explicit FTPS and implicit FTPS add a separate passive-mode individual-file workflow with certificate validation and native approval before unencrypted FTP connections. These are original implementations; full SecureFX parity remains a goal.
+
+Two-way synchronization does not propagate deletions. Mirroring permanently removes only the target-only paths listed in its review; it stops on changed files or newly nonempty directories. Folder operations are sequences of commits, so completed changes remain after interruption. FTP/FTPS does not yet support folders, synchronization, resume or remote editing. See [the 0.16 release notes](docs/RELEASE-v0.16.0.md) and [file-transfer guide](docs/SECURE-CONNECTIONS.md). The latest verified download remains v0.15 above until publication and independent asset verification finish.
 
 ## New in 0.15 — Recovery, merging, synchronization and remote editing
 
@@ -192,7 +200,7 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 - SSH identity/certificate paths, jump host, requested forwarding, authentication/algorithm controls, compression and keepalive options.
 - JSON configuration import/export, version-1 migration, and a limited importer for plain nonsecret SecureCRT SSH2 session INI fields.
 
-See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, live tabs across multiple windows, and Windows-specific RDP/ActiveX features remain gaps. Full feature parity remains in development; the modern interface follows TermForge's own visual design.
+See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SECURECRT-PARITY.md) for implemented subsets, missing features and acceptance gates. Distinct legacy emulations, SSH1/RLogin, credential/key managers, advanced proxies, modem transfer protocols, printing, complete automation compatibility, live tabs across multiple windows, and Windows-specific RDP/ActiveX features remain gaps. Full feature parity remains in development; the modern interface follows ForgeCRT's own visual design.
 
 ## Historical interface — v0.3
 
@@ -248,7 +256,7 @@ The test and build workflows retain build artifacts. A separate, manually dispat
 
 ## Connections and privacy
 
-TermForge offers managed SSH with pinned host-key checks and an OS-protected named credential vault, plus system OpenSSH without a shell wrapper and with separate host checks. Saved sessions hold credential references; exports/imports clear them and exclude the vault. Private-key contents are not stored. Managed prompts bypass terminal input/history. OpenSSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive terminal input. Review recordings before saving or replaying them. See [credential/transfer limits](docs/SECURE-CONNECTIONS.md).
+ForgeCRT offers managed SSH with pinned host-key checks and an OS-protected named credential vault, plus system OpenSSH without a shell wrapper and with separate host checks. Saved sessions hold credential references; exports/imports clear them and exclude the vault. Private-key contents are not stored. Managed prompts bypass terminal input/history. OpenSSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive terminal input. Review recordings before saving or replaying them. See [credential/transfer limits](docs/SECURE-CONNECTIONS.md).
 
 Configuration exports/history/snippets may reveal infrastructure or commands; output logs may contain secrets. The TFTP server starts only explicitly, defaults to loopback port 6969, permits one chosen client IP and shares one selected folder; uploads create new files without replacing existing files. See [Python automation](docs/PYTHON-AUTOMATION.md), [TFTP limits](docs/TFTP.md), and [SECURITY.md](SECURITY.md).
 
@@ -256,4 +264,4 @@ Opening a project does not execute its code. Ansible actions require trust becau
 
 ## Contributing and license
 
-[Contributions](CONTRIBUTING.md) are welcome. TermForge's original source is licensed under [MIT](LICENSE), with no subscription or activation requirement. Dependencies retain their respective licenses; MIT does not relicense Electron, xterm.js, node-pty, OpenSSH, or other third-party code.
+[Contributions](CONTRIBUTING.md) are welcome. ForgeCRT's original source is licensed under [MIT](LICENSE), with no subscription or activation requirement. Dependencies retain their respective licenses; MIT does not relicense Electron, xterm.js, node-pty, OpenSSH, or other third-party code.

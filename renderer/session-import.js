@@ -66,7 +66,7 @@ export function createSessionImportUi({ api, toast = () => {}, onImported = asyn
       const result = await api.sessionImportApply({planId});
       if (result.canceled) { summary.textContent = 'Import canceled. Preview again to review and save.'; return; }
       await discard(); dialog.close(); toast(`${result.added} sessions imported, ${result.replaced} replaced.`);
-      try { await onImported(result); } catch { toast('Sessions were saved, but the session list could not refresh. Restart TermForge after finishing your active work.', true); }
+      try { await onImported(result); } catch { toast('Sessions were saved, but the session list could not refresh. Restart ForgeCRT after finishing your active work.', true); }
     } catch (exception) { fail(exception); summary.textContent = 'Preview again before importing.'; }
     finally { setBusy(false); }
   });

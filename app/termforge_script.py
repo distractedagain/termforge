@@ -1,4 +1,4 @@
-"""Original TermForge Python bridge; no third-party scripting engine."""
+"""Original ForgeCRT Python bridge; no third-party scripting engine."""
 
 import builtins
 import json
@@ -31,12 +31,12 @@ def _rpc(method, **params):
                 "method": method, "params": params})
         line = _protocol_input.readline()
         if not line:
-            raise RuntimeError("TermForge closed the scripting bridge.")
+            raise RuntimeError("ForgeCRT closed the scripting bridge.")
         response = json.loads(line)
         if response.get("kind") != "response" or response.get("requestId") != request_id:
-            raise RuntimeError("Invalid TermForge scripting response.")
+            raise RuntimeError("Invalid ForgeCRT scripting response.")
         if not response.get("ok"):
-            raise RuntimeError(response.get("error", "TermForge scripting request failed."))
+            raise RuntimeError(response.get("error", "ForgeCRT scripting request failed."))
         return response.get("result")
 
 
@@ -189,7 +189,7 @@ class _Tab:
 
 class _CRT(types.ModuleType):
     def __init__(self):
-        super().__init__("crt", "TermForge's documented subset of terminal scripting APIs.")
+        super().__init__("crt", "ForgeCRT's documented subset of terminal scripting APIs.")
         context_id = _config["defaultContextId"]
         self.Screen = _Screen(context_id)
         self.Session = _Session(context_id)

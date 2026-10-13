@@ -37,7 +37,8 @@ const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 // A folder is a reviewed sequence of guarded file commits, not an atomic
 // directory transaction. Completed files and created folders survive errors.
-// Merge and one-way sync retain every destination-only item; neither deletes.
+// Merge and one-way sync retain destination-only items. Mirror deletes only
+// explicitly reviewed target-only regular files and then empty directories.
 function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remoteStat, confirm = async () => false,
   enqueue, copy, timeout = 30000, planLifetimeMs = 300000 }) {
   if (!Number.isInteger(planLifetimeMs) || planLifetimeMs < 1 || planLifetimeMs > 300000) throw new TypeError('Invalid folder review lifetime.');
@@ -117,7 +118,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       if (!Array.isArray(children) || children.length > MAX_ENTRIES - entries.length) throw new Error(`Folder copies support at most ${MAX_ENTRIES} entries including the root.`);
       const childNames = children.map(child => remote ? child.filename : child); const seen = new Set();
       for (const name of childNames) {
-        if (!validName(name) || (!remote && !localName(name)) || (plan.review.direction === 'download' && !localName(name)) || seen.has(name)) throw new Error('The folder contains an unsafe or duplicate filename.');
+        if (!validName(name) || (!remote && !localName(name)) || ((plan.review.direction === 'download' || plan.review.mode === 'two-way') && !localName(name)) || seen.has(name)) throw new Error('The folder contains an unsafe or duplicate filename.');
         seen.add(name);
       }
       childNames.sort();
@@ -134,12 +135,13 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
   }
   async function inspect(plan) {
     check(plan);
+    if (plan.review.mode === 'two-way') return inspectTwoWay(plan);
     const upload = plan.review.direction === 'upload'; const sourceRemote = !upload; const merging = plan.review.mode !== 'copy';
     const sourceApi = sourceRemote ? path.posix : path; const destinationApi = upload ? path.posix : path;
     const sourceParents = await parents(plan, sourceApi.dirname(plan.review.sourceRoot), sourceRemote);
     const destinationParents = await parents(plan, destinationApi.dirname(plan.review.destinationRoot), upload);
     if (!merging && await stat(plan, plan.review.destinationRoot, upload)) throw new Error('The destination folder already exists. Choose a new folder name or select Merge.');
-    const source = await inventory(plan, plan.review.sourceRoot, sourceRemote, { hashes: merging });
+    const source = await inventory(plan, plan.review.sourceRoot, sourceRemote, { hashes: merging || plan.review.resumable });
     const destination = merging ? await inventory(plan, plan.review.destinationRoot, upload, { missing: true, hashes: true }) : [];
     const destinations = new Map(destination.map(entry => [entry.relativePath, entry]));
     const portable = new Map();
@@ -163,16 +165,180 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
       return { ...entry, action, destinationExpected: target?.expected || null, ...(target?.hash ? { destinationHash: target.hash } : {}) };
     });
     const sourceNames = new Set(source.map(entry => entry.relativePath));
-    const kept = destination.filter(entry => !sourceNames.has(entry.relativePath)).length;
+    const destinationOnly = destination.filter(entry => !sourceNames.has(entry.relativePath));
+    let deletedFiles = 0; let deletedDirectories = 0;
+    if (plan.review.mode === 'mirror') {
+      for (const entry of destinationOnly.sort((a, b) => b.relativePath.split('/').length - a.relativePath.split('/').length || a.relativePath.localeCompare(b.relativePath))) {
+        if (entry.type === 'file') deletedFiles++; else deletedDirectories++;
+        entries.push({ ...entry, action: entry.type === 'file' ? 'delete-file' : 'delete-directory', direction: plan.review.direction,
+          destinationExpected: entry.expected, destinationHash: entry.hash });
+      }
+    }
+    if (entries.length > MAX_ENTRIES) throw new Error(`Folder reviews support at most ${MAX_ENTRIES} combined actions including the root.`);
+    const kept = plan.review.mode === 'mirror' ? 0 : destinationOnly.length;
     check(plan);
     return { sourceParents, destinationParents, entries, destination, files: copied + replaced, directories, totalBytes,
-      copied, replaced, skipped, kept, sourceFiles: source.filter(entry => entry.type === 'file').length,
+      copied, replaced, skipped, kept, deletedFiles, deletedDirectories, sourceFiles: source.filter(entry => entry.type === 'file').length,
       sourceDirectories: source.filter(entry => entry.type === 'directory').length };
   }
+  async function inspectTwoWay(plan) {
+    const localParents = await parents(plan, path.dirname(plan.review.localPath), false);
+    const remoteParents = await parents(plan, path.posix.dirname(plan.review.remotePath), true);
+    const local = await inventory(plan, plan.review.localPath, false, { missing: true, hashes: true });
+    const remote = await inventory(plan, plan.review.remotePath, true, { missing: true, hashes: true });
+    if (!local.length && !remote.length) throw new Error('At least one two-way folder must already exist.');
+    const locals = new Map(local.map(entry => [entry.relativePath, entry]));
+    const remotes = new Map(remote.map(entry => [entry.relativePath, entry]));
+    const portable = new Map();
+    for (const entry of [...local, ...remote]) {
+      const normalized = entry.relativePath.normalize('NFC').toLocaleLowerCase('en-US');
+      if (portable.has(normalized) && portable.get(normalized) !== entry.relativePath) throw new Error('Source and destination names collide after case or Unicode normalization.');
+      portable.set(normalized, entry.relativePath);
+    }
+    const names = [...new Set([...locals.keys(), ...remotes.keys()])].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+    if (names.length > MAX_ENTRIES) throw new Error(`Two-way folder reviews support at most ${MAX_ENTRIES} combined entries.`);
+    const entries = []; let copied = 0; let replaced = 0; let skipped = 0; let directories = 0; let totalBytes = 0; let conflicts = 0; let unresolved = 0;
+    const used = new Set();
+    for (const relativePath of names) {
+      const left = locals.get(relativePath); const right = remotes.get(relativePath);
+      if (left && right && left.type !== right.type) throw new Error('A local file conflicts with a remote directory (or vice versa). Rename or move the conflicting item before reviewing again.');
+      let source = left || right; let target = left ? right : left; let direction = left ? 'upload' : 'download'; let action;
+      if (source.type === 'directory') { action = left && right ? 'skip' : 'mkdir'; if (action === 'mkdir') directories++; }
+      else if (!target) { action = 'copy'; copied++; totalBytes += source.size; }
+      else if (left.hash === right.hash) { action = 'skip'; skipped++; }
+      else {
+        conflicts++; const choice = plan.resolutionMap.get(relativePath);
+        if (choice) used.add(relativePath);
+        if (!choice) { action = 'conflict'; unresolved++; }
+        else if (choice === 'skip') { action = 'skip'; skipped++; }
+        else {
+          direction = choice === 'local' ? 'upload' : 'download'; source = choice === 'local' ? left : right; target = choice === 'local' ? right : left;
+          if (target.expected.mode & 0o7000) throw new Error('Replacement refuses destination files with special permission bits.');
+          action = 'replace'; replaced++; totalBytes += source.size;
+        }
+      }
+      if (totalBytes > MAX_BYTES) throw new Error('A reviewed folder transfer must be no larger than 1 TiB.');
+      entries.push({ ...source, action, direction, destinationExpected: target?.expected || null,
+        ...(target?.hash ? { destinationHash: target.hash } : {}),
+        ...(left && right && source.type === 'file' && left.hash !== right.hash ? { conflict: true, resolution: plan.resolutionMap.get(relativePath) || null, localSize: left.size, remoteSize: right.size } : {}) });
+    }
+    if ([...plan.resolutionMap.keys()].some(name => !used.has(name))) throw new Error('A two-way resolution no longer refers to a conflicting file. Review the changed trees again.');
+    check(plan);
+    return { localParents, remoteParents, local, remote, entries, files: copied + replaced, directories, totalBytes,
+      copied, replaced, skipped, kept: 0, deletedFiles: 0, deletedDirectories: 0, conflicts, unresolved,
+      sourceFiles: entries.filter(entry => entry.type === 'file').length, sourceDirectories: entries.filter(entry => entry.type === 'directory').length };
+  }
+  async function runAdvanced(job, session) {
+    const plan = job.folderPlan; const twoWay = plan.review.mode === 'two-way';
+    const localTree = twoWay ? plan.expected.local : job.direction === 'upload' ? plan.expected.entries.filter(e => !e.action.startsWith('delete-')) : plan.expected.destination;
+    const remoteTree = twoWay ? plan.expected.remote : job.direction === 'upload' ? plan.expected.destination : plan.expected.entries.filter(e => !e.action.startsWith('delete-'));
+    const localMap = new Map(localTree.map(entry => [entry.relativePath, entry]));
+    const remoteMap = new Map(remoteTree.map(entry => [entry.relativePath, entry]));
+    const created = { local: new Map(), remote: new Map() };
+    const pathFor = (relative, remote) => { const root = remote ? job.remotePath : job.localPath; return relative ? (remote ? path.posix : path).join(root, ...relative.split('/')) : root; };
+    async function guardParents(relativePath, remote) {
+      const api = remote ? path.posix : path; const root = remote ? job.remotePath : job.localPath;
+      const outside = twoWay ? remote ? plan.expected.remoteParents : plan.expected.localParents
+        : remote === (job.direction === 'upload') ? plan.expected.destinationParents : plan.expected.sourceParents;
+      if (!equal(outside, await parents(plan, api.dirname(root), remote))) throw new Error('A reviewed folder parent changed during the operation.');
+      const parts = relativePath.split('/').slice(0, -1); const ancestors = relativePath ? [''] : [];
+      for (const part of parts) ancestors.push(ancestors.at(-1) ? `${ancestors.at(-1)}/${part}` : part);
+      const known = remote ? remoteMap : localMap; const added = remote ? created.remote : created.local;
+      for (const ancestor of ancestors) {
+        const filename = pathFor(ancestor, remote); const expected = added.get(ancestor) || (known.get(ancestor) ? identity(known.get(ancestor).expected) : null);
+        const current = await stat(plan, filename, remote);
+        if (!expected || current?.type !== 'directory' || !equal(expected, identity(current))) throw new Error('A reviewed ancestor folder changed during the operation.');
+        const canonical = remote ? await call(session.sftp, 'realpath', [filename], plan.controller.signal) : await fsp.realpath(filename);
+        if (canonical !== filename) throw new Error('A reviewed ancestor folder changed during the operation.');
+      }
+    }
+    async function validate(entry) {
+      check(plan, false); const deleting = entry.action.startsWith('delete-'); const destinationRemote = (entry.direction || job.direction) === 'upload';
+      // Probe source absence first: this may traverse many remote ancestors.
+      // The destination snapshot and content hash must be the final checks
+      // before deletion so edits made during those probes are retained.
+      if (deleting) await guardParentsMissing(entry.relativePath, !destinationRemote);
+      await guardParents(entry.relativePath, destinationRemote);
+      const destination = pathFor(entry.relativePath, destinationRemote);
+      const current = await stat(plan, destination, destinationRemote);
+      if (entry.type === 'directory') {
+        if (entry.destinationExpected ? !current || !equal(identity(entry.destinationExpected), identity(current)) : Boolean(current)) throw new Error('A destination folder changed or appeared after review.');
+      } else {
+        if (!equal(entry.destinationExpected, current)) throw new Error('A reviewed destination file changed or appeared during the operation.');
+        if (entry.destinationHash && entry.destinationHash !== await digest(plan, destination, destinationRemote, entry.destinationExpected)) throw new Error('A reviewed destination file content changed during the operation.');
+      }
+      if (!deleting) {
+        await guardParents(entry.relativePath, !destinationRemote);
+        const source = pathFor(entry.relativePath, !destinationRemote); const info = await stat(plan, source, !destinationRemote);
+        const matches = entry.type === 'directory' ? info && equal(identity(entry.expected), identity(info)) : equal(entry.expected, info);
+        if (!matches) throw new Error('A reviewed source file or folder changed during the operation.');
+        if (entry.hash && entry.hash !== await digest(plan, source, !destinationRemote, entry.expected)) throw new Error('A reviewed source file content changed during the operation.');
+      }
+      check(plan, false);
+    }
+    async function guardParentsMissing(relativePath, remote) {
+      const api = remote ? path.posix : path; const root = remote ? job.remotePath : job.localPath;
+      const outside = remote === (job.direction === 'upload') ? plan.expected.destinationParents : plan.expected.sourceParents;
+      if (!equal(outside, await parents(plan, api.dirname(root), remote))) throw new Error('A mirror source parent changed.');
+      const known = remote ? remoteMap : localMap; let missing = false; const parts = relativePath.split('/');
+      const chain = ['']; for (const part of parts) chain.push(chain.at(-1) ? `${chain.at(-1)}/${part}` : part);
+      for (const relative of chain) {
+        if (missing) break;
+        const info = await stat(plan, pathFor(relative, remote), remote); const expected = known.get(relative);
+        if (!expected) { if (info) throw new Error('A mirror source path appeared after review.'); missing = true; }
+        else if (info?.type !== 'directory' || !equal(identity(expected.expected), identity(info))) throw new Error('A mirror source folder changed.');
+      }
+      if (!missing) throw new Error('A mirror source path appeared after review.');
+    }
+    async function mutateRemote(method, args, filename) {
+      try { await call(session.sftp, method, args, undefined, timeout); }
+      catch (error) {
+        if (!Number.isInteger(error.code)) {
+          session.closed = true; session.client.end();
+          throw Object.assign(new Error(`The ${method} outcome is unknown. Reconnect and inspect ${filename} before retrying. Completed changes were retained.`), { indeterminate: true });
+        }
+        throw error;
+      }
+    }
+    for (const entry of plan.expected.entries) {
+      if (entry.action === 'conflict') throw new Error('Unresolved two-way conflicts cannot be applied.');
+      await validate(entry);
+      const direction = entry.direction || job.direction; const remote = direction === 'upload'; const destination = pathFor(entry.relativePath, remote);
+      job.currentPath = entry.relativePath || path.basename(job.localPath); job.publish();
+      if (entry.action === 'skip') continue;
+      if (entry.action === 'mkdir') {
+        if (remote) await mutateRemote('mkdir', [destination, { mode: 0o700 }], destination); else await fsp.mkdir(destination, { mode: 0o700 });
+        job.directoriesCreated++; const info = await stat(plan, destination, remote);
+        if (info?.type !== 'directory') throw new Error('The new destination folder could not be verified.');
+        (remote ? created.remote : created.local).set(entry.relativePath, identity(info));
+      } else if (entry.action.startsWith('delete-')) {
+        if (entry.type === 'directory') {
+          const children = remote ? await call(session.sftp, 'readdir', [destination], plan.controller.signal) : await fsp.readdir(destination);
+          if (!Array.isArray(children) || children.length) throw new Error('A reviewed mirror directory is no longer empty. Its new contents were retained.');
+          await validate(entry);
+          if (remote) await mutateRemote('rmdir', [destination], destination); else await fsp.rmdir(destination);
+          job.deletedDirectories = (job.deletedDirectories || 0) + 1;
+        } else {
+          if (remote) await mutateRemote('unlink', [destination], destination); else await fsp.unlink(destination);
+          job.deletedFiles = (job.deletedFiles || 0) + 1;
+        }
+        if (await stat(plan, destination, remote)) throw new Error('A mirror destination appeared again after deletion. The new entry was retained.');
+      } else {
+        const info = entry.destinationExpected;
+        const expectedDestination = info ? { type: info.type, size: info.size, mtime: info.mtime, mode: info.mode,
+          permissions: (info.mode & 0o777).toString(8).padStart(3, '0'), ...(!remote ? { ino: info.ino, dev: info.dev, ctime: info.ctime } : {}) } : null;
+        await copy(job, session, { direction, localPath: pathFor(entry.relativePath, false), remotePath: pathFor(entry.relativePath, true), size: entry.size,
+          expectedDestination, reviewedReplacement: entry.action === 'replace', validate: () => validate(entry) });
+        job.filesCompleted++;
+      }
+      job.publish();
+    }
+    job.currentPath = ''; job.publish();
+  }
   function review(plan) {
-    const { files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories } = plan.expected;
+    const { files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, deletedFiles = 0, deletedDirectories = 0, conflicts = 0, unresolved = 0 } = plan.expected;
     return { ...plan.review, entries: plan.expected.entries.map(({ expected, destinationExpected, hash, destinationHash, ...item }) => ({ ...item })),
-      files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, expiresAt: plan.expires };
+      files, directories, totalBytes, copied, replaced, skipped, kept, sourceFiles, sourceDirectories, deletedFiles, deletedDirectories, conflicts, unresolved, expiresAt: plan.expires };
   }
   async function prepare(input = {}) {
     available(); assertAvailable();
@@ -181,10 +347,20 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     if (!['upload', 'download'].includes(input.direction)) throw new Error('Choose upload or download.');
     const localPath = plainPath(input.localPath, false); const remotePath = plainPath(input.remotePath, true);
     const mode = input.mode ?? 'copy'; const conflictPolicy = input.conflictPolicy ?? 'skip';
-    if (!['copy', 'merge', 'sync'].includes(mode) || !['skip', 'replace'].includes(conflictPolicy)) throw new Error('Choose a supported folder operation and conflict policy.');
+    if (!['copy', 'merge', 'sync', 'two-way', 'mirror'].includes(mode) || !['skip', 'replace'].includes(conflictPolicy)) throw new Error('Choose a supported folder operation and conflict policy.');
+    if (input.resumable !== undefined && typeof input.resumable !== 'boolean') throw new Error('Choose a valid folder recovery option.');
+    if (input.resumable && ['two-way', 'mirror'].includes(mode)) throw new Error('Resumable folder operations currently support copy, merge, and one-way synchronization.');
+    const resolutions = input.resolutions ?? [];
+    if (!Array.isArray(resolutions) || resolutions.length > MAX_ENTRIES || (mode !== 'two-way' && resolutions.length)) throw new Error('Choose valid per-file two-way resolutions.');
+    const resolutionMap = new Map();
+    for (const choice of resolutions) {
+      if (!choice || typeof choice.relativePath !== 'string' || !choice.relativePath || !choice.relativePath.split('/').every(localName)
+        || !['local', 'remote', 'skip'].includes(choice.source) || resolutionMap.has(choice.relativePath)) throw new Error('Choose a unique local, remote, or skip resolution for each conflicting file.');
+      resolutionMap.set(choice.relativePath, choice.source);
+    }
     const upload = input.direction === 'upload';
-    const plan = { session, controller: new AbortController(), expires: Date.now() + planLifetimeMs, applying: false,
-      review: { planId: randomUUID(), id: input.id, direction: input.direction, mode, conflictPolicy, protocol: 'sftp', host: session.host, port: session.port,
+    const plan = { session, resolutionMap, controller: new AbortController(), expires: Date.now() + planLifetimeMs, applying: false,
+      review: { planId: randomUUID(), id: input.id, direction: input.direction, mode, conflictPolicy, resumable: input.resumable === true, protocol: 'sftp', host: session.host, port: session.port,
         localPath, remotePath, sourceRoot: upload ? localPath : remotePath, destinationRoot: upload ? remotePath : localPath } };
     let finishPreparing; plan.preparingDone = new Promise(resolve => { finishPreparing = resolve; });
     active = plan;
@@ -199,6 +375,7 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     let resolveDone; plan.done = new Promise(resolve => { resolveDone = resolve; });
     try {
       check(plan);
+      if (plan.expected.unresolved) throw new Error('Resolve or explicitly skip each two-way conflict before applying this review.');
       const accepted = await new Promise((resolve, reject) => {
         const abort = () => { cleanup(); reject(aborted()); };
         const timer = setTimeout(() => { cleanup(); reject(new Error('The folder review expired. Review the folder again.')); plan.controller.abort(); }, Math.max(1, plan.expires - Date.now()));
@@ -221,7 +398,9 @@ function createFolderTransfers({ getSession, assertAvailable, isBusy, call, remo
     active.controller.abort(); release(active); return true;
   }
   async function run(job, session) {
-    const plan = job.folderPlan; const upload = job.direction === 'upload'; const sourceRemote = !upload;
+    const plan = job.folderPlan;
+    if (['two-way', 'mirror'].includes(plan.review.mode)) return runAdvanced(job, session);
+    const upload = job.direction === 'upload'; const sourceRemote = !upload;
     const sourceApi = sourceRemote ? path.posix : path; const destinationApi = upload ? path.posix : path;
     const created = new Map(); const expectedEntries = new Map(plan.expected.entries.map(entry => [entry.relativePath, entry]));
     const pathFor = (root, relative, api) => relative ? api.join(root, ...relative.split('/')) : root;

@@ -1,6 +1,6 @@
 # Color schemes
 
-The [0.4 preview](https://github.com/distractedagain/termforge/releases/tag/v0.4.0) adds a visual palette picker while keeping TermForge's compact desktop layout. Earlier v0.3 downloads predate this picker.
+The [0.4 preview](https://github.com/distractedagain/termforge/releases/tag/v0.4.0) adds a visual palette picker while keeping ForgeCRT's compact desktop layout. Earlier v0.3 downloads predate this picker.
 
 ## Choose a default scheme
 
@@ -25,11 +25,11 @@ The same global scheme and matching-interface setting are available under **Opti
 | Forge Light | Cool paper with deep ink and muted colored text |
 | High Contrast | Bright text and strong accents on black |
 
-[Solarized](https://ethanschoonover.com/solarized/) was designed by Ethan Schoonover. TermForge uses the original sRGB values and ANSI slot assignments for its Solarized presets. Both variants share the same sixteen ANSI slots and change their foreground, background, cursor, and selection roles. Several “bright” slots intentionally contain muted base colors, as specified by Solarized.
+[Solarized](https://ethanschoonover.com/solarized/) was designed by Ethan Schoonover. ForgeCRT uses the original sRGB values and ANSI slot assignments for its Solarized presets. Both variants share the same sixteen ANSI slots and change their foreground, background, cursor, and selection roles. Several “bright” slots intentionally contain muted base colors, as specified by Solarized.
 
 ![Solarized Light with matching interface colors and synthetic demo output](images/solarized-light.png)
 
-![TermForge's palette picker with Solarized Dark selected](images/solarized-picker.png)
+![ForgeCRT's palette picker with Solarized Dark selected](images/solarized-picker.png)
 
 These images show the 0.4 source in a headless browser with local synthetic sessions and ANSI text. They demonstrate renderer appearance; no remote device is connected, and native macOS window controls are not shown.
 
@@ -39,7 +39,7 @@ Select a saved session, choose **Options → Session Options… → Appearance**
 
 Saving a session's appearance updates its open terminals without reconnecting or clearing their output. Changing the global default updates inheriting terminals and keeps explicit per-session choices. New connections use the saved choice. Connection-specific fields continue to apply on the next connection.
 
-**Match interface to default scheme** is a global preference. It colors TermForge's toolbars, managers, tabs, dialogs, and status area using the global scheme; switching between sessions with different palettes does not change the interface colors. Turn matching off to restore the independently selected classic light or dark interface. Operating-system menus and other native controls remain under the system's control.
+**Match interface to default scheme** is a global preference. It colors ForgeCRT's toolbars, managers, tabs, dialogs, and status area using the global scheme; switching between sessions with different palettes does not change the interface colors. Turn matching off to restore the independently selected classic light or dark interface. Operating-system menus and other native controls remain under the system's control.
 
 ## Display and verification limits
 

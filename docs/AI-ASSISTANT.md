@@ -1,17 +1,17 @@
 # AI Assistant
 
-TermForge's optional assistant investigates terminal output, drafts commands and proposes edits to an explicitly attached project file. Open **View → AI Assistant** or the speech-bubble toolbar button. It follows a review workflow: choose the text to share, ask a question, review the answer, then choose whether to stage a command or apply a file proposal.
+ForgeCRT's optional assistant investigates terminal output, drafts commands and proposes edits to an explicitly attached project file. Open **View → AI Assistant** or the speech-bubble toolbar button. It follows a review workflow: choose the text to share, ask a question, review the answer, then choose whether to stage a command or apply a file proposal.
 
 ## Free model connections
 
 | Connection | Setup | Cost and limits |
 | --- | --- | --- |
-| Ollama (local; default) | Install [Ollama](https://ollama.com/) and a local chat model separately; start Ollama, then choose Refresh models | No hosted API fee. Uses your computer's memory, storage and processing power. TermForge downloads no models. |
+| Ollama (local; default) | Install [Ollama](https://ollama.com/) and a local chat model separately; start Ollama, then choose Refresh models | No hosted API fee. Uses your computer's memory, storage and processing power. ForgeCRT downloads no models. |
 | Free online models (OpenRouter) | Create a free [OpenRouter account and API key](https://openrouter.ai/settings/keys), choose Free online models, and paste the key into the masked field | Uses only `openrouter/free`. Free availability and quotas depend on OpenRouter. If unavailable or exhausted, the request stops. No paid fallback. |
 
-Online mode uses OpenRouter's [Free Models Router](https://openrouter.ai/openrouter/free), which selects among available free models. It is not bundled access to ChatGPT or Claude. [OpenAI API pricing](https://developers.openai.com/api/docs/pricing) and [Claude API billing](https://support.claude.com/en/articles/8977456-how-do-i-pay-for-my-claude-api-usage) are separate provider offerings; TermForge does not promise their paid models for free. OpenRouter's [rate limits](https://openrouter.ai/docs/api/reference/limits) can change.
+Online mode uses OpenRouter's [Free Models Router](https://openrouter.ai/openrouter/free), which selects among available free models. It is not bundled access to ChatGPT or Claude. [OpenAI API pricing](https://developers.openai.com/api/docs/pricing) and [Claude API billing](https://support.claude.com/en/articles/8977456-how-do-i-pay-for-my-claude-api-usage) are separate provider offerings; ForgeCRT does not promise their paid models for free. OpenRouter's [rate limits](https://openrouter.ai/docs/api/reference/limits) can change.
 
-TermForge fixes online requests to the free router, sets maximum prompt, completion, per-request and image prices to zero, disables provider fallbacks, and sends no paid plugins or tools. The app does not offer a paid model or top-up flow. These restrictions rely on OpenRouter honoring its documented [provider pricing controls](https://openrouter.ai/docs/guides/routing/provider-selection); a third-party free service is not guaranteed to remain available.
+ForgeCRT fixes online requests to the free router, sets maximum prompt, completion, per-request and image prices to zero, disables provider fallbacks, and sends no paid plugins or tools. The app does not offer a paid model or top-up flow. These restrictions rely on OpenRouter honoring its documented [provider pricing controls](https://openrouter.ai/docs/guides/routing/provider-selection); a third-party free service is not guaranteed to remain available.
 
 The OpenRouter key stays in memory while the panel is open. Closing the panel, switching connections or choosing Clear removes the key field and resets permission to send online. The key is not written to settings, exports, logs or browser storage. Closing the panel cancels active requests; it cannot recall text already received by a provider.
 

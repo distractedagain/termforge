@@ -1,4 +1,4 @@
-"""TermForge's private, JSONL Ansible controller. Never imported by a project."""
+"""ForgeCRT's private, JSONL Ansible controller. Never imported by a project."""
 import hashlib
 import importlib.metadata
 import json
@@ -51,7 +51,7 @@ def probe(config):
         return 0
     except Exception as error:
         emit({"available": False, "error": str(error)[:8192], "pythonVersion": sys.version.split()[0],
-              "hint": "Install ansible-core and ansible-runner in this Python environment. On Windows use a Python environment inside WSL. TermForge never installs packages automatically."})
+              "hint": "Install ansible-core and ansible-runner in this Python environment. On Windows use a Python environment inside WSL. ForgeCRT never installs packages automatically."})
         return 1
 
 

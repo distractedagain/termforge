@@ -17,6 +17,7 @@ const { createCredentialVault } = require('./credentials.cjs');
 const { createAuthPrompts } = require('./auth-prompts.cjs');
 const { createSecureSsh } = require('./secure-ssh.cjs');
 const { createSecureTransfers } = require('./secure-transfers.cjs');
+const { createFtpTransfers } = require('./ftp-transfers.cjs');
 const { createQuickConnectWindow } = require('./quick-connect-window.cjs');
 const { createNativeMenu } = require('./native-menu.cjs');
 const { createDesktopActions } = require('./desktop-actions.cjs');
@@ -24,7 +25,10 @@ const { createKeyTools } = require('./key-tools.cjs');
 const { createSessionImport } = require('./session-import.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+// Keep the established OS credential identity and profile through the branding change.
 app.setName('TermForge');
+app.setAboutPanelOptions({ applicationName: 'ForgeCRT', applicationVersion: app.getVersion() });
+app.setPath('userData', path.join(app.getPath('appData'), 'TermForge'));
 let window;
 let store;
 let terminals;
@@ -36,6 +40,7 @@ let credentials;
 let authPrompts;
 let secureSsh;
 let secureTransfers;
+let ftpTransfers;
 let quickConnect;
 let nativeMenu;
 let desktopActions;
@@ -68,7 +73,7 @@ async function cleanupTerminals() {
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
   screenRequests.clear();
   const server = tftp;
-  await stopOwnedResources({ ansible: () => ansible?.closeAll(), scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), secureConnections: async () => { try { await secureTransfers?.closeAll(); } finally { await secureSsh?.closeAll(); } }, tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
+  await stopOwnedResources({ ansible: () => ansible?.closeAll(), scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), ftpConnections: () => ftpTransfers?.closeAll(), secureConnections: async () => { try { await secureTransfers?.closeAll(); } finally { await secureSsh?.closeAll(); } }, tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
 }
 function readScreen(request) {
   if (!request || !terminals.has(requiredId(request.id))) return Promise.reject(new Error('The script terminal is no longer open.'));
@@ -84,7 +89,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareFolder', 'transferStartFolder', 'transferResume', 'remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'ftpOpen', 'transferStart', 'transferPrepareFolder', 'transferStartFolder', 'transferResume', 'remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('ForgeCRT is stopping its active work.');
     return callback(...args);
   });
 }
@@ -186,24 +191,27 @@ function registerHandlers() {
     if (!['ssh', 'sftp'].includes(profile.protocol)) throw new Error('File transfers require an SSH session.');
     return secureTransfers.open(validateSession({ ...profile, ssh: { ...profile.ssh, backend: 'managed' } }));
   });
-  handle('transferClose', id => secureTransfers.close(requiredId(id)));
-  handle('transferListRemote', input => secureTransfers.listRemote(input));
+  const assertFtpIdle = () => { if (ftpTransfers.activeCount) throw new Error('Wait for the active FTP/FTPS operation before starting another file operation.'); };
+  const transferEngine = id => ftpTransfers.owns(id) ? ftpTransfers : secureTransfers;
+  handle('ftpOpen', input => ftpTransfers.open(input));
+  handle('transferClose', id => transferEngine(requiredId(id)).close(id));
+  handle('transferListRemote', input => transferEngine(input?.id).listRemote(input));
   handle('transferListLocal', input => secureTransfers.listLocal(input));
   handle('transferChooseLocal', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Choose local transfer folder', properties: ['openDirectory'], defaultPath: app.getPath('home') });
     return result.canceled ? null : { path: result.filePaths[0] };
   });
-  handle('transferStart', input => secureTransfers.start(input));
-  handle('transferCancel', id => secureTransfers.cancel(requiredId(id)));
+  handle('transferStart', input => { const engine = transferEngine(input?.id); if (engine === ftpTransfers) secureTransfers.assertExternalAvailable(); else assertFtpIdle(); return engine.start(input); });
+  handle('transferCancel', id => { requiredId(id); return (ftpTransfers.ownsJob(id) ? ftpTransfers : secureTransfers).cancel(id); });
   handle('transferPause', id => secureTransfers.pause(requiredId(id)));
-  handle('transferResume', input => secureTransfers.resume(input));
+  handle('transferResume', input => { assertFtpIdle(); return secureTransfers.resume(input); });
   handle('transferDiscardPartial', input => secureTransfers.discardPartial(input));
-  handle('transferListJobs', () => secureTransfers.listJobs());
-  handle('transferPrepareFolder', input => secureTransfers.prepareFolderTransfer(input));
+  handle('transferListJobs', () => [...secureTransfers.listJobs(), ...ftpTransfers.listJobs()]);
+  handle('transferPrepareFolder', input => { assertFtpIdle(); return secureTransfers.prepareFolderTransfer(input); });
   handle('transferStartFolder', input => secureTransfers.startFolderTransfer(input));
   handle('transferDiscardFolder', input => secureTransfers.discardFolderTransfer(input));
-  for (const name of ['remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'remoteEditDiscardSave', 'remoteEditClose']) handle(name, input => secureTransfers[name](input));
-  handle('transferPrepareRemoteOperation', input => secureTransfers.prepareRemoteOperation(input));
+  for (const name of ['remoteEditOpen', 'remoteEditPrepareSave', 'remoteEditSave', 'remoteEditDiscardSave', 'remoteEditClose']) handle(name, input => { if (['remoteEditOpen','remoteEditPrepareSave'].includes(name)) assertFtpIdle(); return secureTransfers[name](input); });
+  handle('transferPrepareRemoteOperation', input => { assertFtpIdle(); return secureTransfers.prepareRemoteOperation(input); });
   handle('transferApplyRemoteOperation', input => secureTransfers.applyRemoteOperation(input));
   handle('transferDiscardRemoteOperation', input => secureTransfers.discardRemoteOperation(input));
   handle('projectOpen', async () => {
@@ -263,7 +271,7 @@ function registerHandlers() {
     return { path: result.filePath };
   });
   handle('importConfig', async () => {
-    const result = await dialog.showOpenDialog(window, { title: 'Import TermForge configuration', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const result = await dialog.showOpenDialog(window, { title: 'Import ForgeCRT configuration', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (result.canceled) return null;
     const stat = await fsp.stat(result.filePaths[0]);
     if (stat.size > 4 * 1024 * 1024) throw new Error('Configuration exceeds 4 MiB');
@@ -440,7 +448,7 @@ async function boot() {
   });
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 850, minHeight: 600,
-    title: 'TermForge', backgroundColor: '#f5f7fa',
+    title: 'ForgeCRT', backgroundColor: '#f5f7fa',
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 24 } } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false }
   });
@@ -452,14 +460,14 @@ async function boot() {
     connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event),
     confirmResume: (review, { signal } = {}) => approveNative({ title: 'Resume retained transfer', message: 'Verify and resume this transfer?',
       detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nRetained bytes: ${review.retainedBytes}\nTotal bytes: ${review.total}\n\nThe source and retained partial file will be verified before continuing. Changed files or a different authenticated server identity will be refused.`, accept: 'Verify and resume', signal }),
-    confirmDiscardPartial: (review, { signal } = {}) => approveNative({ title: 'Discard retained transfer', message: review.forgetOnly ? 'Forget this uncertain transfer checkpoint?' : 'Discard this retained partial file?',
-      detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nPartial: ${review.stagePath}\n\n${review.forgetOnly ? 'The transfer result is uncertain. Files will remain for inspection; only the recovery record will be removed.' : 'The verified partial file and its recovery record will be removed. The source and final destination will be retained.'}`, accept: review.forgetOnly ? 'Forget checkpoint' : 'Discard partial', signal }),
+    confirmDiscardPartial: (review, { signal } = {}) => approveNative({ title: 'Discard retained transfer', message: review.kind === 'folder' ? 'Forget this folder recovery checkpoint?' : review.forgetOnly ? 'Forget this uncertain transfer checkpoint?' : 'Discard this retained partial file?',
+      detail: `Server: ${review.host}:${review.port}\nLocal: ${review.localPath}\nRemote: ${review.remotePath}\nPartial: ${review.stagePath}\n\n${review.kind === 'folder' ? 'Completed files, folders and the current partial copy remain; only the recovery record will be removed.' : review.forgetOnly ? 'The transfer result is uncertain. Files will remain for inspection; only the recovery record will be removed.' : 'The verified partial file and its recovery record will be removed. The source and final destination will be retained.'}`, accept: review.forgetOnly ? 'Forget checkpoint' : 'Discard partial', signal }),
     confirmRemoteEdit: (review, { signal } = {}) => approveNative({ title: 'Save remote file', message: 'Replace this remote file with the reviewed edits?',
       detail: `Server: ${review.host}:${review.port}\nPath: ${review.path}\nBefore: ${review.previousBytes} bytes\nAfter: ${review.bytes} bytes\n\nThe remote file is checked against the opened revision before replacement.`, accept: 'Save remote file', signal }),
     confirmFolderTransfer: (review, { signal } = {}) => approveNative({
-      title: 'Copy reviewed folder', message: `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
-      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\nMode: ${review.mode || 'copy'}\nReplace: ${review.replaced || 0}\nSkip: ${review.skipped || 0}\n\n${!review.mode || review.mode === 'copy' ? 'The destination must be a new folder. Existing items will not be replaced.' : 'Only the reviewed replacements will overwrite existing files. Destination-only items are retained.'} Completed files and folders remain if you cancel or a later item fails.`,
-      accept: 'Copy folder', signal
+      title: review.mode === 'mirror' ? 'Apply reviewed mirror' : review.mode === 'two-way' ? 'Apply reviewed two-way synchronization' : 'Copy reviewed folder', message: review.mode === 'mirror' ? 'Apply this mirror, including permanent deletions?' : review.mode === 'two-way' ? 'Apply the reviewed changes on both sides?' : `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
+      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\nMode: ${review.mode || 'copy'}\nReplace: ${review.replaced || 0}\nSkip: ${review.skipped || 0}\nDelete files: ${review.deletedFiles || 0}\nDelete folders: ${review.deletedDirectories || 0}\n\n${review.mode === 'mirror' ? 'Target-only entries listed in the review will be permanently deleted. ' : review.mode === 'two-way' ? 'Both local and remote folders may change according to your per-file choices. ' : ''}${!review.mode || review.mode === 'copy' ? 'The destination must be a new folder. Existing items will not be replaced.' : review.mode === 'mirror' ? 'Only the reviewed copies, replacements and deletions will be applied.' : 'Only the reviewed replacements will overwrite existing files. Destination-only items are retained.'} Completed files and folders remain if you cancel or a later item fails.`,
+      accept: review.mode === 'mirror' ? 'Apply mirror and deletions' : review.mode === 'two-way' ? 'Apply both directions' : 'Copy folder', signal
     }),
     confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }),
     confirmRemoteOperation: (review, { signal } = {}) => {
@@ -470,6 +478,11 @@ async function boot() {
     }
   });
   await secureTransfers.initializeRecovery();
+  ftpTransfers = createFtpTransfers({
+    emit: event => send('transferEvent', event), requestAuthentication: input => authPrompts.request(input),
+    confirmPlaintext: (review) => approveNative({ title: 'Connect using unencrypted FTP', message: `Allow plaintext FTP to ${review.host}:${review.port}?`, detail: 'FTP sends your username, password and files without encryption. Use FTPS when the server supports it. This approval applies only to this connection.', accept: 'Use plaintext FTP', signal: review.signal }),
+    confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nFTP server rename operations are not atomic conditional replacements. The prior remote file may be retained as a backup for inspection.`, accept: 'Replace file', signal })
+  });
   sessionImport = createSessionImport({
     chooseFile: async () => {
       const result = await dialog.showOpenDialog(window, { title: 'Import sessions from CSV or text', properties: ['openFile'], filters: [{ name: 'Session lists', extensions: ['csv', 'tsv', 'txt'] }, { name: 'All files', extensions: ['*'] }] });
@@ -477,7 +490,7 @@ async function boot() {
     },
     loadConfig: () => store.load(),
     commitSessions: (sessions, options) => {
-      if (shuttingDown) throw new Error('TermForge is stopping its active work.');
+      if (shuttingDown) throw new Error('ForgeCRT is stopping its active work.');
       return store.commitImportedSessions(sessions, options);
     },
     approveApply: review => approveNative({ title: 'Import reviewed sessions', message: `Save ${review.added + review.replaced} imported sessions?`, detail: `Add: ${review.added}\nReplace: ${review.replaced}\nSkip: ${review.skipped}\n\nExisting sessions selected for replacement keep their identifiers. No connections will be opened.`, accept: 'Import sessions' })
@@ -506,7 +519,7 @@ async function boot() {
   automation = createAutomationManager({
     getSessionProfiles: () => store.load().sessions,
     getActiveTerminalId: () => activeTerminalId,
-    openSession: (profile) => { if (shuttingDown) throw new Error('TermForge is stopping its active work.'); const opened = terminals.open(profile); send('terminalOpened', { ...opened, profile }); return opened; },
+    openSession: (profile) => { if (shuttingDown) throw new Error('ForgeCRT is stopping its active work.'); const opened = terminals.open(profile); send('terminalOpened', { ...opened, profile }); return opened; },
     closeSession: (id) => terminals.close(id), writeTerminal: (data) => terminals.write(data),
     getTerminalIds: () => terminals.list(), getTerminalDetails: (id) => terminals.describe(id),
     getScreen: readScreen, activateTerminal: (id) => { if (!terminals.has(requiredId(id))) throw new Error('Terminal is no longer open.'); activeTerminalId = id; send('terminalActivated', { id }); },
@@ -531,12 +544,12 @@ async function boot() {
     if (quitting) return;
     if (savingProjects.size) {
       event.preventDefault();
-      dialog.showMessageBoxSync(window, { type: 'info', buttons: ['Keep open'], defaultId: 0, cancelId: 0, message: 'A project file is still saving.', detail: 'Let the save finish, then close TermForge again. Closing now could interrupt the file write.' });
+      dialog.showMessageBoxSync(window, { type: 'info', buttons: ['Keep open'], defaultId: 0, cancelId: 0, message: 'A project file is still saving.', detail: 'Let the save finish, then close ForgeCRT again. Closing now could interrupt the file write.' });
       return;
     }
     const serverState = tftp?.status();
     const serverOwned = serverState && (serverState.state !== 'stopped' || serverState.activeTransfers > 0);
-    const transferConnections = secureTransfers?.count || 0;
+    const transferConnections = (secureTransfers?.count || 0) + (ftpTransfers?.count || 0);
     const remoteDocuments = secureTransfers?.remoteEditCount || 0;
     const keyOperations = keyTools?.count || 0;
     if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections && !keyOperations && !remoteDocuments) return;
@@ -568,7 +581,7 @@ async function boot() {
 }
 
 app.whenReady().then(boot).catch((error) => {
-  dialog.showErrorBox('TermForge could not start', error.message);
+  dialog.showErrorBox('ForgeCRT could not start', error.message);
   app.exit(1);
 });
 app.on('window-all-closed', () => app.quit());

@@ -5,7 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const directory = path.resolve(process.env.TERMFORGE_SMOKE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'termforge-smoke-')));
 fs.mkdirSync(directory, { recursive: true });
-const env = { ...process.env, TERMFORGE_DATA_DIR: path.join(directory, 'profile'), TERMFORGE_SMOKE_DIR: directory };
+const env = { ...process.env, TERMFORGE_DATA_DIR: path.join(directory, 'profile'), TERMFORGE_SMOKE_DIR: directory, NODE_EXTRA_CA_CERTS: path.join(__dirname, '../tests/fixtures/ftp-tls/localhost-cert.pem') };
 delete env.ELECTRON_RUN_AS_NODE;
 const ciNoSandbox = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.TERMFORGE_CI_NO_SANDBOX === '1';
 const child = spawn(require('electron'), [...(ciNoSandbox ? ['--no-sandbox', '--disable-gpu'] : []), '.', '--termforge-smoke'], { cwd: path.join(__dirname, '..'), env, stdio: 'inherit' });

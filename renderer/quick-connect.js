@@ -173,7 +173,7 @@ async function initialize() {
     finally { $('quick-manage-credentials').disabled = false; }
   });
   try {
-    if (!api) throw new Error('Quick Connect is available from the TermForge desktop app.');
+    if (!api) throw new Error('Quick Connect is available from the ForgeCRT desktop app.');
     api.onCredentialsChanged?.(setCredentials);
     api.onFileSession?.(() => { if (!busy) { if (!['ssh','sftp'].includes($('quick-protocol').value)) $('quick-port').value = '22'; $('quick-protocol').value = 'ssh'; $('quick-sftp').checked = true; updateFields(); $('quick-host').focus(); } });
     const state = await api.getState();

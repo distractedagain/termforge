@@ -104,9 +104,13 @@ function nativeHarness(platform = 'darwin') {
 test('native menus are enabled at the top level, use platform roles, and rebuild only when relevant state changes', () => {
   const h = nativeHarness();
   h.controller.update({ ready: true });
-  assert.equal(h.installed.length, 1); assert.equal(h.installed[0][0].label, 'TermForge');
+  assert.equal(h.installed.length, 1); assert.equal(h.installed[0][0].label, 'ForgeCRT');
+  const roles = h.installed[0][0].submenu;
+  assert.equal(roles.find(item => item.role === 'about').label, 'About ForgeCRT');
+  assert.equal(roles.find(item => item.role === 'hide').label, 'Hide ForgeCRT');
+  assert.equal(roles.find(item => item.role === 'quit').label, 'Quit ForgeCRT');
   assert.ok(h.installed[0][0].submenu.some(entry => entry.role === 'services'));
-  assert.ok(h.installed[0].filter(entry => entry.label !== 'TermForge').every(entry => entry.enabled));
+  assert.ok(h.installed[0].filter(entry => entry.label !== 'ForgeCRT').every(entry => entry.enabled));
   assert.equal(h.controller.update({ ready: true, privateUnrelatedState: 'ignore' }), false); assert.equal(h.installed.length, 1);
   h.controller.update({ ready: true, current: live }); assert.equal(h.installed.length, 2);
   const windows = nativeHarness('win32'); windows.controller.update({ ready: true });
