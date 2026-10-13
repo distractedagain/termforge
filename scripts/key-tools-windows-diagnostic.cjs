@@ -4,8 +4,8 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { utils } = require('ssh2');
-const { createKeyTools } = require('../app/key-tools.cjs');
+const { generateEd25519Fixture } = require('./ssh-key-fixtures.cjs');
+const { createKeyTools, spawnPrivateWindowsPty } = require('../app/key-tools.cjs');
 
 async function main() {
   if (process.platform !== 'win32') { console.log('Windows-only diagnostic; skipped.'); return; }
@@ -13,14 +13,14 @@ async function main() {
   const oldPhrase = 'old synthetic diagnostic passphrase', newPhrase = 'new synthetic diagnostic passphrase';
   const source = path.join(directory, 'source-key');
   try {
-    await fs.writeFile(source, utils.generateKeyPairSync('ed25519', { cipher: 'aes256-cbc', passphrase: oldPhrase }).private);
+    await fs.writeFile(source, generateEd25519Fixture({ cipher: 'aes256-cbc', passphrase: oldPhrase }).private);
     for (const operation of ['generate', 'convert']) {
       const destination = path.join(directory, `${operation}-key`);
       let output = '', outputBytes = 0, result, failure;
       const service = createKeyTools({ tempRoot: directory, timeoutMs: 15000,
         dialog: { showSaveDialog: async () => ({ filePath: destination }), showOpenDialog: async () => ({ filePaths: [source] }) },
         spawnPty(executable, args, options) {
-          const child = require('node-pty').spawn(executable, args, options);
+          const child = spawnPrivateWindowsPty(executable, args, options);
           child.onData(chunk => { outputBytes += Buffer.byteLength(chunk); if (outputBytes <= 32768) output += chunk; });
           return child;
         },

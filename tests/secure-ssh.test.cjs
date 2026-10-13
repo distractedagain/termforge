@@ -11,8 +11,10 @@ const net = require('node:net');
 const { randomUUID } = require('node:crypto');
 const { createSecureSsh } = require('../app/secure-ssh.cjs');
 const { createTerminalManager } = require('../app/terminals.cjs');
-const hostOne = utils.generateKeyPairSync('ed25519').private;
-const hostTwo = utils.generateKeyPairSync('ed25519').private;
+const { generateEd25519Fixture } = require('../scripts/ssh-key-fixtures.cjs');
+const leadingZeroEd25519 = require('./fixtures/leading-zero-ed25519.cjs');
+const hostOne = generateEd25519Fixture().private;
+const hostTwo = generateEd25519Fixture().private;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate) { const deadline = Date.now() + 5000; while (!predicate()) { if (Date.now() > deadline) throw new Error('Loopback SSH test timed out.'); await delay(10); } }
 async function temporary(t) { const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'termforge-secure-ssh-')); t.after(() => fsp.rm(dir, { recursive: true, force: true })); return dir; }
@@ -102,7 +104,7 @@ test('manual username and password prompts begin only after host review', async 
 });
 
 test('public-key authentication supports encrypted keys with a separately prompted passphrase', async t => {
-  const key = utils.generateKeyPairSync('ed25519', { cipher: 'aes256-cbc', passphrase: 'fixture-passphrase' });
+  const key = generateEd25519Fixture({ cipher: 'aes256-cbc', passphrase: 'fixture-passphrase' });
   const publicKey = utils.parseKey(key.public), requests = [];
   const endpoint = await server(t, { authenticate: context => {
     if (context.method !== 'publickey' || !context.key.data.equals(publicKey.getPublicSSH())) return context.reject(['publickey']);
@@ -112,6 +114,21 @@ test('public-key authentication supports encrypted keys with a separately prompt
   const identityFile = path.join(directory, 'fixture-private-key'); await fsp.writeFile(identityFile, key.private, { mode: 0o600 });
   const client = await service.connect(profile(endpoint.port, { credentialId: '', identityFile, ssh: { backend: 'managed', authOrder: ['publickey'] } })); client.end();
   assert.deepEqual(requests, ['key-passphrase']); assert.ok(endpoint.methods.every(method => method.method === 'publickey'));
+});
+
+test('public-key authentication accepts a correctly encoded Ed25519 identity with leading zero bytes', async t => {
+  const key = leadingZeroEd25519(), publicKey = utils.parseKey(key.public); let signatures = 0;
+  assert.equal(publicKey.getPublicSSH().subarray(-32, -30).toString('hex'), '0000');
+  const endpoint = await server(t, { authenticate: context => {
+    if (context.method !== 'publickey' || !context.key.data.equals(publicKey.getPublicSSH())) return context.reject(['publickey']);
+    if (!context.signature) return context.accept();
+    if (!publicKey.verify(context.blob, context.signature, context.hashAlgo)) return context.reject();
+    signatures++; context.accept();
+  } });
+  const { directory, service } = await fixture(t, { requestAuthentication: async () => assert.fail('Unencrypted synthetic key needs no passphrase') });
+  const identityFile = path.join(directory, 'leading-zero-test-identity'); await fsp.writeFile(identityFile, key.private, { mode: 0o600 });
+  const client = await service.connect(profile(endpoint.port, { credentialId: '', identityFile, ssh: { backend: 'managed', authOrder: ['publickey'] } })); client.end();
+  assert.equal(signatures, 1);
 });
 
 test('ordered methods fall back once and authentication rejection exposes no secret', async t => {
@@ -219,7 +236,7 @@ test('arbitrary library error strings never reach the terminal or invoke rejecti
 
 
 test('SSH agent signs through a local agent socket without loading a private key file', async t => {
-  const key = utils.parseKey(utils.generateKeyPairSync('ed25519').private);
+  const key = utils.parseKey(generateEd25519Fixture().private);
   const directory = await temporary(t), sockets = new Set(); let signed = 0;
   const windowsPipe = String.raw`\\.\pipe\termforge-agent-${randomUUID()}`;
   assert.deepEqual([...Buffer.from(windowsPipe).subarray(0, 9)], [92, 92, 46, 92, 112, 105, 112, 101, 92], 'Windows pipe prefix must retain every literal backslash on every platform');

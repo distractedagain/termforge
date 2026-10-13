@@ -9,7 +9,8 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { utils } = require('ssh2');
-const { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty } = require('../app/key-tools.cjs');
+const { generateEd25519Fixture } = require('../scripts/ssh-key-fixtures.cjs');
+const { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty, spawnPrivateWindowsPty, ownPrivateWindowsPty } = require('../app/key-tools.cjs');
 
 const passphrase = 'fixture passphrase ! $()';
 async function fixture(t, options = {}) {
@@ -41,7 +42,7 @@ test('creates an encrypted Ed25519 key through private native prompts without ar
   const observed = [];
   const { service, destination, directory } = await fixture(t, {
     spawn(executable, args, options) { observed.push({ executable, args, options }); return spawn(executable, args, options); },
-    spawnPty(executable, args, options) { observed.push({ executable, args, options }); return require('node-pty').spawn(executable, args, options); },
+    spawnPty(executable, args, options) { observed.push({ executable, args, options }); return spawnPrivateWindowsPty(executable, args, options); },
   });
   const result = await service.generate({ type: 'ed25519', comment: 'fixture; $(touch never)', passphrase });
   assert.equal(result.encrypted, true); assert.equal(result.privatePath, destination); assert.equal(result.publicPath, `${destination}.pub`); assert.match(result.fingerprint, /^SHA256:/u);
@@ -90,7 +91,7 @@ test('converts a PEM key to encrypted OpenSSH, preserves identity and never chan
 
 test('converts an encrypted OpenSSH key with a new passphrase, leaving its source untouched', async t => {
   const { service, destination, source } = await fixture(t);
-  const pair = utils.generateKeyPairSync('ed25519', { cipher: 'aes256-cbc', passphrase: 'original fixture secret' });
+  const pair = generateEd25519Fixture({ cipher: 'aes256-cbc', passphrase: 'original fixture secret' });
   await fsp.writeFile(source, pair.private, { mode: 0o600 });
   await service.convert({ oldPassphrase: 'original fixture secret', newPassphrase: passphrase });
   assert.equal(await fsp.readFile(source, 'utf8'), pair.private);
@@ -99,7 +100,7 @@ test('converts an encrypted OpenSSH key with a new passphrase, leaving its sourc
 
 test('incorrect source passphrase fails before destination selection or launching OpenSSH', async t => {
   const { service, source, calls, directory } = await fixture(t, { spawn: () => assert.fail('Must not launch ssh-keygen for a bad source passphrase') });
-  await fsp.writeFile(source, utils.generateKeyPairSync('ed25519', { cipher: 'aes256-cbc', passphrase }).private, { mode: 0o600 });
+  await fsp.writeFile(source, generateEd25519Fixture({ cipher: 'aes256-cbc', passphrase }).private, { mode: 0o600 });
   await assert.rejects(service.convert({ oldPassphrase: 'wrong passphrase', newPassphrase: 'another fixture secret' }), /Cannot read/u);
   assert.equal(calls.length, 0); await noTemporary(directory);
 });
@@ -123,7 +124,7 @@ test('exclusive pair write handles a last-moment public-file collision and remov
 
 test('symbolic source and destination files are refused', { skip: process.platform === 'win32' }, async t => {
   const { service, directory, source, destination } = await fixture(t);
-  const real = path.join(directory, 'real-key'); await fsp.writeFile(real, utils.generateKeyPairSync('ed25519').private, { mode: 0o600 });
+  const real = path.join(directory, 'real-key'); await fsp.writeFile(real, generateEd25519Fixture().private, { mode: 0o600 });
   await fsp.symlink(real, source);
   await assert.rejects(service.convert({ oldPassphrase: '', newPassphrase: passphrase }), /symbolic link/u);
   await fsp.symlink(real, destination);
@@ -148,7 +149,7 @@ test('keygen failures discard diagnostic details and clean temporary source copi
 });
 
 test('a tool that fails to encrypt the key cannot save an unencrypted result', async t => {
-  const unencrypted = utils.generateKeyPairSync('ed25519');
+  const unencrypted = generateEd25519Fixture();
   const { service, destination, directory } = await fixture(t, { spawn: fakeChild({ observe: ({ args }) => { if (args) require('node:fs').writeFileSync(args[args.indexOf('-f') + 1], unencrypted.private, { mode: 0o600 }); } }) });
   await assert.rejects(service.generate({ type: 'ed25519', comment: '', passphrase }), /did not encrypt/u);
   await assert.rejects(fsp.stat(destination), { code: 'ENOENT' }); await noTemporary(directory);
@@ -164,6 +165,14 @@ test('agent list reads only SHA256 public fingerprints and never mutates the age
 test('agent list distinguishes an empty agent from an unavailable one', async t => {
   const empty = await fixture(t, { spawn: fakeChild({ code: 1 }) }); assert.equal((await empty.service.agentList()).available, true);
   const absent = await fixture(t, { spawn: fakeChild({ code: 2 }) }); assert.equal((await absent.service.agentList()).available, false);
+});
+
+test('native OpenSSH receives required Windows ProgramData without arbitrary inherited secrets or askpass programs', async t => {
+  const observed = [];
+  const { service } = await fixture(t, { env: { ...process.env, ProgramData: 'C:\\ProgramData', PROGRAMDATA: 'C:\\ProgramData', PRIVATE_FIXTURE_SECRET: passphrase, SSH_ASKPASS: '/must-not-run' }, spawn: fakeChild({ code: 1, observe: entry => observed.push(entry) }) });
+  await service.agentList(); const environment = observed[0].options.env;
+  assert.equal(environment.ProgramData, 'C:\\ProgramData'); assert.equal(environment.PROGRAMDATA, 'C:\\ProgramData');
+  assert.equal(environment.PRIVATE_FIXTURE_SECRET, undefined); assert.equal(environment.SSH_ASKPASS, undefined); assert.equal(environment.SSH_ASKPASS_REQUIRE, 'never');
 });
 
 test('subprocess timeout and shutdown terminate owned tools and release the busy guard', async t => {
@@ -294,4 +303,33 @@ test('silent private Windows children are force-terminated before first output a
     fixture.controller.abort(); fixture.events.emit('data', 'Enter passphrase (empty for no passphrase): ');
     await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(terminated.length, 1);
   }
+});
+
+test('private Windows adapter releases only its captured ConPTY and waits for its owned worker after native exit', async () => {
+  const fixture = privatePtyFixture(), closed = []; let finishWorker, disposed = false;
+  const workerFinished = new Promise(resolve => { finishWorker = resolve; });
+  fixture.child._agent = { _useConpty: true, _useConptyDll: false, _pty: 71,
+    _ptyNative: { kill: (...args) => closed.push(args) },
+    _conoutSocketWorker: { _worker: { terminate: () => workerFinished } },
+    _inSocket: { destroy: () => closed.push('input') }, _outSocket: { destroy: () => closed.push('output') },
+    kill: () => assert.fail('Never query or signal a departed child PID'),
+  };
+  const owned = ownPrivateWindowsPty(fixture.child);
+  const operation = runPrivateKeyPty({ spawnPty: () => owned, executable: '/synthetic/keygen', args: [], cwd: '/synthetic', env: {}, responses: [], timeoutMs: 1000, killProcess: () => assert.fail('Never signal after exit') }).then(() => { disposed = true; });
+  fixture.events.emit('exit', { exitCode: 0 }); await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(disposed, false); assert.deepEqual(closed, [[71, false], 'input', 'output']);
+  finishWorker(0); await operation; assert.equal(disposed, true);
+  await owned.dispose(); assert.deepEqual(closed, [[71, false], 'input', 'output']);
+});
+
+test('private terminal cleanup failures cannot report successful key generation', async () => {
+  const fixture = privatePtyFixture(); fixture.child.dispose = async () => { throw new Error('synthetic resource detail'); };
+  const result = fixture.start([]); fixture.events.emit('exit', { exitCode: 0 });
+  await assert.rejects(result, error => error.code === 'KEY_TOOLS_CLEANUP_FAILED' && !error.message.includes('synthetic'));
+});
+
+test('unsupported Windows builds and private adapter versions fail before creating any native child', () => {
+  const spawn = () => assert.fail('Unsupported adapters must never spawn a child');
+  for (const release of ['10.0.17763', 'unknown']) assert.throws(() => spawnPrivateWindowsPty('/synthetic/keygen', [], {}, { release, version: '1.1.0', spawn }), /Windows 10 build 18309/u);
+  assert.throws(() => spawnPrivateWindowsPty('/synthetic/keygen', [], {}, { release: '10.0.26100', version: '1.2.0', spawn }), /node-pty 1\.1\.0/u);
 });

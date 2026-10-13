@@ -7,6 +7,7 @@ const fsp = fs.promises;
 const path = require('node:path');
 const { once } = require('node:events');
 const { Server, utils } = require('ssh2');
+const { generateEd25519Fixture } = require('./ssh-key-fixtures.cjs');
 const { OPEN_MODE, STATUS_CODE } = utils.sftp;
 
 async function startFixture(directory, approved, options = {}) {
@@ -19,7 +20,7 @@ async function startFixture(directory, approved, options = {}) {
     assert.ok(result === remote || result.startsWith(remote + path.sep), 'Fixture path escaped its isolated directory');
     return result;
   }
-  const server = new Server({ hostKeys: [utils.generateKeyPairSync('ed25519').private] }, peer => {
+  const server = new Server({ hostKeys: [generateEd25519Fixture().private] }, peer => {
     peers.add(peer); peer.on('error', () => {}); peer.on('close', () => peers.delete(peer));
     peer.on('authentication', context => {
       authentication.push({ reviewed: approved(), method: context.method, valid: context.username === 'native-fixture-user' && context.password === 'Native-fixture-password-123!' });

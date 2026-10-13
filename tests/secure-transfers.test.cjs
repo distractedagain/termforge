@@ -10,8 +10,9 @@ const { spawn, spawnSync } = require('node:child_process');
 const { Client, Server, utils } = require('ssh2');
 const { OPEN_MODE, STATUS_CODE } = utils.sftp;
 const { createSecureTransfers } = require('../app/secure-transfers.cjs');
+const { generateEd25519Fixture } = require('../scripts/ssh-key-fixtures.cjs');
 
-const key = utils.generateKeyPairSync('ed25519').private;
+const key = generateEd25519Fixture().private;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const scpAvailable = !spawnSync('scp', ['-V'], { windowsHide: true, timeout: 5000 }).error;
 

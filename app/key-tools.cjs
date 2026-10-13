@@ -88,6 +88,41 @@ function resolveTool(name, env, platform) {
   throw new Error(`${name} is unavailable. Install the OpenSSH client tools for this computer.`);
 }
 
+// Keep this adapter restricted to our private key-tool PTYs. node-pty 1.1.0's
+// natural Windows exit leaves a conout Worker alive, and public kill() queries
+// a possibly departed PID. Dispose only remaining owned resources; native exit
+// may already have removed the captured ConPTY ID before the JS exit callback.
+function ownPrivateWindowsPty(child) {
+  const agent = child._agent, connection = agent?._conoutSocketWorker;
+  if (!agent?._useConpty || agent._useConptyDll || typeof agent._ptyNative?.kill !== 'function' || typeof connection?._worker?.terminate !== 'function') throw new Error('The installed private Windows terminal adapter is unsupported.');
+  const handle = agent._pty, native = agent._ptyNative, worker = connection._worker;
+  let handleClosed = false, disposal;
+  const closeHandle = () => { if (!handleClosed) { native.kill(handle, false); handleClosed = true; } };
+  return {
+    get pid() { return child.pid; },
+    onData: callback => child.onData(callback), onExit: callback => child.onExit(callback),
+    on: (...args) => child.on(...args), removeListener: (...args) => child.removeListener(...args),
+    write: data => child.write(data), kill: closeHandle,
+    dispose() {
+      if (!disposal) disposal = Promise.resolve().then(async () => {
+        closeHandle();
+        clearTimeout(agent._closeTimeout); clearTimeout(connection._drainTimeout);
+        agent._inSocket.destroy(); agent._outSocket.destroy();
+        await worker.terminate();
+      });
+      return disposal;
+    },
+  };
+}
+function spawnPrivateWindowsPty(executable, args, options, dependencies = {}) {
+  if ((dependencies.version ?? require('node-pty/package.json').version) !== '1.1.0') throw new Error('The private Windows terminal adapter requires node-pty 1.1.0.');
+  const release = dependencies.release ?? os.release(), build = /^(\d+)\.(\d+)\.(\d+)/u.exec(release);
+  if (!build || Number(build[3]) < 18309) throw new Error('Private SSH key tools require Windows 10 build 18309 or newer with ConPTY support.');
+  // Check before spawning: node-pty otherwise silently falls back to winpty,
+  // which does not support this private resource ownership/cleanup contract.
+  return ownPrivateWindowsPty((dependencies.spawn ?? require('node-pty').spawn)(executable, args, options));
+}
+
 // Native Windows OpenSSH uses _getwch() rather than redirected stdin:
 // https://github.com/PowerShell/openssh-portable/blob/latestw_all/contrib/win32/win32compat/misc.c
 // This private ConPTY is never attached to a terminal tab, logs or renderer.
@@ -111,9 +146,12 @@ function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, tim
     const finish = code => {
       if (done) return; done = true; ownedPid = undefined; clearTimeout(timer); signal?.removeEventListener('abort', aborted);
       subscription?.dispose(); exitSubscription?.dispose(); buffer = ''; for (const response of pending) response.value = '';
-      if (failure) reject(failure);
-      else if (code !== 0 || answered !== pending.length) reject(new Error('ssh-keygen could not complete this operation. Check the key format, passphrase, and installed OpenSSH version.'));
-      else resolve({ code, output: '' });
+      const outcome = failure || (code !== 0 || answered !== pending.length ? new Error('ssh-keygen could not complete this operation. Check the key format, passphrase, and installed OpenSSH version.') : null);
+      Promise.resolve().then(() => child?.dispose?.()).then(() => {
+        if (outcome) reject(outcome); else resolve({ code, output: '' });
+      }, () => {
+        const error = new Error('Private Windows terminal resources could not be closed.'); error.code = 'KEY_TOOLS_CLEANUP_FAILED'; reject(error);
+      });
     };
     if (signal?.aborted) { reject(new Error('SSH key tools are closing.')); return; }
     try {
@@ -152,7 +190,7 @@ function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, tim
   });
 }
 
-function createKeyTools({ dialog, getWindow = () => undefined, register, approve, spawn = spawnChild, spawnPty = (file, args, options) => require('node-pty').spawn(file, args, options), env = process.env, platform = process.platform, tempRoot = os.tmpdir(), timeoutMs = 60000, removeTemporary = directory => fsp.rm(directory, { recursive: true, force: true }) } = {}) {
+function createKeyTools({ dialog, getWindow = () => undefined, register, approve, spawn = spawnChild, spawnPty = spawnPrivateWindowsPty, env = process.env, platform = process.platform, tempRoot = os.tmpdir(), timeoutMs = 60000, removeTemporary = directory => fsp.rm(directory, { recursive: true, force: true }) } = {}) {
   const children = new Set(), stopping = new AbortController(); let busy = false, closed = false, activeOperation = null, cleanupFailure = null;
   const live = () => { if (closed) throw new Error('SSH key tools are closing.'); };
   function exclusive(callback) {
@@ -173,7 +211,8 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
     });
   }
   const childEnv = { LC_ALL: 'C', LANG: 'C', SSH_ASKPASS_REQUIRE: 'never' };
-  for (const key of ['PATH', 'Path', 'HOME', 'USERPROFILE', 'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'SSH_AUTH_SOCK']) if (typeof env[key] === 'string') childEnv[key] = env[key];
+  // Native Windows OpenSSH requires ProgramData during startup (w32fd.c).
+  for (const key of ['PATH', 'Path', 'HOME', 'USERPROFILE', 'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'ProgramData', 'PROGRAMDATA', 'TEMP', 'TMP', 'TMPDIR', 'SSH_AUTH_SOCK']) if (typeof env[key] === 'string') childEnv[key] = env[key];
   function runTool(name, args, input = '', acceptedCodes = [0]) {
     live();
     const executable = resolveTool(name, env, platform);
@@ -206,7 +245,7 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
     });
   }
   function runKeygen(args, responses) {
-    if (platform === 'win32' && spawnPty) return runPrivateKeyPty({ spawnPty, executable: resolveTool('ssh-keygen', env, platform), args, cwd: tempRoot, env: childEnv, responses, timeoutMs, signal: stopping.signal });
+    if (platform === 'win32' && spawnPty) return runPrivateKeyPty({ spawnPty, executable: resolveTool('ssh-keygen', env, platform), args, cwd: tempRoot, env: childEnv, responses, timeoutMs, signal: stopping.signal }).catch(error => { if (error.code === 'KEY_TOOLS_CLEANUP_FAILED') cleanupFailure = error; throw error; });
     return runTool('ssh-keygen', args, responses.map(response => `${response.value}\n`).join(''));
   }
   async function approvedUnencrypted(request) {
@@ -300,4 +339,4 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
   if (register) { register('keyToolsGenerate', generate); register('keyToolsConvert', convert); register('keyToolsAgentList', agentList); }
   return result;
 }
-module.exports = { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty };
+module.exports = { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty, spawnPrivateWindowsPty, ownPrivateWindowsPty };
