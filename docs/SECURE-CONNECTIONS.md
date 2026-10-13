@@ -6,6 +6,8 @@ TermForge 0.9 adds named credentials, managed SSH connections, and a graphical f
 
 Open **File → Quick Connect**. For SSH2, choose the managed connection engine, enter the hostname and port, and choose either a username with authentication prompts or a saved credential. Enable and reorder Public key, Keyboard interactive and Password methods. An explicit private-key path or the system agent supplies public keys; encrypted keys prompt for a passphrase. Keyboard-interactive challenges always ask for fresh answers, including when a password is saved.
 
+Managed SSH discovers an agent through `SSH_AUTH_SOCK` in TermForge's environment. It does not automatically discover a Windows OpenSSH agent or Pageant. Configure the appropriate agent endpoint before launching TermForge, or choose an explicit private-key file.
+
 **SFTP session** opens File Transfer. **Save session** stores the connection profile. **Show Quick Connect on startup** opens the form at launch without connecting. Terminal connections open in tabs; detached windows are not implemented.
 
 The screenshot's firewall/GSSAPI controls map to a separate **System OpenSSH** engine: its existing session options support one jump host, forwarding and GSSAPI according to the installed client/server. Managed SSH currently rejects jump hosts, forwarding, SSH certificates, GSSAPI and X11 forwarding. Choose the OpenSSH engine for those terminal workflows; saved TermForge passwords cannot be used with it. A control being visible does not mean every SecureCRT authentication or firewall configuration is supported.
@@ -34,7 +36,11 @@ Use the transfer toolbar or **Transfer → File Transfer** with an SSH profile s
 
 Choose **SFTP** for normal transfers or **SCP** for actual `scp -t`/`scp -f` file payloads on the same verified SSH connection. SCP mode still requires SFTP for directory browsing, destination checks, staging and commit, and a compatible `scp` executable on the remote server. SCP-only servers are not supported. Both modes currently copy regular files, with multiple selected files queued individually. Directory recursion, symbolic-link copying, resume, synchronization, remote editing, drag and drop, and permission/time preservation are not included.
 
+SCP commands use POSIX shell quoting and require a compatible remote SSH command shell. Use SFTP for Windows servers whose SSH command shell is `cmd.exe` or PowerShell. Windows-client SCP tests exercise the file protocol and quoting through an isolated server fixture; they do not establish compatibility with those Windows server shells.
+
 Transfers use temporary files and ask before replacing an existing destination. Local downloads reject symlinks and unsafe remote file names. Failed/cancelled transfers try to remove their temporary files; a lost connection or app crash can leave a remote temporary file. Existing files are checked again before replacement. Conflicts can leave the prior destination in a named recovery file, reported in the transfer error. Remote checks use size/type/timestamps, so a same-size change within the timestamp resolution may be missed. Remote commits also depend on the server honoring SFTP v3's no-overwrite rename behavior. Avoid uploading over a file another process is actively updating.
+
+The local destination filesystem must permit hard links, which TermForge uses to commit a download without silently overwriting a competing file. Filesystems without hard-link support, including FAT/exFAT volumes, cannot receive downloads. Before replacing an existing local file, TermForge checks this capability and leaves that file in place if the check fails. Choose another local folder or filesystem.
 
 Cancellation stops queued jobs and active copying. Once replacement has begun, TermForge waits for its outcome: an acknowledged replacement reports Completed. If the server disconnects before acknowledging a rename, the job reports an uncertain outcome, retains available recovery files and stops that transfer connection. Inspect the named paths before retrying. Quitting with an active transfer connection requires confirmation and waits for owned cleanup.
 

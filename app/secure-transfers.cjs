@@ -243,7 +243,19 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   }
   async function commitLocal(stage, context, expected, job) {
     check(job.controller.signal); await checkParent(context);
-    const target = context.target; const existing = await localStat(target);
+    const target = context.target;
+    if (expected) {
+      // Some removable/network filesystems cannot create hard links. Verify
+      // the exact operation used for commit and recovery before moving the
+      // existing destination out of the way.
+      const probe = path.join(context.canonical, `.termforge-${randomUUID()}.linkcheck`);
+      let linked = false;
+      try { await fsp.link(stage, probe); linked = true; }
+      catch { throw new Error('This destination cannot create the hard links required for safe downloads. The existing file was left in place. Choose a different local folder or filesystem.'); }
+      finally { if (linked) await fsp.unlink(probe); }
+      await checkParent(context);
+    }
+    const existing = await localStat(target);
     if (!same(expected, existing ? localSnapshot(existing) : null)) throw new Error('The local destination changed after overwrite confirmation.');
     check(job.controller.signal); job.commitStarted = true;
     let backup = null;

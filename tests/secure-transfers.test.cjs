@@ -349,3 +349,26 @@ test('disconnected jobs remain owned and shutdown awaits their pending cleanup',
     assert.deepEqual(await fsp.readdir(local), []);
   } finally { releaseCleanup(); }
 });
+
+test('filesystems without hard links refuse replacement before moving the existing local file', { timeout: 10000 }, async t => {
+  const { local, remote, run } = await fixture(t, { confirmOverwrite: async () => true });
+  const canonical = await fsp.realpath(local);
+  const destination = path.join(local, 'file');
+  await fsp.writeFile(destination, 'keep the original bytes'); await fsp.writeFile(path.join(remote, 'file'), 'replacement');
+  const originalLink = fsp.link; const originalRename = fsp.rename; let movedExisting = false; let refusedLinks = 0;
+  fsp.rename = async (from, to) => { if (from === path.join(canonical, 'file')) movedExisting = true; return originalRename(from, to); };
+  try {
+    for (const code of ['ENOTSUP', 'EPERM']) {
+      fsp.link = async (from, to) => {
+        if (path.dirname(from) === canonical) { refusedLinks++; throw Object.assign(new Error('Fixture filesystem does not support hard links'), { code }); }
+        return originalLink(from, to);
+      };
+      const result = await run({ direction: 'download', localPath: destination, remotePath: '/file' });
+      assert.equal(result.status, 'failed'); assert.match(result.error, /hard links.*existing file was left in place/);
+      assert.equal(movedExisting, false, 'Replacement must not rename the original before checking hard-link support');
+      assert.equal(await fsp.readFile(destination, 'utf8'), 'keep the original bytes');
+      assert.deepEqual(await fsp.readdir(local), ['file'], 'No recovery rename or staging residue remains');
+    }
+    assert.equal(refusedLinks, 2);
+  } finally { fsp.link = originalLink; fsp.rename = originalRename; }
+});

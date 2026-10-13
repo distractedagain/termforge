@@ -12,8 +12,8 @@ TermForge 0.9.0 adds OS-protected saved credentials, a fuller Quick Connect work
 
 - Choose username or saved credentials, enable/reorder supported authentication methods, select a private key, open an SFTP workspace, save a session or optionally show Quick Connect at startup.
 - Browse local and remote folders side by side; upload/download regular files with progress, a transfer queue, cancellation and overwrite review.
-- SFTP handles normal copies. SCP performs actual `scp -f`/`scp -t` payload transfers; it still needs SFTP for browsing, metadata checks, staging and commit, and a compatible remote SCP program.
-- Transfers stage new data and preserve recovery files on conflicting replacements. Remote metadata has limited timestamp precision and depends on the server honoring no-overwrite SFTP rename; avoid competing writers.
+- SFTP handles normal copies. SCP performs actual `scp -f`/`scp -t` payload transfers; it still needs SFTP for browsing, metadata checks, staging and commit, a compatible remote SCP program and a POSIX-compatible command shell. Use SFTP for Windows servers with PowerShell or cmd.exe shells.
+- Transfers stage new data and preserve recovery files on conflicting replacements. Local downloads require a filesystem that supports hard links; unsupported replacements are refused before moving the existing file. Remote metadata has limited timestamp precision and depends on the server honoring no-overwrite SFTP rename; avoid competing writers.
 
 Managed SSH supports password, keyboard-interactive, explicit private keys (including passphrase prompts) and a bounded system SSH agent. Existing system OpenSSH sessions remain available for jump hosts, forwarding, certificates, GSSAPI and X11. Those advanced options are explicitly rejected by the managed transport. Host-key stores are separate. Opening file transfer creates a separate SSH connection using the profile/credential; it does not reuse the live terminal's channel.
 
@@ -21,7 +21,7 @@ This is a preview, not full SecureCRT/SecureFX parity. Recursive folder copying,
 
 ## Verification and platform notes
 
-Local source passed 250 backend tests, 97 existing interface checks, 20 new secure-connection interface checks and 13 project-editor checks. Production dependency audit reported zero vulnerabilities. Tests use temporary files, synthetic credentials, injected OS-storage providers, headless UI fixtures and real loopback SSH/SFTP/SCP servers. Provider-injected vault tests do not verify native Keychain/DPAPI/keyring access. Cross-platform CI and installer verification remain pending. No Electron window is launched on the development laptop; native Electron smoke runs under Linux CI.
+Local source passed 251 backend tests, 97 existing interface checks, 20 new secure-connection interface checks and 13 project-editor checks. Production dependency audit reported zero vulnerabilities. Tests use temporary files, synthetic credentials, injected OS-storage providers, headless UI fixtures and real loopback SSH/SFTP/SCP servers. Provider-injected vault tests do not verify native Keychain/DPAPI/keyring access. Cross-platform CI and installer verification remain pending. No Electron window is launched on the development laptop; native Electron smoke runs under Linux CI.
 
 macOS packages retain ad-hoc signing without Apple notarization; Keychain may ask for access again after an update. Windows packages are unsigned. OS encryption protects storage according to each platform's guarantees; it is not a defense against a compromised unlocked account. System OpenSSH is needed only for the OpenSSH/interactive SFTP engine; the managed SSH/SFTP client is bundled. Python, Ansible and local AI runtimes remain separate installations.
 
