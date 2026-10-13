@@ -220,10 +220,10 @@ test('close reports failed temporary-file cleanup instead of silently declaring 
   await assert.rejects(service.close(), /temporary files could not be removed/u);
 });
 
-function privatePtyFixture({ timeoutMs = 1000, autoExitOnKill = true } = {}) {
+function privatePtyFixture({ timeoutMs = 1000, autoExitOnKill = true, killProcess } = {}) {
   const events = new EventEmitter(), writes = [], calls = [], controller = new AbortController(); let kills = 0;
   const child = { onData: callback => { events.on('data', callback); return { dispose: () => events.off('data', callback) }; }, onExit: callback => { events.on('exit', callback); return { dispose: () => events.off('exit', callback) }; }, write: value => writes.push(value), kill: () => { kills++; if (autoExitOnKill) queueMicrotask(() => events.emit('exit', { exitCode: 1 })); } };
-  const start = responses => runPrivateKeyPty({ spawnPty: (...args) => { calls.push(args); return child; }, executable: '/synthetic/ssh-keygen', args: ['-q', '-p'], cwd: '/synthetic', env: { SSH_ASKPASS_REQUIRE: 'never' }, responses, timeoutMs, signal: controller.signal });
+  const start = responses => runPrivateKeyPty({ spawnPty: (...args) => { calls.push(args); return child; }, executable: '/synthetic/ssh-keygen', args: ['-q', '-p'], cwd: '/synthetic', env: { SSH_ASKPASS_REQUIRE: 'never' }, responses, timeoutMs, signal: controller.signal, killProcess });
   return { start, child, events, writes, calls, controller, get kills() { return kills; } };
 }
 
@@ -240,10 +240,10 @@ test('private Windows prompts handle fragmented control sequences and send one a
   assert.equal(fixture.events.listenerCount('data'), 0); assert.equal(fixture.events.listenerCount('exit'), 0);
 });
 
-test('private Windows generation accepts old and current OpenSSH prompt spelling', async () => {
-  for (const prompt of ['Enter passphrase (empty for no passphrase): ', 'Enter passphrase for "C:\\fixture\\private-key" (empty for no passphrase): ']) {
+test('private Windows generation accepts both OpenSSH prompt spellings and ConPTY cursor-rendered trailing blanks', async () => {
+  for (const prompt of ['Enter passphrase (empty for no passphrase): ', 'Enter passphrase for "C:\\fixture\\private-key" (empty for no passphrase): ', 'Enter passphrase (empty for no passphrase):\x1b[1C']) {
     const fixture = privatePtyFixture(); const result = fixture.start([{ prompt: 'new', value: '' }, { prompt: 'same', value: '' }]);
-    fixture.events.emit('data', prompt); fixture.events.emit('data', '\r\nEnter same passphrase again: '); fixture.events.emit('exit', { exitCode: 0 });
+    fixture.events.emit('data', prompt); fixture.events.emit('data', '\r\nEnter same passphrase again:\x1b[1C'); fixture.events.emit('exit', { exitCode: 0 });
     await result; assert.deepEqual(fixture.writes, ['\r', '\r']);
   }
 });
@@ -279,5 +279,19 @@ test('private prompt subscription failures kill the child and await its exit bef
     await new Promise(resolve => setTimeout(resolve, 5)); assert.equal(finished, false); assert.equal(fixture.kills, 1); assert.deepEqual(fixture.writes, []);
     if (broken === 'onData') fixture.events.emit('exit', { exitCode: 1 }); else fixture.events.emit('legacy-exit', 1);
     assert.match((await result).message, /Could not initialize/u); assert.equal(fixture.events.listenerCount('legacy-exit'), 0);
+  }
+});
+
+test('silent private Windows children are force-terminated before first output and drained on timeout or shutdown', async () => {
+  for (const cause of ['timeout', 'shutdown']) {
+    const terminated = [];
+    const fixture = privatePtyFixture({ timeoutMs: 15, autoExitOnKill: false, killProcess: (pid, signal) => { terminated.push([pid, signal]); queueMicrotask(() => fixture.events.emit('exit', { exitCode: 1 })); } });
+    fixture.child.pid = 424242; // Synthetic owned PID; the injected killer never touches OS processes.
+    const result = fixture.start([{ prompt: 'new', value: passphrase }]);
+    if (cause === 'shutdown') fixture.controller.abort();
+    await assert.rejects(result, cause === 'timeout' ? /did not finish/u : /closing/u);
+    assert.deepEqual(terminated, [[424242, 'SIGKILL']]); assert.equal(fixture.kills, 1); assert.deepEqual(fixture.writes, []);
+    fixture.controller.abort(); fixture.events.emit('data', 'Enter passphrase (empty for no passphrase): ');
+    await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(terminated.length, 1);
   }
 });

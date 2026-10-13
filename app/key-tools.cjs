@@ -93,14 +93,23 @@ function resolveTool(name, env, platform) {
 // This private ConPTY is never attached to a terminal tab, logs or renderer.
 // Supply exactly one answer after its complete expected prompt; typing early
 // loses input because Windows readpassphrase() clears pending console input.
-function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, timeoutMs, signal }) {
+function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, timeoutMs, signal, killProcess = (pid, termination) => process.kill(pid, termination) }) {
   const pending = responses.map(response => ({ ...response }));
   return new Promise((resolve, reject) => {
-    let child, timer, subscription, exitSubscription, failure, buffer = '', outputBytes = 0, answered = 0, done = false;
-    const fail = error => { if (failure) return; failure = error; try { child?.kill(); } catch { /* Wait for owned process exit. */ } };
+    let child, ownedPid, timer, subscription, exitSubscription, failure, buffer = '', outputBytes = 0, answered = 0, done = false;
+    const fail = error => {
+      if (failure || done) return; failure = error;
+      // node-pty's Windows kill() waits for the first output event. A silent
+      // child still needs termination, so stop the captured owned process too.
+      // Never retain a PID or signal it after the exit witness has fired.
+      if (Number.isSafeInteger(ownedPid) && ownedPid > 0) {
+        try { killProcess(ownedPid, 'SIGKILL'); } catch { /* The process may already be exiting; still drain the PTY exit. */ }
+      }
+      if (!done) { try { child?.kill(); } catch { /* Wait for owned process exit. */ } }
+    };
     const aborted = () => fail(new Error('SSH key tools are closing.'));
     const finish = code => {
-      if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener('abort', aborted);
+      if (done) return; done = true; ownedPid = undefined; clearTimeout(timer); signal?.removeEventListener('abort', aborted);
       subscription?.dispose(); exitSubscription?.dispose(); buffer = ''; for (const response of pending) response.value = '';
       if (failure) reject(failure);
       else if (code !== 0 || answered !== pending.length) reject(new Error('ssh-keygen could not complete this operation. Check the key format, passphrase, and installed OpenSSH version.'));
@@ -109,6 +118,7 @@ function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, tim
     if (signal?.aborted) { reject(new Error('SSH key tools are closing.')); return; }
     try {
       child = spawnPty(executable, args, { cwd, env, name: 'xterm', cols: 240, rows: 30, useConpty: true });
+      ownedPid = child.pid;
       try { exitSubscription = child.onExit(({ exitCode }) => finish(exitCode)); }
       catch {
         // node-pty also exposes EventEmitter's exit event. Keep an exit witness
@@ -124,7 +134,9 @@ function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, tim
         buffer = (buffer + chunk).slice(-8192);
         const visible = stripVTControlCharacters(buffer).replace(/[\r\n]/gu, '');
         const expected = pending[answered];
-        const pattern = expected.prompt === 'old' ? /Enter old passphrase: $/u : expected.prompt === 'same' ? /Enter same passphrase again: $/u : /Enter (?:new )?passphrase(?: for "[^"]*")? \(empty for no passphrase\): $/u;
+        // ConPTY may render the final blank as a cursor movement rather than a
+        // literal space. The complete prompt text and colon are still required.
+        const pattern = expected.prompt === 'old' ? /Enter old passphrase:[ \t]*$/u : expected.prompt === 'same' ? /Enter same passphrase again:[ \t]*$/u : /Enter (?:new )?passphrase(?: for "[^"]*")? \(empty for no passphrase\):[ \t]*$/u;
         if (pattern.test(visible)) {
           const answer = expected.value; expected.value = ''; answered++; buffer = '';
           try { child.write(`${answer}\r`); } catch { fail(new Error('Could not answer the private ssh-keygen prompt.')); }
