@@ -279,7 +279,11 @@ test('Controller close waits for tree verification even if its parent exits firs
 });
 
 const helperPython = process.platform === 'win32' ? 'python' : 'python3';
-const helperPythonAvailable = spawnSync(helperPython, ['-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
+const helperPythonProbe = spawnSync(helperPython, ['-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'], { encoding: 'utf8', timeout: process.platform === 'win32' ? 30000 : 5000, windowsHide: true });
+const helperPythonAvailable = helperPythonProbe.status === 0;
+if (process.env.GITHUB_ACTIONS === 'true') {
+  assert.equal(helperPythonAvailable, true, `CI Python helper probe failed for ${helperPython}: ${helperPythonProbe.error?.message || helperPythonProbe.stderr?.trim() || `exit ${helperPythonProbe.status}, signal ${helperPythonProbe.signal}`}`);
+}
 function pythonHelper(code, args = []) {
   const result = spawnSync(helperPython, ['-I', '-c', `import runpy,sys,json,hashlib\nfrom pathlib import Path\nh = runpy.run_path(sys.argv[1])\n${code}`, path.join(__dirname, '../app/termforge_ansible.py'), ...args], { encoding: 'utf8', timeout: 10000, windowsHide: true });
   assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);

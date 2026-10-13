@@ -313,9 +313,9 @@ function registerHandlers() {
     return { enabled: true, path: result.filePath };
   });
   handle('clipboardRead', () => clipboard.readText());
-  handle('clipboardWrite', (text) => {
+  handle('clipboardWrite', async (text) => {
     if (typeof text !== 'string' || text.length > 1024 * 1024) throw new Error('Clipboard text exceeds 1 MiB');
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
     return true;
   });
 }

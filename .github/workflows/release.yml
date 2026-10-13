@@ -51,6 +51,8 @@ jobs:
         run: npm ci
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+      - name: Verify the isolated Python interpreter before parallel tests
+        run: python -I -c "import sys, json, pathlib, runpy; print(sys.executable); print(sys.version)"
       - name: Run tests
         run: npm test
       - name: Build renderer

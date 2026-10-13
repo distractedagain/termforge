@@ -34,7 +34,7 @@ async function projectSmoke(window, terminals, directory) {
   assert.notEqual(path.resolve(project), profile);
   const originalDialog = dialog.showOpenDialog;
   const originalWrite = terminals.write;
-  const oldClipboard = clipboard.readText();
+  const oldClipboard = await clipboard.readText();
   const editorWrites = [];
   let dialogCalls = 0;
   const evaluate = code => window.webContents.executeJavaScript(`(async () => {
@@ -49,7 +49,7 @@ async function projectSmoke(window, terminals, directory) {
   const waitClipboard = async expected => {
     const end = Date.now() + 12000;
     while (Date.now() < end) {
-      if (clipboard.readText() === expected) return;
+      if (await clipboard.readText() === expected) return;
       await new Promise(resolve => setTimeout(resolve, 40));
     }
     throw new Error('Native Copy did not return the complete project document');
@@ -92,10 +92,11 @@ async function projectSmoke(window, terminals, directory) {
       await wait(() => document.querySelector('#project-editor .monaco-editor') && document.activeElement?.closest('#project-editor'), 'focused Monaco editor');
       await wait(() => document.getElementById('project-diagnostics').textContent.includes('YAML syntax checked'), 'YAML diagnostics');
     `);
-    clipboard.writeText('TERMFORGE_SMOKE_CLIPBOARD_SENTINEL');
+    await evaluate("await window.termforge.clipboardWrite('TERMFORGE_SMOKE_CLIPBOARD_SENTINEL');");
+    assert.equal(await clipboard.readText(), 'TERMFORGE_SMOKE_CLIPBOARD_SENTINEL', 'Clipboard write IPC must finish before acknowledging completion');
     menu('select-all'); menu('copy');
     await waitClipboard(playbook);
-    clipboard.writeText(editedPlaybook); menu('paste');
+    await clipboard.writeText(editedPlaybook); menu('paste');
     await evaluate(`
       await wait(() => !document.getElementById('project-save').disabled, 'editor paste through native IPC');
       document.getElementById('project-save').click();
@@ -109,7 +110,7 @@ async function projectSmoke(window, terminals, directory) {
       await wait(() => /[1-9][0-9]* JSON syntax issue/.test(document.getElementById('project-diagnostics').textContent), 'JSON worker diagnostics over the custom protocol');
       await wait(() => window.__termforgeEditorSmoke.workers.some(worker => worker.label === 'json' && worker.messages > 0), 'actual JSON worker response');
     `);
-    clipboard.writeText(validJson); menu('select-all'); menu('paste');
+    await clipboard.writeText(validJson); menu('select-all'); menu('paste');
     await evaluate(`
       await wait(() => !document.getElementById('project-save').disabled, 'corrected JSON editor buffer');
       await wait(() => document.getElementById('project-diagnostics').textContent === 'JSON syntax checked locally', 'JSON worker clears corrected diagnostics');
@@ -124,7 +125,7 @@ async function projectSmoke(window, terminals, directory) {
     assert.ok(state.workers.every(worker => worker.errors.length === 0), JSON.stringify(state.workers));
     await fs.writeFile(path.join(directory, 'project-workers.json'), JSON.stringify(state, null, 2));
     console.log('PASS custom-protocol JSON worker, corrected diagnostics, JSON save, CSP, and zero editor-to-terminal writes');
-    return { projectNativeDialog:true, projectNativeClipboard:true, projectSaveToDisk:true, projectNoTerminalWrites:true, jsonCustomProtocolWorker:true, jsonDiagnostics:true, editorCsp:true };
+    return { projectNativeDialog:true, projectNativeClipboard:true, clipboardIpcCompletion:true, projectSaveToDisk:true, projectNoTerminalWrites:true, jsonCustomProtocolWorker:true, jsonDiagnostics:true, editorCsp:true };
   } catch (error) {
     const state = await evaluate(`return {workers:window.__termforgeEditorSmoke?.workers, violations:window.__termforgeEditorSmoke?.violations, diagnostics:document.getElementById('project-diagnostics')?.textContent, error:document.getElementById('project-error-text')?.textContent};`).catch(() => null);
     const failure = {error:error.stack || String(error), state};
@@ -133,7 +134,7 @@ async function projectSmoke(window, terminals, directory) {
     await fs.writeFile(path.join(directory, 'project-failure.json'), JSON.stringify(failure, null, 2)).catch(() => {});
     throw error;
   } finally {
-    dialog.showOpenDialog = originalDialog; terminals.write = originalWrite; clipboard.writeText(oldClipboard);
+    dialog.showOpenDialog = originalDialog; terminals.write = originalWrite; await clipboard.writeText(oldClipboard);
     await evaluate(`
       const state = window.__termforgeEditorSmoke;
       if (state) {
