@@ -1,5 +1,9 @@
 TermForge 0.11.0 brings its docked sidebars closer to the SecureCRT macOS layout while retaining TermForge's existing connection, command and terminal workflows. TermForge remains free, open source and MIT-licensed for macOS, Windows and Linux.
 
+![TermForge Session Manager with vertical manager tabs](https://raw.githubusercontent.com/distractedagain/termforge/v0.11.0/docs/images/sidebar-v0.11.png)
+
+Headless preview with synthetic sessions; no remote device is connected.
+
 ## Docked desktop managers
 
 - Full vertical **Session Manager**, **Command Manager** and **Active Sessions** tabs run down the left edge.
