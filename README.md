@@ -8,9 +8,9 @@ This 0.8 preview uses a temporary localhost project; no device is connected. It 
 
 ## Download
 
-[Download the TermForge v0.13.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.13.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+[Download the TermForge v0.14.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.14.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
 
-Earlier previews remain available: [TermForge v0.12.0](https://github.com/distractedagain/termforge/releases/tag/v0.12.0), [v0.11.0](https://github.com/distractedagain/termforge/releases/tag/v0.11.0), [v0.10.0](https://github.com/distractedagain/termforge/releases/tag/v0.10.0), [v0.9.0](https://github.com/distractedagain/termforge/releases/tag/v0.9.0), [v0.8.0](https://github.com/distractedagain/termforge/releases/tag/v0.8.0), [v0.7.0](https://github.com/distractedagain/termforge/releases/tag/v0.7.0), [v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
+Earlier previews remain available: [TermForge v0.13.0](https://github.com/distractedagain/termforge/releases/tag/v0.13.0), [v0.12.0](https://github.com/distractedagain/termforge/releases/tag/v0.12.0), [v0.11.0](https://github.com/distractedagain/termforge/releases/tag/v0.11.0), [v0.10.0](https://github.com/distractedagain/termforge/releases/tag/v0.10.0), [v0.9.0](https://github.com/distractedagain/termforge/releases/tag/v0.9.0), [v0.8.0](https://github.com/distractedagain/termforge/releases/tag/v0.8.0), [v0.7.0](https://github.com/distractedagain/termforge/releases/tag/v0.7.0), [v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. Core terminal features require no subscription, activation, account, or cloud service. Optional free online AI requires your own OpenRouter account and API key; local AI uses a separately installed Ollama model.
 
@@ -26,13 +26,15 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.14 source — Reviewed folder transfers
+## New in 0.14 — Reviewed folder transfers
 
 ![Reviewed SFTP folder upload](docs/images/folder-copy-v0.14.png)
 
 The built-in file workspace now supports **SFTP folder upload and download**. Select one folder to inspect its complete tree, review the exact destination and confirm the copy. Nested folders, empty folders and zero-byte files are supported, with aggregate progress and cancellation. Destinations must be new folders; completed output remains after cancellation or failure. See the [folder-copy guide](docs/SECURE-CONNECTIONS.md#reviewed-folder-copies) and [verification record](docs/VERIFICATION-v0.14.0.md).
 
-This is an original implementation within TermForge. SecureFX is not bundled or required. Folder merges, synchronization, resume, remote editing and FTP/FTPS remain outside this release.
+This is an original implementation within TermForge. SecureFX is not bundled or required. Folder merges, synchronization, resume, remote editing and FTP/FTPS remain outside this release. The [SecureFX workflow parity map](docs/SECUREFX-PARITY.md) tracks these gaps and completion evidence.
+
+All four platform CI jobs and installer builds passed. Linux also passed 261 interface checks and a real Electron folder-transfer round trip. The public tag, thirteen assets and twelve checksum entries passed anonymous verification; see the [0.14 verification record](docs/VERIFICATION-v0.14.0.md) for exact test counts and limitations.
 
 ## New in 0.13 — Session imports and remote file management
 
