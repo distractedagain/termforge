@@ -25,6 +25,7 @@ import './modern.css';
 import './modern-ai.css';
 import { createProjectUi } from './projects.js';
 import './secure-connections.css';
+import './managers.css';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -65,6 +66,7 @@ let selectedFolderPath = null;
 let focusedTreeKey = 'folder:';
 let openMenuName = null;
 let menuEditTarget = null;
+let sessionContextTrigger = null;
 let lastWorkspaceFocus = 'terminal';
 const panes = { sessionManager: true, commandWindow: true, buttonBar: true };
 const secureConnections = createSecureConnections({api, toast, confirmAction});
@@ -106,13 +108,17 @@ function actionProfile() {
 }
 
 function setPane(name, visible) {
+  const returnToRail = name === 'sessionManager' && !visible && $('session-manager').contains(document.activeElement);
   panes[name] = visible;
   applyPaneVisibility();
+  if (returnToRail) $('session-manager').querySelector('.dock-tab.selected')?.focus();
   saveLayout();
 }
 
 function applyPaneVisibility() {
-  $('session-manager').hidden = !panes.sessionManager;
+  $('session-manager').classList.toggle('manager-collapsed', !panes.sessionManager);
+  $('session-manager').querySelector('.sidebar-content').hidden = !panes.sessionManager;
+  for (const tab of $('session-manager').querySelectorAll('.dock-tab')) tab.setAttribute('aria-expanded', String(panes.sessionManager && tab.classList.contains('selected')));
   $('sidebar-resizer').hidden = !panes.sessionManager;
   $('command-bar').hidden = !panes.commandWindow;
   $('command-resizer').hidden = !panes.commandWindow;
@@ -226,6 +232,22 @@ function normalizeFolder(folder) {
   return String(folder || '').split(/[\\/]/).map((part) => part.trim()).filter(Boolean);
 }
 
+function syncTreeSelection() {
+  for (const row of $('session-list').querySelectorAll('.session-row')) {
+    const selected = selectedSessionIds.has(row.dataset.sessionId);
+    row.classList.toggle('selected', selected);
+    const button = row.querySelector('.session-main');
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = button.dataset.treeKey === focusedTreeKey ? 0 : -1;
+  }
+  for (const folder of $('session-list').querySelectorAll('.folder-heading')) {
+    const selected = folder.dataset.folderPath === selectedFolderPath;
+    folder.classList.toggle('selected', selected);
+    folder.setAttribute('aria-selected', String(selected));
+    folder.tabIndex = folder.dataset.treeKey === focusedTreeKey ? 0 : -1;
+  }
+}
+
 function selectSession(profile, focus = false, event = null) {
   if (!profile) return;
   if (event?.shiftKey && selectedSessionId) {
@@ -238,20 +260,16 @@ function selectSession(profile, focus = false, event = null) {
   selectedSessionId = profile.id;
   selectedFolderPath = null;
   focusedTreeKey = `session:${profile.id}`;
-  for (const row of $('session-list').querySelectorAll('.session-row')) {
-    const selected = selectedSessionIds.has(row.dataset.sessionId);
-    row.classList.toggle('selected', selected);
-    const button = row.querySelector('.session-main'); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
-  }
-  for (const folder of $('session-list').querySelectorAll('.folder-heading')) { folder.classList.remove('selected'); folder.tabIndex = -1; }
+  syncTreeSelection();
   $('session-selection').textContent = selectedSessionIds.size > 1 ? `${selectedSessionIds.size} sessions selected. Connect or edit their options.` : `${profile.protocol.toUpperCase()} · ${profileDetail(profile)}`;
   updateToolbar();
   if (focus) focusTreeItem(focusedTreeKey);
 }
 
 function focusTreeItem(key) {
-  const item = [...$('session-list').querySelectorAll('[data-tree-key]')].find((node) => node.dataset.treeKey === key);
-  if (item) { focusedTreeKey = key; item.focus(); item.scrollIntoView({ block: 'nearest' }); }
+  const items = [...$('session-list').querySelectorAll('[data-tree-key]')];
+  const item = items.find((node) => node.dataset.treeKey === key);
+  if (item) { focusedTreeKey = key; for (const node of items) node.tabIndex = node === item ? 0 : -1; item.focus(); item.scrollIntoView({ block: 'nearest' }); }
 }
 
 function renderSessions() {
@@ -278,6 +296,7 @@ function renderSessions() {
     const heading = make('button', `folder-heading${selectedFolderPath === folder.path ? ' selected' : ''}`);
     heading.dataset.treeKey = key; heading.dataset.treeKind = 'folder'; heading.dataset.folderPath = folder.path;
     heading.setAttribute('role', 'treeitem'); heading.setAttribute('aria-expanded', String(!collapsed)); heading.setAttribute('aria-level', String(level));
+    heading.setAttribute('aria-selected', String(selectedFolderPath === folder.path));
     heading.tabIndex = focusedTreeKey === key ? 0 : -1;
     heading.append(make('span', 'tree-chevron', collapsed ? '▸' : '▾'), createIcon('folder', 'folder-icon'), make('span', 'folder-name', folder.name), make('span', 'folder-count', String(folder.count)));
     heading.addEventListener('click', () => {
@@ -334,7 +353,12 @@ function treeKeydown(event) {
   const focusItem = (node) => {
     if (!node) return;
     if (node.dataset.treeKind === 'session') selectSession(state.sessions.find((entry) => entry.id === node.dataset.sessionId));
-    else { selectedFolderPath = node.dataset.folderPath; selectedSessionId = null; selectedSessionIds.clear(); updateToolbar(); }
+    else {
+      selectedFolderPath = node.dataset.folderPath; selectedSessionId = null; selectedSessionIds.clear();
+      focusedTreeKey = node.dataset.treeKey; syncTreeSelection();
+      $('session-selection').textContent = 'Connect to open the sessions in this folder.';
+      updateToolbar();
+    }
     focusTreeItem(node.dataset.treeKey);
   };
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
@@ -355,7 +379,7 @@ function treeKeydown(event) {
     }
   } else if (event.key === 'F2' && profile) { event.preventDefault(); openProfileDialog(profile); }
   else if (event.key === 'Delete' && profile) { event.preventDefault(); deleteSession(profile); }
-  else if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') { event.preventDefault(); const rect = item.getBoundingClientRect(); showSessionContext(rect.left + 10, rect.bottom, profile || null, item.dataset.folderPath || ''); }
+  else if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') { event.preventDefault(); const rect = item.getBoundingClientRect(); showSessionContext(rect.left + 10, rect.bottom, profile || null, profile ? null : item.dataset.folderPath || ''); }
 }
 
 function renderSnippets() {
@@ -1393,6 +1417,8 @@ function fillMenu(container, entries) {
 function closeMenus() {
   $('menu-dropdown').hidden = true; $('session-context-menu').hidden = true; openMenuName = null;
   menuEditTarget = null;
+  sessionContextTrigger = null;
+  $('sidebar-more').setAttribute('aria-expanded', 'false');
   for (const button of document.querySelectorAll('[data-menu]')) button.setAttribute('aria-expanded', 'false');
 }
 
@@ -1411,8 +1437,10 @@ function showMenu(name, focus = false) {
   if (focus) $('menu-dropdown').querySelector('button:not(:disabled)')?.focus();
 }
 
-function showSessionContext(x, y, profile, folder) {
+function showSessionContext(x, y, profile, folder, trigger = null) {
   closeMenus();
+  sessionContextTrigger = trigger;
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
   const entries = [{ label: 'New Session…', action: 'new-session', enabled: true }, null, { label: selectedSessionIds.size > 1 ? `Connect ${selectedSessionIds.size} Sessions…` : folder !== null ? 'Connect Folder…' : 'Connect', action: 'connect', enabled: Boolean(profile || folder !== null) }, { label: selectedSessionIds.size > 1 ? 'Multiple Session Options…' : 'Session Options…', action: 'session-options', enabled: Boolean(profile) }];
   fillMenu($('session-context-menu'), entries);
   if (profile) {
@@ -1443,10 +1471,10 @@ function setupMenus() {
   for (const container of [$('menu-dropdown'), $('session-context-menu')]) container.addEventListener('keydown', (event) => {
     const buttons = [...container.querySelectorAll('button:not(:disabled)')]; const index = buttons.indexOf(document.activeElement);
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus(); }
-    if (event.key === 'Escape') { event.preventDefault(); const name = openMenuName; closeMenus(); if (name) document.querySelector(`[data-menu="${name}"]`)?.focus(); else focusTreeItem(focusedTreeKey); }
+    if (event.key === 'Escape') { event.preventDefault(); const name = openMenuName; const trigger = sessionContextTrigger; closeMenus(); if (name) document.querySelector(`[data-menu="${name}"]`)?.focus(); else if (trigger) trigger.focus(); else focusTreeItem(focusedTreeKey); }
     if (container.id === 'menu-dropdown' && ['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const buttons = [...document.querySelectorAll('[data-menu]')]; const index = buttons.findIndex((button) => button.dataset.menu === openMenuName); showMenu(buttons[(index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length].dataset.menu, true); }
   });
-  document.addEventListener('pointerdown', (event) => { if (!event.target.closest('.menu-dropdown,.menu-bar')) closeMenus(); });
+  document.addEventListener('pointerdown', (event) => { if (!event.target.closest('.menu-dropdown,.menu-bar,#sidebar-more')) closeMenus(); });
   window.addEventListener('blur', closeMenus);
 }
 
@@ -1478,6 +1506,11 @@ function setupHandlers() {
   const toolbarActions = { 'color-schemes-button': 'color-schemes', 'connect-session': 'connect', 'sidebar-connect': 'connect', 'disconnect-session': 'disconnect', 'reconnect-session': 'reconnect', 'session-options': 'session-options', 'sidebar-properties': 'session-options', 'copy-terminal': 'copy', 'paste-terminal': 'paste', 'find-terminal': 'find', 'sftp-session': 'sftp', 'session-log': 'log' };
   for (const [id, action] of Object.entries(toolbarActions)) bind(id, 'click', () => runAction(action));
   bind('close-session-manager', 'click', () => setPane('sessionManager', false));
+  bind('sidebar-more', 'click', () => {
+    if ($('sidebar-more').getAttribute('aria-expanded') === 'true') { closeMenus(); return; }
+    const rect = $('sidebar-more').getBoundingClientRect();
+    showSessionContext(rect.left, rect.bottom, selectedProfile(), selectedFolderPath, $('sidebar-more'));
+  });
   bind('close-command-window', 'click', () => setPane('commandWindow', false));
   bind('session-list', 'keydown', treeKeydown);
   for (const id of ['add-session-sidebar', 'new-session', 'welcome-new']) bind(id, 'click', () => runAction('new-session'));

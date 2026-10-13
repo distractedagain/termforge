@@ -128,6 +128,194 @@ async function expectVisibleBounds(page, selectors) {
   return result;
 }
 
+async function sidebarPreview(page, name) {
+  await screenshot(page, `sidebar-${name}-workspace`);
+  await page.locator('#session-manager').screenshot({ path: path.join(output, `sidebar-${name}.png`), animations: 'disabled' });
+}
+
+async function runSidebarChecks() {
+  const rail = ['#dock-sessions', '#dock-commands', '#dock-active'];
+  const collapsed = async page => {
+    await page.locator('.sidebar-content').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('#sidebar-resizer').isVisible(), false, 'A collapsed manager must not expose a resize handle.');
+    const bounds = await expectVisibleBounds(page, ['#session-manager', ...rail, '.workspace']);
+    const width = await page.locator('#session-manager').evaluate(element => element.getBoundingClientRect().width);
+    assert.ok(width > 0 && width < 80, 'Closing a manager must leave a narrow, usable rail.');
+    return { width, bounds };
+  };
+  const readyAfterReload = async page => {
+    await page.reload(); await page.locator('#dock-sessions').waitFor({ state: 'visible' });
+    await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+  };
+  const noTerminalEffects = async (page, before) => {
+    const after = await calls(page);
+    assert.deepEqual(after.opens, before.opens, 'Switching managers must not open a terminal.');
+    assert.deepEqual(after.writes, before.writes, 'Switching managers must not send terminal input.');
+    assert.deepEqual(after.closes, before.closes, 'Closing a manager must not close a terminal.');
+  };
+  const managers = [['sessions', 'Session Manager', '#session-search'], ['commands', 'Command Manager', '#command-filter'], ['active', 'Active Sessions', '#active-filter']];
+  const page = await pageFor('darwin', { theme: 'light' });
+  await check('Closing any manager preserves the rail and terminal; every rail tab reopens its panel', page, async () => {
+    const router = await openProfile(page);
+    await writeScreenFixture(page, router.id, '\x1b[2J\x1b[HSYNTHETIC SIDEBAR PREVIEW\r\nNo device connected.\r\n\r\nrouter-01# ', 'sidebar-preview-ready');
+    const before = await calls(page); const tabs = await page.locator('.terminal-tab').count(); const evidence = [];
+    for (const [key, title, filter] of managers) {
+      const selectedRail = await page.locator('.dock-tab[aria-pressed="true"]').getAttribute('id');
+      await page.locator('#close-session-manager').click(); evidence.push(await collapsed(page));
+      assert.equal(await page.evaluate(() => document.activeElement?.id), selectedRail, 'Closing the focused panel must return keyboard focus to its rail tab.');
+      await page.locator(`#dock-${key}`).click(); await page.locator(filter).waitFor({ state: 'visible' });
+      assert.equal(await page.locator('#manager-title').innerText(), title);
+      assert.equal(await page.locator(`#dock-${key}`).getAttribute('aria-pressed'), 'true');
+      assert.equal(await page.locator('#sidebar-resizer').isVisible(), true);
+      assert.equal(await page.locator('.manager-content:visible').count(), 1);
+      assert.equal(await page.locator('.terminal-tab').count(), tabs);
+    }
+    await noTerminalEffects(page, before);
+    await page.locator('#dock-sessions').click(); await page.locator('.session-main').filter({ hasText: 'router-01' }).click();
+    await sidebarPreview(page, 'light-populated');
+    await page.locator('#dock-commands').click(); await sidebarPreview(page, 'light-commands');
+    await page.locator('#dock-active').click(); await sidebarPreview(page, 'light-active');
+    await page.locator('#close-session-manager').click(); await sidebarPreview(page, 'light-collapsed');
+    return evidence;
+  });
+  const layout = await pageFor('darwin', { theme: 'light' });
+  await check('Collapsed manager reload remembers its expanded width and reopens at the saved size', layout, async () => {
+    const width = () => layout.locator('#session-manager').evaluate(element => element.getBoundingClientRect().width);
+    const original = await width();
+    for (let index = 0; index < 6; index += 1) await layout.locator('#sidebar-resizer').press('ArrowRight');
+    const resized = await width(); assert.ok(resized > original, 'The splitter must resize the expanded manager.');
+    const preference = await layout.evaluate(() => JSON.parse(localStorage.getItem('termforge-classic-layout')));
+    assert.equal(preference.sidebarWidth, resized);
+    await layout.locator('#close-session-manager').click(); await collapsed(layout);
+    const saved = await layout.evaluate(() => JSON.parse(localStorage.getItem('termforge-classic-layout')));
+    assert.equal(saved.sidebarWidth, resized, 'Collapsing must not overwrite the expanded width with the rail width.');
+    assert.equal(saved.panes.sessionManager, false);
+    await readyAfterReload(layout); await collapsed(layout);
+    await layout.locator('#dock-commands').click(); await layout.locator('#command-filter').waitFor({ state: 'visible' });
+    assert.equal(await width(), resized, 'Reopening after reload must restore the saved width.');
+    await readyAfterReload(layout); await layout.locator('#session-search').waitFor({ state: 'visible' });
+    assert.equal(await width(), resized);
+    const after = await calls(layout); assert.equal(after.opens.length, 0); assert.equal(after.writes.length, 0); assert.equal(after.closes.length, 0);
+    return { original, resized, saved };
+  });
+  const keyboard = await pageFor('darwin', { theme: 'light' });
+  await check('Vertical manager rail supports arrow, Home, End, Enter and Space without terminal actions', keyboard, async () => {
+    const before = await calls(keyboard);
+    await keyboard.locator('#close-session-manager').click(); await collapsed(keyboard);
+    await keyboard.locator('#dock-sessions').focus();
+    const navigation = [['ArrowDown', 'dock-commands'], ['ArrowDown', 'dock-active'], ['Home', 'dock-sessions'], ['End', 'dock-active'], ['ArrowUp', 'dock-commands']];
+    for (const [key, expected] of navigation) {
+      await keyboard.keyboard.press(key);
+      assert.equal(await keyboard.evaluate(() => document.activeElement?.id), expected, `${key} must move focus to ${expected}.`);
+      assert.equal(await keyboard.locator('.sidebar-content').isVisible(), false, 'Navigation alone must not activate a collapsed manager.');
+    }
+    await keyboard.keyboard.press('Enter'); await keyboard.locator('#command-filter').waitFor({ state: 'visible' });
+    assert.equal(await keyboard.locator('#dock-commands').getAttribute('aria-pressed'), 'true');
+    await keyboard.locator('#close-session-manager').click(); await collapsed(keyboard);
+    await keyboard.locator('#dock-active').press('Space'); await keyboard.locator('#active-filter').waitFor({ state: 'visible' });
+    assert.equal(await keyboard.locator('#dock-active').getAttribute('aria-pressed'), 'true');
+    await noTerminalEffects(keyboard, before);
+  });
+  const tree = await pageFor('darwin', { theme: 'light' });
+  await check('Folder keyboard selection clears old session selection and Connect reviews the chosen folder', tree, async () => {
+    const before = await calls(tree);
+    const router = tree.locator('.session-main').filter({ hasText: 'router-01' });
+    await router.click(); assert.equal(await router.getAttribute('aria-selected'), 'true');
+    await router.press('ArrowUp');
+    const core = tree.locator('#session-list [data-folder-path="Network/Core"]');
+    assert.equal(await core.evaluate(element => document.activeElement === element), true);
+    assert.equal(await core.getAttribute('aria-selected'), 'true');
+    assert.equal(await tree.locator('.session-row.selected').count(), 0);
+    assert.equal(await tree.locator('.session-main[aria-selected="true"]').count(), 0);
+    assert.equal(await tree.locator('#session-list [data-tree-key][tabindex="0"]').count(), 1);
+    await tree.locator('#sidebar-connect').click(); await tree.locator('#confirm-dialog').waitFor({ state: 'visible' });
+    const targets = await tree.locator('.confirm-target-item').allTextContents();
+    assert.equal(targets.length, 2); assert.ok(targets.some(text => text.includes('router-01'))); assert.ok(targets.some(text => text.includes('switch-01')));
+    assert.ok(targets.every(text => !text.includes('local-shell')));
+    await tree.locator('#confirm-cancel').click();
+    await noTerminalEffects(tree, before);
+    return { targets };
+  });
+  const more = await pageFor('darwin', { theme: 'light' });
+  await check('Session Manager More menu toggles, dismisses outside and returns keyboard focus on Escape', more, async () => {
+    const before = await calls(more);
+    const button = more.locator('#sidebar-more'); const menu = more.locator('#session-context-menu');
+    await button.click(); await menu.waitFor({ state: 'visible' }); assert.equal(await button.getAttribute('aria-expanded'), 'true');
+    await button.click(); await menu.waitFor({ state: 'hidden' }); assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    await button.press('Enter'); await menu.waitFor({ state: 'visible' });
+    await more.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+    assert.equal(await button.evaluate(element => document.activeElement === element), true);
+    assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    await button.click(); await menu.waitFor({ state: 'visible' });
+    await more.locator('#manager-title').click(); await menu.waitFor({ state: 'hidden' });
+    assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    await noTerminalEffects(more, before);
+  });
+  const compact = await pageFor('darwin', { theme: 'light' });
+  await check('All manager panels and collapsed rail remain usable at the minimum width and 800 by 600', compact, async () => {
+    await compact.setViewportSize({ width: 800, height: 600 });
+    for (let index = 0; index < 50; index += 1) await compact.locator('#sidebar-resizer').press('ArrowLeft');
+    const evidence = [];
+    for (const [key, , filter] of managers) {
+      await compact.locator(`#dock-${key}`).click();
+      evidence.push(await expectVisibleBounds(compact, ['#session-manager', ...rail, '#close-session-manager', filter, '.workspace', '.workspace-footer']));
+      const controls = compact.locator(`#${key}-manager-content .session-tools button, #${key}-manager-content input`);
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const control = controls.nth(index);
+        await control.scrollIntoViewIfNeeded();
+        const bounds = await control.evaluate(element => ({ id: element.id, box: element.getBoundingClientRect().toJSON(), sidebar: document.getElementById('session-manager').getBoundingClientRect().toJSON() }));
+        assert.ok(bounds.box.x >= bounds.sidebar.x && bounds.box.right <= bounds.sidebar.right + 1, `${bounds.id} must be reachable inside the narrow manager's scrollable toolbar.`);
+      }
+      await compact.locator('#close-session-manager').click(); await collapsed(compact);
+    }
+    await compact.locator('#dock-sessions').click(); await sidebarPreview(compact, 'light-compact-minimum');
+    const after = await calls(compact); assert.equal(after.opens.length, 0); assert.equal(after.writes.length, 0); assert.equal(after.closes.length, 0);
+    return evidence;
+  });
+  const selected = await pageFor('darwin', { theme: 'light' });
+  await check('Selected folder, command and active-session rows retain readable selection colors on hover', selected, async () => {
+    await openProfile(selected); const before = await calls(selected); const evidence = [];
+    const rows = [['sessions', '#session-list [data-folder-path="Network/Core"]'], ['commands', '.command-manager-row[data-command-id="fixture-version"]'], ['active', '.active-session-row.selected']];
+    for (const [manager, selector] of rows) {
+      await selected.locator(`#dock-${manager}`).click();
+      const row = selected.locator(selector); await row.click();
+      await selected.locator('#manager-title').hover();
+      const colors = await row.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {}))); const style = getComputedStyle(element); return { background: style.backgroundColor, foreground: style.color }; });
+      await row.hover();
+      const hovered = await row.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {}))); const style = getComputedStyle(element); return { background: style.backgroundColor, foreground: style.color }; });
+      assert.deepEqual(hovered, colors, 'Hover must preserve the selected row background and foreground as a pair.');
+      assert.notEqual(colors.background, colors.foreground, 'Selected text must remain distinct from its background.');
+      evidence.push({ manager, colors });
+    }
+    await noTerminalEffects(selected, before); return evidence;
+  });
+  const empty = await pageFor('darwin', { theme: 'light' }, []);
+  await check('Empty Session Manager retains a selectable Sessions root and usable new-session action', empty, async () => {
+    const root = empty.locator('#session-list [data-tree-kind="folder"]').first();
+    await root.click(); assert.equal(await root.locator('.folder-name').innerText(), 'Sessions');
+    assert.equal(await root.getAttribute('aria-selected'), 'true');
+    await sidebarPreview(empty, 'light-empty-root');
+    await empty.locator('#add-session-sidebar').click(); await empty.locator('#profile-dialog').waitFor({ state: 'visible' });
+    await closeDialog(empty, 'profile-dialog');
+    const after = await calls(empty); assert.equal(after.opens.length, 0); assert.equal(after.writes.length, 0); assert.equal(after.closes.length, 0); assert.equal(after.saves.length, 0);
+  });
+  for (const variant of ['dark', 'solarized-dark', 'solarized-light']) {
+    const themed = await pageFor('darwin', { theme: variant === 'solarized-light' ? 'light' : 'dark' });
+    await check(`${variant} sidebar keeps all three full manager labels and filters reachable`, themed, async () => {
+      if (variant.startsWith('solarized')) await applyPalette(themed, variant, true);
+      await expectVisibleBounds(themed, ['#session-manager', ...rail, '#session-search']);
+      for (const [key, title, filter] of managers) {
+        const button = themed.getByRole('button', { name: title, exact: true });
+        await button.click(); await themed.locator(filter).waitFor({ state: 'visible' });
+        assert.equal(await button.innerText(), title, 'The vertical rail must retain the full readable manager name.');
+      }
+      await themed.locator('#dock-sessions').click(); await themed.locator('.session-main').filter({ hasText: 'router-01' }).click();
+      await sidebarPreview(themed, variant);
+      const after = await calls(themed); assert.equal(after.opens.length, 0); assert.equal(after.writes.length, 0); assert.equal(after.closes.length, 0);
+    });
+  }
+}
+
 async function runModernChecks() {
   const sizes = [{ width: 1280, height: 800 }, { width: 850, height: 600 }];
   const shellControls = ['#main-toolbar', '#session-manager', '#dock-sessions', '#dock-commands', '#dock-active', '#session-search', '#local-ai-toggle', '#settings-button', '.workspace-footer'];
@@ -1165,6 +1353,7 @@ async function run() {
   await runWorkspaceChecks();
   await runLocalAiChecks();
   await runModernChecks();
+  await runSidebarChecks();
   // Separate, clearly labelled synthetic previews. Test notifications and
   // modified profiles from the preceding checks never appear in these images.
   const preview = await pageFor('darwin', { theme: 'dark', fontSize: 15, keywords: [{ text: 'DEMO SESSION', caseSensitive: false, foreground: '#000000', background: '#70e330' }] });

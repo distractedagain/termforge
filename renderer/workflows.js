@@ -23,6 +23,7 @@ export function createWorkflows(context) {
       $(`${key}-manager-content`).hidden = key !== name;
       $(`dock-${key}`).classList.toggle('selected', key === name);
       $(`dock-${key}`).setAttribute('aria-pressed', String(key === name));
+      $(`dock-${key}`).setAttribute('aria-expanded', String(key === name));
     }
     if (name === 'commands') renderCommands();
     if (name === 'active') renderActive();
@@ -245,7 +246,15 @@ export function createWorkflows(context) {
     }
   }
   function install() {
-    for (const name of ['sessions', 'commands', 'active']) $(`dock-${name}`).addEventListener('click', () => showManager(name));
+    const tabs = ['sessions', 'commands', 'active'].map(name => $(`dock-${name}`));
+    for (const [index, tab] of tabs.entries()) {
+      tab.addEventListener('click', () => showManager(['sessions', 'commands', 'active'][index]));
+      tab.addEventListener('keydown', event => {
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : event.key === 'ArrowDown' ? (index + 1) % tabs.length : event.key === 'ArrowUp' ? (index + tabs.length - 1) % tabs.length : null;
+        if (next === null) return;
+        event.preventDefault(); tabs[next].focus();
+      });
+    }
     $('command-filter').addEventListener('input', renderCommands); $('active-filter').addEventListener('input', renderActive);
     $('command-edit').addEventListener('click', showSnippets); $('command-new').addEventListener('click', showSnippets);
     $('command-run').addEventListener('click', () => { const command = state().snippets.find((entry) => entry.id === selectedCommandId); if (command) attempt(() => launchCommand(command)); });

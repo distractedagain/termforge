@@ -1,0 +1,389 @@
+/* Docked desktop managers. Kept local so terminals and the rest of the
+   workspace retain their own appearance and optional color schemes. */
+#session-manager {
+  --manager-rail-width: 34px;
+  --manager-chrome: #eeeeee;
+  --manager-caption: #f5f5f5;
+  --manager-field: #ffffff;
+  --manager-border: #bfbfbf;
+  --manager-text: #252525;
+  --manager-muted: #727272;
+  --manager-hover: #e1e1e1;
+  --manager-selection: #0956df;
+  --manager-selection-text: #ffffff;
+  --manager-folder: #62c9ef;
+  --manager-folder-edge: #2c9ed2;
+  display: flex;
+  flex-direction: row;
+  background: var(--manager-chrome);
+  color: var(--manager-text);
+  border-right: 0;
+}
+
+:root[data-theme="dark"] #session-manager,
+:root[data-match-colors="true"] #session-manager {
+  --manager-chrome: var(--chrome);
+  --manager-caption: var(--panel);
+  --manager-field: var(--field);
+  --manager-border: var(--border);
+  --manager-text: var(--text);
+  --manager-muted: var(--muted);
+  --manager-hover: var(--hover);
+  --manager-selection: var(--select);
+  --manager-selection-text: var(--text);
+  --manager-folder: color-mix(in srgb, var(--accent) 62%, var(--field));
+  --manager-folder-edge: var(--accent);
+}
+
+#session-manager.manager-collapsed {
+  width: var(--manager-rail-width);
+  min-width: var(--manager-rail-width);
+  max-width: var(--manager-rail-width);
+}
+
+#session-manager .dock-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: var(--manager-rail-width);
+  min-height: 0;
+  gap: 8px;
+  padding: 4px 2px 4px 1px;
+  background: var(--manager-chrome);
+  border-right: 1px solid var(--manager-border);
+  border-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+#session-manager .dock-tab {
+  display: block;
+  flex: 0 0 auto;
+  writing-mode: vertical-rl;
+  width: 29px;
+  min-width: 29px;
+  min-height: 0;
+  height: auto;
+  padding: 10px 5px;
+  border: 1px solid var(--manager-border);
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--manager-chrome), var(--manager-caption));
+  color: var(--manager-text);
+  box-shadow: inset 1px 0 1px #ffffff24;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 17px;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#session-manager .dock-tab.selected {
+  border-color: var(--manager-border);
+  background: var(--manager-caption);
+  color: var(--manager-text);
+  box-shadow: inset -2px 0 var(--manager-selection);
+}
+
+#session-manager .dock-tab:hover:enabled {
+  background: var(--manager-hover);
+}
+
+#session-manager .dock-tab:focus-visible {
+  outline: 2px solid var(--manager-selection);
+  outline-offset: -3px;
+}
+
+#session-manager .sidebar-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 4px 0 2px;
+}
+
+#session-manager .pane-caption {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  min-height: 28px;
+  padding: 3px 2px;
+  border-bottom: 1px solid var(--manager-border);
+  background: var(--manager-caption);
+  color: var(--manager-text);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+#session-manager #manager-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#session-manager #close-session-manager {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--manager-muted);
+  color: var(--manager-caption);
+  font: 600 17px/14px Arial, sans-serif;
+}
+
+#session-manager #close-session-manager:hover {
+  background: var(--manager-text);
+}
+
+#session-manager #close-session-manager:focus-visible {
+  outline: 2px solid var(--manager-selection);
+  outline-offset: 2px;
+}
+
+#session-manager .session-tools {
+  display: flex;
+  align-items: center;
+  height: 33px;
+  min-height: 33px;
+  padding: 2px 3px;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--manager-border);
+  background: var(--manager-chrome);
+  scrollbar-width: thin;
+}
+
+#session-manager .session-tools .small-tool {
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--manager-muted);
+}
+
+#session-manager .session-tools .small-tool:hover:enabled,
+#session-manager .session-tools .small-tool[aria-expanded="true"] {
+  background: var(--manager-hover);
+  border-color: var(--manager-border);
+}
+
+#session-manager .session-tools .small-tool:focus-visible {
+  outline: 1px solid var(--manager-selection);
+}
+
+#session-manager .session-tools .tool-icon {
+  width: 21px;
+  height: 21px;
+  color: currentColor;
+  stroke-width: 2;
+}
+
+#session-manager .manager-tool-separator {
+  width: 1px;
+  height: 23px;
+  flex: 0 0 auto;
+  margin: 0 2px;
+  border-left: 1px dotted var(--manager-muted);
+}
+
+#session-manager #sidebar-more {
+  margin-left: auto;
+}
+
+#session-manager .session-search {
+  margin: 4px 0;
+}
+
+#session-manager .session-search input {
+  width: 100%;
+  height: 25px;
+  border: 1px solid var(--manager-border);
+  border-radius: 0;
+  background: var(--manager-field);
+  color: var(--manager-text);
+  padding: 3px 5px;
+  font-size: 12px;
+  box-shadow: inset 0 1px 1px #00000005;
+}
+
+#session-manager .session-search input::placeholder {
+  color: var(--manager-muted);
+  opacity: .8;
+}
+
+#session-manager .session-search input:focus-visible {
+  outline: 2px solid var(--manager-selection);
+  outline-offset: -1px;
+}
+
+#session-manager .session-list,
+#session-manager .manager-list {
+  min-height: 0;
+  margin: 0 0 3px;
+  padding: 2px 1px 5px;
+  background: var(--manager-field);
+  border: 1px solid var(--manager-border);
+  border-radius: 0;
+  color: var(--manager-text);
+}
+
+#session-manager .tree-children {
+  padding-left: 14px;
+}
+
+#session-manager .folder-heading {
+  height: 24px;
+  min-height: 24px;
+  gap: 4px;
+  padding: 2px 3px;
+  border-radius: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--manager-text);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#session-manager .tree-chevron {
+  color: inherit;
+  width: 9px;
+  font-size: 10px;
+  opacity: .75;
+}
+
+#session-manager .folder-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  fill: var(--manager-folder);
+  stroke: var(--manager-folder-edge);
+  stroke-width: 1.2;
+  color: var(--manager-folder-edge);
+}
+
+#session-manager .folder-count {
+  margin-left: auto;
+  padding: 0 3px;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  opacity: .7;
+}
+
+#session-manager .session-row {
+  min-height: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 1px 3px 1px 13px;
+  gap: 5px;
+  border-radius: 0;
+  color: var(--manager-text);
+}
+
+#session-manager .session-main {
+  min-width: 0;
+  height: 21px;
+  padding: 2px 0;
+  color: inherit;
+  font-size: 12px;
+}
+
+#session-manager .session-main strong {
+  font-weight: 400;
+}
+
+#session-manager .session-icon {
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  color: var(--manager-muted);
+}
+
+#session-manager .command-manager-row,
+#session-manager .active-session-row {
+  min-height: 24px;
+  height: 24px;
+  padding: 2px 5px;
+  border-radius: 0;
+  color: var(--manager-text);
+  font-size: 12px;
+}
+
+#session-manager .command-manager-row > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#session-manager .active-session-row {
+  padding-left: 17px;
+}
+
+#session-manager .folder-heading:not(.selected):hover:enabled,
+#session-manager .session-row:not(.selected):hover,
+#session-manager .command-manager-row:not(.selected):hover:enabled,
+#session-manager .active-session-row:not(.selected):hover:enabled {
+  background: var(--manager-hover);
+}
+
+#session-manager .folder-heading.selected,
+#session-manager .session-row.selected,
+#session-manager .command-manager-row.selected,
+#session-manager .active-session-row.selected {
+  background: var(--manager-selection);
+  color: var(--manager-selection-text);
+  border-color: transparent;
+}
+
+#session-manager .session-row.selected .session-icon {
+  color: var(--manager-selection-text);
+}
+
+#session-manager .session-row.connected::after {
+  width: 5px;
+  height: 5px;
+  background: #349f50;
+  box-shadow: 0 0 0 1px var(--manager-field);
+}
+
+#session-manager .session-selection {
+  min-height: 28px;
+  max-height: 43px;
+  padding: 3px 4px;
+  border-top: 0;
+  color: var(--manager-muted);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+#session-manager .sidebar-empty {
+  padding: 8px 7px;
+  color: var(--manager-muted);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+@media (forced-colors: active) {
+  #session-manager .dock-tab.selected,
+  #session-manager .folder-heading.selected,
+  #session-manager .session-row.selected,
+  #session-manager .command-manager-row.selected,
+  #session-manager .active-session-row.selected {
+    outline: 1px solid Highlight;
+  }
+}

@@ -26,6 +26,18 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.11 — Docked desktop managers
+
+![Docked Session Manager with vertical manager tabs](docs/images/sidebar-v0.11.png)
+
+Headless preview with synthetic sessions; no remote device is connected.
+
+The sidebar follows the SecureCRT macOS reference more closely: full vertical **Session Manager**, **Command Manager** and **Active Sessions** tabs, a centered caption with a close control, a compact monochrome toolbar and inset trees. Light mode uses blue selection and cyan folders; dark mode and optional Solarized interface matching remain available.
+
+The caption's close control collapses the content while leaving the manager rail visible. Select a rail tab to reopen the panel at its previous width. Arrow keys, Home and End move focus among the rail tabs; Enter or Space opens the focused manager. The **More session actions** button exposes existing session/folder actions, and keyboard folder selection keeps the highlighted item and connection target in agreement. Project mode retains its existing separate explorer.
+
+The renderer build and 108 headless interface checks passed, including 11 new sidebar checks; cross-platform release verification is in progress. The download above remains v0.10.0 until publication. See the [0.11 release notes](docs/RELEASE-v0.11.0.md) and [verification record](docs/VERIFICATION-v0.11.0.md). Floating managers, pin/auto-hide behavior and complete SecureCRT parity are not included.
+
 ## New in 0.10 — Native Quick Connect window
 
 Quick Connect now opens in its own movable, resizable desktop window with a standard operating-system title bar. On macOS, the window uses native close, minimize and zoom controls; Windows and Linux use their own window controls. The terminal workspace stays open behind it, and opening Quick Connect again brings back the same form.

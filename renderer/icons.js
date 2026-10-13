@@ -5,6 +5,7 @@ const paths = {
   disconnect: 'M8 3v4 M16 3v4 M6 7h12v3a6 6 0 0 1-12 0V7 M12 16v5 M3 3l18 18',
   reconnect: 'M20 10a8 8 0 1 0-2 8 M20 4v6h-6',
   new: 'M12 5v14 M5 12h14',
+  more: 'M6 6l6 6-6 6 M13 6l6 6-6 6',
   terminal: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M7 9l3 3-3 3 M13 15h4',
   sessions: 'M5 3h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M5 13h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z M7 7h.01 M7 17h.01 M11 7h6 M11 17h6',
   commands: 'M5 6l6 6-6 6 M13 18h6',
