@@ -1,6 +1,6 @@
 # TermForge 0.13.0 verification
 
-Status: all four platform CI jobs and all four package builds passed at source `fe4b4359d418db7dab09fd9a1e49c62f0717272d`. Publication and public-asset checks are pending; the verified public download remains v0.12.0 until those checks finish.
+Status: all four platform CI jobs and all four package builds passed at source `fe4b4359d418db7dab09fd9a1e49c62f0717272d`. [Version 0.13.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.13.0), and its public assets passed anonymous verification.
 
 ## Scope
 
@@ -18,7 +18,7 @@ Reviewed CSV/TSV session import, atomic saved-session updates and SFTP mkdir/ren
 | Remote file actions | 17 passed, including narrow light/dark review screens |
 | Renderer build | Passed |
 | Four-platform source CI, packaging and native Linux IPC | Passed at the source above |
-| Source tag, publisher and public-asset verification | Pending |
+| Source tag, publisher and public-asset verification | Passed; thirteen public assets and twelve checksum entries |
 
 The store checks preserve snapshot identifiers and unrelated settings and reject stale or invalid plans without writing. Import checks cover quoted rows, field validation, secret-field filtering, collision policies, explicit exclusions, file/row limits, expired/single-use plans, shutdown and async races. Remote-operation checks exercise all four operations, symlink/root rejection, target and parent metadata changes, active-transfer exclusion, cancellation, special permission bits and unknown outcomes after lost acknowledgements. They include actual SSH/SFTP wire fixtures alongside injected failure cases.
 
@@ -37,6 +37,12 @@ All jobs in [source CI](https://github.com/distractedagain/termforge/actions/run
 - The real Linux Electron smoke passed its existing SSH/PTY, menu, clipboard, editor-worker and Quick Connect checks, plus the new import and remote file operations.
 
 Headless Chromium uses synthetic application bridges and temporary import files. It checks renderer interactions and geometry, not installed applications. The Linux Electron smoke exercised import through the actual preload, native menu and atomic store, confirming one-use review tokens, source preservation and no automatic connection. Actual loopback SSH/SFTP operations created a directory, renamed a file, changed permissions, deleted the empty directory and restored the filename; contents and mode were checked independently on disk. Picker and approval responses were fixtures. Its OS credential provider was insecure `basic_text`, so it verified refusal to save credentials rather than successful secure-vault storage.
+
+## Publication evidence
+
+The [publisher](https://github.com/distractedagain/termforge/actions/runs/38441931537) validated all four build artifacts, original package hashes and build records, then published eight installer/archive files, four build records and `SHA256SUMS.txt`. Tag `v0.13.0` points to the tested source above; later documentation commits do not change that tag.
+
+Anonymous verification on October 13, 2026 at 17:52 UTC confirmed public release ID `411954647`, the exact source tag, all thirteen expected assets and all twelve checksum-manifest entries. The manifest and four build records were downloaded without authentication and independently hashed. The eight installer hashes were compared against GitHub's recorded SHA-256 asset digests; installer bytes were not downloaded or independently rehashed in this public check.
 
 ## Verification limits
 
