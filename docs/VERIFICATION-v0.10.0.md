@@ -1,6 +1,6 @@
 # TermForge 0.10.0 verification
 
-Status: local checks, all four platform CI jobs, native Linux execution and all four installer builds passed at source `145b99187dab3d771217af3109372d2b0aa6ca0d`. Publication, tag and public asset verification remain pending. Earlier release evidence is preserved in [interface verification history](UI-VERIFICATION.md).
+Status: local checks, all four platform CI jobs, native Linux execution and all four installer builds passed at source `145b99187dab3d771217af3109372d2b0aa6ca0d`. The release is published, and the source tag and public assets passed independent anonymous verification on October 13, 2026. Earlier release evidence is preserved in [interface verification history](UI-VERIFICATION.md).
 
 ## Local evidence available during preparation
 
@@ -34,25 +34,31 @@ The identity picker response was stubbed to a temporary fixture file. Successful
 
 The same native run passed existing real PTY/OpenSSH, managed SSH/SFTP, masked authentication/cancellation, host-key verification/refusal and insecure Linux `basic_text` storage-refusal checks. Native clipboard completion, YAML/JSON saves and no editor-to-terminal writes passed. The JSON worker returned ten messages with no errors, no CSP violations were recorded, and both desktop/editor PNG captures succeeded. `result.json` records `behavioralChecksPassed: true`. Host-approval and folder-picker responses were stubbed for the isolated fixtures. No Electron window was launched on the development laptop.
 
-## CI and packaging — passed; publication pending
+## CI, packaging and publication — passed
 
 All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38412494525) and all four [installer builds](https://github.com/distractedagain/termforge/actions/runs/38412503136) completed successfully at the same source revision. The platform counts below were read from each completed job's log.
 
 | Stage | 0.10.0 status |
 | --- | --- |
 | Tested source SHA | `145b99187dab3d771217af3109372d2b0aa6ca0d` |
-| Release tag verification | Pending |
+| Release tag verification | Passed; `v0.10.0` resolves to the tested source SHA above |
 | macOS ARM64 CI and installer build | Passed; 273 backend tests, no skips; seven real localhost Ansible checks |
 | macOS Intel CI and installer build | Passed; 273 backend tests, no skips; seven real localhost Ansible checks |
 | Windows x64 CI and installer build | Passed; 266 backend tests, seven expected POSIX/symlink skips, no failures |
 | Linux x64 CI, native smoke and installer build | Passed; 273 backend tests, no skips; seven real localhost Ansible checks; 154 interface checks and native smoke |
 | macOS ad-hoc signature integrity checks | Passed for both architectures; no Apple notarization |
-| Publisher package/build-record/checksum verification | Pending |
-| Anonymous public release/asset verification | Pending |
+| Publisher package/build-record/checksum verification | Passed; [publisher run](https://github.com/distractedagain/termforge/actions/runs/38413778860) |
+| Anonymous public release/asset verification | Passed; thirteen assets, twelve checksum entries and four matching build records |
 
 The 154 Linux interface checks comprise 97 main-workspace, 13 project-editor, 21 secure-connection and 23 standalone Quick Connect checks. Production dependency audits reported zero vulnerabilities on all four platforms. Both Macs used Python 3.13.15 and Linux used Python 3.13.16 for Ansible Core 2.21.5 and Runner 2.4.3. Those localhost checks do not contact network devices or establish real WSL support.
 
-The macOS packages use ad-hoc signing without Developer ID or Apple notarization; Windows packages are unsigned. The successful builds and signature checks establish package construction, not installed-package interaction. The published download remains [v0.9.0](https://github.com/distractedagain/termforge/releases/tag/v0.9.0) until publication and public verification complete.
+The macOS packages use ad-hoc signing without Developer ID or Apple notarization; Windows packages are unsigned. The successful builds and signature checks establish package construction, not installed-package interaction. The public download is [v0.10.0](https://github.com/distractedagain/termforge/releases/tag/v0.10.0).
+
+## Public asset verification
+
+The publisher rehashed the four build artifacts and checked their provenance before publishing eight installers/archives, four build records and one checksum manifest. A separate anonymous check confirmed release `411770891` is a public preview, its tag resolves to the tested source, all thirteen expected assets are uploaded, and all twelve manifest entries match GitHub's SHA-256 asset digests.
+
+The checksum manifest and four small build records were anonymously downloaded and independently hashed. Each record identifies version 0.10.0, the tested commit, the correct platform/architecture and expected signing status. The public check did not download or independently rehash installer bytes; installer checks compare manifest hashes with GitHub's recorded digests. Publication and integrity checks do not establish installation or packaged runtime behavior.
 
 ## Remaining verification limits
 
