@@ -26,6 +26,16 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in the 0.9 source — Credentials and file transfer
+
+![Quick Connect with named credentials and ordered authentication](docs/images/quick-connect-v0.9.png)
+
+Headless preview with synthetic connection data; native OS security prompts are not shown.
+
+Quick Connect now supports named credentials, ordered authentication methods, a graphical SFTP workspace and an optional startup form. Save encrypted usernames/passwords in **Transfer → Credentials** and select them from Quick Connect or Session Options. Managed SSH verifies and pins the server key before accessing credentials; first use of a credential with a host/key requires separate approval. Insecure or unavailable OS storage cannot save passwords.
+
+**Transfer → File Transfer** opens a local/remote browser with SFTP or SCP copies, queued progress, cancellation and explicit overwrite review. Both modes currently handle regular files; SCP also requires SFTP for browsing and staging. Existing OpenSSH terminal connections retain advanced SSH options. See the [credential and transfer guide](docs/SECURE-CONNECTIONS.md) for platform guarantees, usage and remaining limits. The download link above remains the last published release until 0.9 verification and publication finish.
+
 ## New in 0.8 — Project workspace
 
 Edit automation files alongside your terminal sessions with the locally bundled Monaco editor. File tabs, YAML diagnostics and Ansible snippets, JSON language services, and Python/Jinja editing support a complete edit/review/save workflow. Git status and diffs are read-only. Saves detect external changes and retain up to twenty private backup versions per file outside the project.
@@ -96,7 +106,7 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 - Explicitly trusted Ansible syntax, check/diff and run workflows with target review, task/host results and cancellation; external Ansible Core/Runner required.
 - AI whole-file proposals with a diff review and separate apply/save steps.
 - Optional AI Assistant with local Ollama or the OpenRouter free router, explicit context sharing, streaming/cancellation and reviewed commands pinned to their original terminal.
-- SSH, interactive SFTP, and local shells through installed system tools; native Telnet and Raw TCP connections; serial device selection and connection settings.
+- Managed SSH with saved credentials, graphical SFTP/SCP file transfers, existing system OpenSSH/interactive SFTP, and local shells; native Telnet and Raw TCP connections; serial device selection and connection settings.
 - Saved session folders, filtering, Quick Connect, Connect Bar, multi-selection and selected-field bulk editing.
 - Reorderable/cloned tabs, independent resizable tab groups, horizontal/vertical/grid tiling, an Active Sessions list, and snapshots retaining repeated saved-session connections and group layouts.
 - Categorized Session/Global Options, per-session font/color/cursor/scrollback, mapped text/menu keys, and literal keyword highlighting.
@@ -154,7 +164,7 @@ For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/
 
 Historically, v0.3 [native CI](https://github.com/distractedagain/termforge/actions/runs/38320236458) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38320240854) passed for all four targets at released source commit `09abaaefbb440d0600647ac389e32f72dca98700`. Both Mac architectures and Linux passed 84 backend tests each; Windows passed 81 with three POSIX-specific tests skipped. Linux also passed 46 headless interface checks. Both Mac packages passed strict recursive ad-hoc signature verification. The [v0.3 publisher](https://github.com/distractedagain/termforge/actions/runs/38320923229) verified all packages, source records and checksums before making that preview public.
 
-A user reported that the installed v0.3 macOS app opened successfully and that its local shell and an SSH connection worked. This is limited manual feedback, not a complete packaged-app runtime test matrix. Real SFTP, key/agent/jump/forwarding, physical serial and LAN-device interoperability need further integration tests. Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic interface checks and native source/build/package CI. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). Those historical results do not certify the current packaged native runtime.
+A user reported that the installed v0.3 macOS app opened successfully and that its local shell and an SSH connection worked. This is limited manual feedback, not a complete packaged-app runtime test matrix. External SSH/SFTP servers, key/agent/jump/forwarding combinations, physical serial and LAN-device interoperability need further integration tests. Historical Harbor 0.1 macOS Intel testing established real local PTYs and isolated SSH new-host/password/changed-key behavior. Harbor 0.2 passed 20 synthetic interface checks and native source/build/package CI. See [the historical v0.2 interface report](docs/UI-VERIFICATION.md). Those historical results do not certify the current packaged native runtime.
 
 Packaging runs on the current operating system and writes to `release/`. The configured targets are macOS ZIP/DMG, Windows NSIS/portable EXE, and Linux AppImage/DEB. Build each platform on a matching machine or use the provided GitHub Actions workflows. macOS packaging applies an ad-hoc signature for compatibility, without a paid certificate or notarization. Trusted Apple Developer ID signing/notarization and Windows publisher signing require your own certificates and release setup.
 
@@ -162,7 +172,7 @@ The test and build workflows retain build artifacts. A separate, manually dispat
 
 ## Connections and privacy
 
-TermForge launches system OpenSSH without a shell wrapper, passing arguments separately and preserving host-key checks. Saved sessions do not store password/private-key contents; the system agent may supply keys. SSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive input. Review recordings before saving or replaying them.
+TermForge offers managed SSH with pinned host-key checks and an OS-protected named credential vault, plus system OpenSSH without a shell wrapper and with separate host checks. Saved sessions hold credential references; exports/imports clear them and exclude the vault. Private-key contents are not stored. Managed prompts bypass terminal input/history. OpenSSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive terminal input. Review recordings before saving or replaying them. See [credential/transfer limits](docs/SECURE-CONNECTIONS.md).
 
 Configuration exports/history/snippets may reveal infrastructure or commands; output logs may contain secrets. The TFTP server starts only explicitly, defaults to loopback port 6969, permits one chosen client IP and shares one selected folder; uploads create new files without replacing existing files. See [Python automation](docs/PYTHON-AUTOMATION.md), [TFTP limits](docs/TFTP.md), and [SECURITY.md](SECURITY.md).
 

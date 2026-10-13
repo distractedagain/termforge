@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu, safeStorage } = require('electron');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { createStore, validateSession, parseSecureCRTIni } = require('./core.cjs');
@@ -13,6 +13,10 @@ const { writePrivateFile, resolveDataDirectory } = require('./files.cjs');
 const { createAiAssistant } = require('./ai-assistant.cjs');
 const { createProjectManager } = require('./projects.cjs');
 const { createAnsibleManager } = require('./ansible.cjs');
+const { createCredentialVault } = require('./credentials.cjs');
+const { createAuthPrompts } = require('./auth-prompts.cjs');
+const { createSecureSsh } = require('./secure-ssh.cjs');
+const { createSecureTransfers } = require('./secure-transfers.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -23,6 +27,10 @@ let automation;
 let localAi;
 let projects;
 let ansible;
+let credentials;
+let authPrompts;
+let secureSsh;
+let secureTransfers;
 const dirtyProjects = new Set();
 const savingProjects = new Map();
 let activeTerminalId = null;
@@ -41,10 +49,11 @@ function send(channel, value) {
 }
 async function cleanupTerminals() {
   localAi?.close();
+  authPrompts?.closeAll();
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
   screenRequests.clear();
   const server = tftp;
-  await stopOwnedResources({ ansible: () => ansible?.closeAll(), scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
+  await stopOwnedResources({ ansible: () => ansible?.closeAll(), scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), secureConnections: async () => { try { await secureTransfers?.closeAll(); } finally { await secureSsh?.closeAll(); } }, tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
 }
 function readScreen(request) {
   if (!request || !terminals.has(requiredId(request.id))) return Promise.reject(new Error('The script terminal is no longer open.'));
@@ -60,7 +69,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'credentialSave'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -70,6 +79,17 @@ function getState() {
 function requiredId(id) {
   if (typeof id !== 'string' || id.length > 128) throw new Error('Invalid identifier');
   return id;
+}
+function connectionProfile(request) {
+  if (!request || typeof request !== 'object' || (!!request.sessionId === !!request.profile)) throw new Error('Choose one connection profile.');
+  const profile = request.sessionId ? store.load().sessions.find(item => item.id === requiredId(request.sessionId)) : validateSession(request.profile);
+  if (!profile) throw new Error('Session not found.');
+  return profile;
+}
+async function approveNative({ title, message, detail, accept, signal }) {
+  if (shuttingDown || signal?.aborted || !window || window.isDestroyed()) return false;
+  const result = await dialog.showMessageBox(window, { type: 'warning', title, message, detail, buttons: ['Cancel', accept], defaultId: 0, cancelId: 0, noLink: true, ...(signal ? { signal } : {}) });
+  return result.response === 1 && !signal?.aborted && !shuttingDown;
 }
 
 function applicationMenu() {
@@ -105,7 +125,7 @@ function applicationMenu() {
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, separator, { role: 'togglefullscreen' }
     ] },
     { label: 'Options', submenu: [action('Session Options…', 'session-options'), action('Global Options…', 'settings'), action('Color Schemes…', 'color-schemes'), action('Keyword Highlighting…', 'keyword-options')] },
-    { label: 'Transfer', submenu: [action('Open SFTP Session', 'sftp'), action('Send ASCII File…', 'send-ascii'), action('Send Break', 'send-break'), action('TFTP Server…', 'tftp-server'), separator, action('Log Session…', 'log'), action('Pause / Resume Log', 'pause-log')] },
+    { label: 'Transfer', submenu: [action('File Transfer…', 'sftp'), action('Credentials…', 'credentials'), action('Trusted SSH Hosts…', 'ssh-hosts'), separator, action('Send ASCII File…', 'send-ascii'), action('Send Break', 'send-break'), action('TFTP Server…', 'tftp-server'), separator, action('Log Session…', 'log'), action('Pause / Resume Log', 'pause-log')] },
     { label: 'Script', submenu: [action('Run Python Script…', 'script-run'), action('Cancel Running Script', 'script-cancel'), separator, action('Record Input…', 'script-record'), action('Script Output', 'script-output')] },
     { label: 'Tools', submenu: [action('Edit Button Bar…', 'snippets'), action('Import / Export…', 'import-export')] },
     { label: 'Window', submenu: [action('Clone Session', 'clone-session'), action('Snapshots…', 'snapshots'), separator, action('New Vertical Tab Group', 'group-vertical'), action('New Horizontal Tab Group', 'group-horizontal'), action('Move Tab to Next Group', 'group-move-next'), action('Collapse Tab Groups', 'group-collapse'), separator, action('Tile Sessions', 'tile'), action('Tile Horizontally', 'tile-horizontal'), action('Tile Vertically', 'tile-vertical'), action('Tile as Grid', 'tile-grid'), separator, { role: 'minimize' }, { label: 'Close Window', role: 'close', accelerator: 'CommandOrControl+Shift+W' }] },
@@ -150,6 +170,38 @@ async function importSecureCRT() {
 
 function registerHandlers() {
   handle('getState', getState);
+  handle('credentialStatus', () => credentials.status());
+  handle('credentialList', () => credentials.list());
+  handle('credentialSave', input => credentials.save(input));
+  handle('credentialDelete', async id => {
+    const entry = (await credentials.list()).find(item => item.id === requiredId(id));
+    if (!entry) return { deleted: false };
+    if (!await approveNative({ title: 'Delete saved credential', message: `Delete “${entry.name}”?`, detail: 'Saved sessions that use this credential will need another credential or a password prompt. Active connections remain open.', accept: 'Delete credential' })) return { deleted: false };
+    return credentials.delete(id);
+  });
+  handle('authRespond', input => authPrompts.respond(input));
+  handle('sshHosts', () => secureSsh.listHosts());
+  handle('sshForgetHost', async input => {
+    if (!input || typeof input.host !== 'string' || !Number.isInteger(input.port)) throw new Error('Choose a trusted host.');
+    const entry = (await secureSsh.listHosts()).find(item => item.host === input.host && item.port === input.port);
+    if (!entry) return { forgotten: false };
+    if (!await approveNative({ title: 'Forget SSH host key', message: `Forget the verified key for ${entry.host}:${entry.port}?`, detail: `Current key: ${entry.fingerprint}\n\nThe next connection will ask you to verify the server identity again.`, accept: 'Forget key' })) return { forgotten: false };
+    return secureSsh.forgetHost(input);
+  });
+  handle('transferOpen', request => {
+    const profile = connectionProfile(request);
+    if (!['ssh', 'sftp'].includes(profile.protocol)) throw new Error('File transfers require an SSH session.');
+    return secureTransfers.open(validateSession({ ...profile, ssh: { ...profile.ssh, backend: 'managed' } }));
+  });
+  handle('transferClose', id => secureTransfers.close(requiredId(id)));
+  handle('transferListRemote', input => secureTransfers.listRemote(input));
+  handle('transferListLocal', input => secureTransfers.listLocal(input));
+  handle('transferChooseLocal', async () => {
+    const result = await dialog.showOpenDialog(window, { title: 'Choose local transfer folder', properties: ['openDirectory'], defaultPath: app.getPath('home') });
+    return result.canceled ? null : { path: result.filePaths[0] };
+  });
+  handle('transferStart', input => secureTransfers.start(input));
+  handle('transferCancel', id => secureTransfers.cancel(requiredId(id)));
   handle('projectOpen', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Open automation project', properties: ['openDirectory'] });
     return result.canceled ? null : projects.open(result.filePaths[0]);
@@ -217,9 +269,8 @@ function registerHandlers() {
   });
   handle('importSecureCRT', importSecureCRT);
   handle('terminalOpen', (request) => {
-    if (!request || typeof request !== 'object' || (!!request.sessionId === !!request.profile)) throw new Error('Choose one connection profile');
-    const profile = request.sessionId ? store.load().sessions.find((item) => item.id === requiredId(request.sessionId)) : validateSession(request.profile);
-    if (!profile) throw new Error('Session not found');
+    const profile = connectionProfile(request);
+    if (profile.protocol === 'sftp' && profile.ssh.backend === 'managed') throw new Error('Open this managed session in File Transfer.');
     return terminals.open(profile);
   });
   handle('terminalWrite', (request) => terminals.write(request));
@@ -343,7 +394,11 @@ async function boot() {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 24 } } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false }
   });
-  terminals = createTerminalManager({ cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });
+  authPrompts = createAuthPrompts({ send });
+  credentials = createCredentialVault({ directory: dataDirectory, safeStorage, confirmUse: ({ name, host, port, fingerprint, signal }) => approveNative({ title: 'Allow saved credential', message: `Use “${name}” with ${host}:${port}?`, detail: `Verified server key: ${fingerprint}\n\nThis allows this credential to authenticate to this host and key on future connections. Only approve servers you trust with these credentials.`, accept: 'Allow credential', signal }) });
+  secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
+  secureTransfers = createSecureTransfers({ connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event), confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }) });
+  terminals = createTerminalManager({ managedTransport: profile => secureSsh.createTerminal(profile), cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });
   automation = createAutomationManager({
     getSessionProfiles: () => store.load().sessions,
     getActiveTerminalId: () => activeTerminalId,
@@ -375,10 +430,11 @@ async function boot() {
     }
     const serverState = tftp?.status();
     const serverOwned = serverState && (serverState.state !== 'stopped' || serverState.activeTransfers > 0);
-    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size) return;
+    const transferConnections = secureTransfers?.count || 0;
+    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections) return;
     event.preventDefault();
     if (shuttingDown) return;
-    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
+    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${transferConnections} file-transfer connection(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
     if (choice === 1) {
       shuttingDown = true;
       cleanupTerminals().then(() => { quitting = true; app.quit(); }).catch(error => { shuttingDown = false; dialog.showErrorBox('Active work could not stop', error.message); });

@@ -5,7 +5,7 @@ export { matchingMapping, decodeMappedText };
 
 let installedEditor;
 const menuLabels = {
-  connect: 'Connect', disconnect: 'Disconnect', reconnect: 'Reconnect', 'local-shell': 'Local Shell', 'quick-connect': 'Quick Connect', find: 'Find', copy: 'Copy', paste: 'Paste', 'select-all': 'Select All', 'clear-screen': 'Clear Screen', 'reset-terminal': 'Reset Terminal', sftp: 'Open SFTP Tab', snapshots: 'Session Snapshots', 'next-tab': 'Next Tab', 'previous-tab': 'Previous Tab', tile: 'Toggle Tiling', 'tile-horizontal': 'Tile Horizontally', 'tile-vertical': 'Tile Vertically', 'tile-grid': 'Tile Grid', 'script-run': 'Run Script',
+  connect: 'Connect', disconnect: 'Disconnect', reconnect: 'Reconnect', 'local-shell': 'Local Shell', 'quick-connect': 'Quick Connect', find: 'Find', copy: 'Copy', paste: 'Paste', 'select-all': 'Select All', 'clear-screen': 'Clear Screen', 'reset-terminal': 'Reset Terminal', sftp: 'SFTP / SCP File Transfer', snapshots: 'Session Snapshots', 'next-tab': 'Next Tab', 'previous-tab': 'Previous Tab', tile: 'Toggle Tiling', 'tile-horizontal': 'Tile Horizontally', 'tile-vertical': 'Tile Vertically', 'tile-grid': 'Tile Grid', 'script-run': 'Run Script',
 };
 
 export function installKeymapEditor(container) {

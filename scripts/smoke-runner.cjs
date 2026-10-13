@@ -224,7 +224,10 @@ module.exports = async ({ window, terminals, store }) => {
   await persist();
   const project = await projectSmoke(window, terminals, directory);
   assert.equal(errors.length, 0, errors.join('\n'));
-  Object.assign(report, project, {behavioralChecksPassed:true});
+  console.log('START native credential, managed SSH and SFTP integration checks');
+  const secure = await require('./secure-smoke.cjs')({ window, terminals, directory });
+  assert.equal(errors.length, 0, errors.join('\n'));
+  Object.assign(report, project, secure, {behavioralChecksPassed:true});
   await persist();
   console.log('START project editor screenshot capture');
   report.screenshots.projectEditor = await screenshot(window, directory, 'project-editor.png');

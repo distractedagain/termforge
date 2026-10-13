@@ -1,8 +1,10 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
-import { installOptionDialogs, selectCategory, loadExtraProfile, readExtraProfile, loadExtraSettings, readExtraSettings, addKeywordRule } from './options.js';
+import { installOptionDialogs, updateSshFields, selectCategory, loadExtraProfile, readExtraProfile, loadExtraSettings, readExtraSettings, addKeywordRule } from './options.js';
 import { installWorkspaceDialogs } from './workspace-dialogs.js';
+import { createSecureConnections } from './secure-connections.js';
+import { createSecureTransferUi } from './secure-transfers.js';
 import { createWorkflows } from './workflows.js';
 import { attachKeywordHighlighting } from './highlighting.js';
 import { createScriptUi } from './scripting.js';
@@ -22,6 +24,7 @@ import { createIcon } from './icons.js';
 import './modern.css';
 import './modern-ai.css';
 import { createProjectUi } from './projects.js';
+import './secure-connections.css';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -64,7 +67,9 @@ let openMenuName = null;
 let menuEditTarget = null;
 let lastWorkspaceFocus = 'terminal';
 const panes = { sessionManager: true, commandWindow: true, buttonBar: true };
-const workflows = createWorkflows({ api, getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
+const secureConnections = createSecureConnections({api, toast, confirmAction});
+const secureTransfers = createSecureTransferUi({api, toast, confirmAction});
+const workflows = createWorkflows({ api, secureConnections, openFileTransfer: profile => secureTransfers.open(profile), getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
   getSelection: () => selectedSessionIds,
   setSelection: (ids) => { selectedSessionIds.clear(); for (const id of ids) selectedSessionIds.add(id); selectedSessionId = ids[0] || null; },
   getLayout: () => tabGroups.getLayout(),
@@ -477,7 +482,7 @@ function openProfileDialog(profile = null) {
   for (const forwarding of profile?.forwardings || []) addForwarding(forwarding);
   $('remote-fields').querySelector('details').open = Boolean(profile?.jumpHost || profile?.forwardings?.length);
   loadExtraProfile(profile || {});
-  setProtocol(profile?.protocol || 'ssh');
+  setProtocol(profile?.protocol || 'ssh'); updateSshFields();
   selectCategory('profile-dialog', 'connection');
   dialogOpen('profile-dialog');
   $('profile-name').focus();
@@ -496,6 +501,7 @@ function readProfile() {
     forwardings: [],
     ...readExtraProfile(),
   };
+  if (profile.credentialId) profile.username = '';
   if (editingSessionId) profile.id = editingSessionId;
   if (selectedProtocol === 'ssh') {
     for (const row of $('forwarding-list').children) {
@@ -702,6 +708,7 @@ function handleTerminalExit(event) {
 async function openConnection(profile, oldId = null) {
   if (!ready) { toast('The workspace is still loading. Please try again in a moment.'); return null; }
   if (profile.id) profile = state.sessions.find((session) => session.id === profile.id) || profile;
+  if (profile.protocol === 'sftp' && profile.ssh?.backend === 'managed') { await secureTransfers.open(profile); return null; }
   openingCount += 1;
   updateWorkspaceStatus();
   try {
@@ -1248,10 +1255,9 @@ async function disconnectActive() {
 function openSftp() {
   const profile = actionProfile();
   if (profile && ['ssh', 'sftp'].includes(profile.protocol)) {
-    openConnection({ ...profile, id: undefined, protocol: 'sftp', forwardings: [], name: `SFTP — ${profile.name}` });
-  } else {
-    openProfileDialog(); setProtocol('sftp'); $('profile-dialog-title').textContent = 'New SFTP session';
-  }
+    secureTransfers.open(profile).catch(error => toast(errorMessage(error), true));
+  } else if (secureTransfers.connected()) secureTransfers.show();
+  else { workflows.openQuickConnect(); $('quick-sftp').checked = true; $('quick-sftp').dispatchEvent(new Event('change')); }
 }
 
 function showSessionOptions() {
@@ -1271,6 +1277,7 @@ async function performAction(action, editTarget = null) {
   if (await recorder.perform(action)) return;
   if (await transfers.perform(action)) return;
   if (await workflows.perform(action)) return;
+  if (await secureConnections.perform(action)) return;
   const current = connections.get(activeId);
   switch (action) {
     case 'local-ai': localAi.toggle(); break;
@@ -1361,7 +1368,7 @@ function menuDefinitions(name) {
     case 'edit': return [item('Copy', 'copy', Boolean(editTarget || current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', editTarget ? !editTarget.disabled && !editTarget.readOnly : Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(editTarget || current)), null, item('Find…', 'find', Boolean(current || projectUi.getActiveDocument()), `${mod}F`), item('Configure Button Bar…', 'snippets')];
     case 'view': return [item('Project Workspace', 'project-workspace', true, '', projectUi.isOpen()), item('AI Assistant', 'local-ai', true, '', localAi.isVisible()), null, item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
     case 'options': return [item('Session Options…', 'session-options', Boolean(actionProfile())), item('Global Options…', 'settings'), item('Color Schemes…', 'color-schemes')];
-    case 'transfer': return [item('Open SFTP Session', 'sftp'), item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('SFTP Command Help…', 'help')];
+    case 'transfer': return [item('SFTP / SCP File Transfer…', 'sftp'), item('Saved Credentials…', 'credentials'), item('Trusted SSH Hosts…', 'ssh-hosts'), null, item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('Transfer Help…', 'help')];
     case 'script': return [item('Run Python Script…', 'script-run'), item('Cancel Script', 'script-cancel', scripts.hasRunning()), null, item(recorder.isRecording() ? 'Stop Recording…' : 'Record Input…', 'script-record', Boolean(current && !current.exited)), item('Script Output…', 'script-output')];
     case 'tools': return [item(current?.logging ? 'Stop Session Logging' : 'Log Session…', 'log', Boolean(current && !current.exited)), item(current?.logPaused ? 'Resume Log' : 'Pause Log', 'pause-log', Boolean(current && current.logging && !current.exited)), item('Configure Button Bar…', 'snippets'), item('Keyword Highlighting…', 'keyword-options'), null, item('Clear Screen', 'clear-screen', Boolean(current)), item('Reset Terminal', 'reset-terminal', Boolean(current)), item('Clear Command History…', 'clear-history'), null, item('Import / Export Sessions…', 'import-export')];
     case 'window': return [item('New Vertical Tab Group', 'group-vertical', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('New Horizontal Tab Group', 'group-horizontal', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('Move Tab to Next Group', 'group-move-next', tileView), item('Collapse Tab Groups', 'group-collapse', tileView), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0), item('Clone Session', 'clone-session', Boolean(current)), item('Next Tab', 'next-tab', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), item('Previous Tab', 'previous-tab', (tabGroups.groupFor(activeId)?.tabs.length || 0) > 1), null, ...[...connections.values()].map((connection, index) => item(`${index + 1}  ${connection.title}`, `activate:${connection.id}`, true, '', connection.id === activeId))];
@@ -1444,7 +1451,7 @@ function setupMenus() {
 }
 
 function setupHandlers() {
-  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install(); localAi.install(); projectUi.install();
+  secureConnections.install(); secureTransfers.install(); installOptionDialogs({ getSettings: () => state.settings, secureConnections }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install(); localAi.install(); projectUi.install();
   $('profile-form').noValidate = true; $('settings-form').noValidate = true;
   addToolbarIcons(); setupMenus(); setupSplitters(); loadLayout();
   $('settings-font').min = '8'; $('settings-font').max = '72'; $('settings-scrollback').max = '128000';
@@ -1452,7 +1459,7 @@ function setupHandlers() {
     const protocol = $('profile-protocol-select').value;
     if (['telnet', 'raw'].includes(protocol) && $('profile-port').value === '22') $('profile-port').value = '23';
     if (['ssh', 'sftp'].includes(protocol) && $('profile-port').value === '23') $('profile-port').value = '22';
-    setProtocol(protocol); if (protocol === 'serial') selectCategory('profile-dialog', 'serial');
+    setProtocol(protocol); updateSshFields(); if (protocol === 'serial') selectCategory('profile-dialog', 'serial');
   });
   bind('refresh-serial-ports', 'click', async () => {
     $('refresh-serial-ports').disabled = true;
@@ -1585,6 +1592,7 @@ async function init() {
     for (const element of document.querySelectorAll('[data-shortcut]')) element.textContent = `${isMac ? '⌘' : 'Ctrl'}${element.dataset.shift ? isMac ? ' ⇧' : ' Shift' : ''} ${element.dataset.shortcut}`;
     renderSessions(); renderSnippets(); renderTabs(); renderWorkspace(); applySettings(); updateWorkspaceStatus(); workflows.refresh();
     ready = true;
+    if (state.settings.showQuickConnectOnStartup) workflows.openQuickConnect();
   } catch (error) {
     $('workspace-status').textContent = 'Could not load the workspace';
     toast(`Could not load configuration: ${errorMessage(error)}`, true);

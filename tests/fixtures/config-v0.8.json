@@ -1,0 +1,161 @@
+{
+  "version": 2,
+  "sessions": [
+    {
+      "id": "local-shell",
+      "name": "Local shell",
+      "folder": "",
+      "protocol": "local",
+      "host": "",
+      "port": 22,
+      "username": "",
+      "identityFile": "",
+      "jumpHost": "",
+      "cwd": "",
+      "description": "",
+      "color": "#60a5fa",
+      "forwardings": [],
+      "terminal": {
+        "terminalType": "xterm-256color",
+        "fontSize": 0,
+        "fontFamily": "",
+        "colorScheme": "",
+        "scrollback": 0,
+        "cursorStyle": "",
+        "cursorBlink": null,
+        "localEcho": false,
+        "backspaceMode": "del",
+        "deleteMode": "escape",
+        "emacsMode": false,
+        "mappedKeys": []
+      },
+      "ssh": {
+        "compression": false,
+        "agentForwarding": false,
+        "x11Forwarding": false,
+        "keepAliveInterval": 30,
+        "keepAliveCountMax": 3,
+        "connectTimeout": 15,
+        "authMethod": "auto",
+        "remoteCommand": "",
+        "certificateFile": "",
+        "ciphers": [],
+        "keyExchanges": [],
+        "macs": []
+      },
+      "serial": {
+        "path": "",
+        "baudRate": 9600,
+        "dataBits": 8,
+        "stopBits": 1,
+        "parity": "none",
+        "flowControl": "none"
+      }
+    },
+    {
+      "id": "upgrade-lab",
+      "name": "Upgrade lab",
+      "folder": "Lab",
+      "protocol": "ssh",
+      "host": "upgrade.example.test",
+      "port": 22,
+      "username": "demo",
+      "identityFile": "",
+      "jumpHost": "",
+      "cwd": "",
+      "description": "",
+      "color": "#60a5fa",
+      "forwardings": [],
+      "terminal": {
+        "terminalType": "xterm-256color",
+        "fontSize": 0,
+        "fontFamily": "",
+        "colorScheme": "solarized-dark",
+        "scrollback": 0,
+        "cursorStyle": "",
+        "cursorBlink": null,
+        "localEcho": false,
+        "backspaceMode": "del",
+        "deleteMode": "escape",
+        "emacsMode": false,
+        "mappedKeys": []
+      },
+      "ssh": {
+        "compression": true,
+        "agentForwarding": false,
+        "x11Forwarding": false,
+        "keepAliveInterval": 30,
+        "keepAliveCountMax": 3,
+        "connectTimeout": 15,
+        "authMethod": "password",
+        "remoteCommand": "",
+        "certificateFile": "",
+        "ciphers": [],
+        "keyExchanges": [],
+        "macs": []
+      },
+      "serial": {
+        "path": "",
+        "baudRate": 9600,
+        "dataBits": 8,
+        "stopBits": 1,
+        "parity": "none",
+        "flowControl": "none"
+      }
+    }
+  ],
+  "settings": {
+    "theme": "light",
+    "fontSize": 14,
+    "scrollback": 5000,
+    "fontFamily": "Menlo, Monaco, Consolas, monospace",
+    "colorScheme": "traditional",
+    "matchColorScheme": false,
+    "cursorStyle": "block",
+    "cursorBlink": true,
+    "bellStyle": "none",
+    "copyOnSelect": false,
+    "pasteOnRightClick": false,
+    "confirmPaste": true,
+    "wordDelimiters": "()[]{}'\"",
+    "closeOnExit": false,
+    "commandHistoryLimit": 100,
+    "keywordHighlightEnabled": true,
+    "keywords": []
+  },
+  "snippets": [
+    {
+      "id": "current-directory",
+      "name": "Current directory",
+      "command": "pwd",
+      "folder": "",
+      "color": "#60a5fa",
+      "buttonBar": "Default"
+    },
+    {
+      "id": "system-name",
+      "name": "System name (Unix)",
+      "command": "uname -a",
+      "folder": "",
+      "color": "#60a5fa",
+      "buttonBar": "Default"
+    }
+  ],
+  "snapshots": [
+    {
+      "id": "upgrade-snapshot",
+      "name": "Lab snapshot",
+      "sessionIds": [
+        "upgrade-lab"
+      ],
+      "layout": {
+        "tile": false,
+        "orientation": "grid",
+        "activeSessionId": "upgrade-lab"
+      }
+    }
+  ],
+  "commandHistory": [
+    "show version"
+  ]
+}

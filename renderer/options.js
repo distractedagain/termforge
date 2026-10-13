@@ -1,4 +1,5 @@
 // Original category dialogs, with only controls that TermForge can apply.
+import { createAuthOrder } from './secure-connections.js';
 import { COLOR_SCHEMES } from '../app/color-schemes.cjs';
 import { createSchemePreview } from './color-picker.js';
 import { installKeymapEditor, loadMappings, readMappings } from './keymap.js';
@@ -55,9 +56,10 @@ export function selectCategory(dialogId, category = 'connection') {
 }
 
 const schemes = [['', 'Use Global Options'], ...COLOR_SCHEMES.map(({ id, name }) => [id, name])];
-let profilePreview, settingsPreview;
+let profilePreview, settingsPreview, profileAuth, secureConnections;
 
-export function installOptionDialogs({ getSettings = () => ({}) } = {}) {
+export function installOptionDialogs({ getSettings = () => ({}), secureConnections: secure } = {}) {
+  secureConnections = secure;
   const protocolSelect = field('profile-protocol-select', 'Protocol', 'select', { values: [['ssh', 'SSH2'], ['sftp', 'SFTP'], ['telnet', 'Telnet'], ['raw', 'Raw TCP'], ['serial', 'Serial'], ['local', 'Local shell']] });
   $('profile-dialog').querySelector('.protocol-picker').hidden = true;
   $('profile-dialog').querySelector('.protocol-picker').after(protocolSelect);
@@ -67,14 +69,21 @@ export function installOptionDialogs({ getSettings = () => ({}) } = {}) {
   const choices = node('datalist'); choices.id = 'serial-port-options'; serial.append(choices);
   const refresh = node('button', 'secondary-button', 'Refresh serial ports'); refresh.id = 'refresh-serial-ports'; refresh.type = 'button'; serial.append(refresh);
   serial.append(field('profile-serial-baud', 'Baud rate', 'select', { values: ['300', '1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200', '230400', '460800', '921600'] }), field('profile-serial-bits', 'Data bits', 'select', { values: ['5', '6', '7', '8'] }), field('profile-serial-stop', 'Stop bits', 'select', { values: ['1', '1.5', '2'] }), field('profile-serial-parity', 'Parity', 'select', { values: ['none', 'even', 'odd', 'mark', 'space'] }), field('profile-serial-flow', 'Flow control', 'select', { values: [['none', 'None'], ['rtscts', 'RTS/CTS'], ['xonxoff', 'XON/XOFF']] }));
+  const managed = node('div'); managed.id = 'profile-managed-fields';
+  const credentialRow = node('div'); credentialRow.id = 'profile-credential-row'; credentialRow.append(field('profile-credential', 'Saved credential (optional)', 'select', {values:[['','Prompt / use username']]}));
+  const manageCredentials = node('button','secondary-button','Manage…'); manageCredentials.type = 'button'; manageCredentials.addEventListener('click', () => secureConnections.openCredentials()); credentialRow.append(manageCredentials);
+  const orderContainer = node('div','auth-order'); orderContainer.id = 'profile-auth-order'; managed.append(credentialRow,node('p','field-note','Saved credentials replace the session username. Their username and password stay in protected storage.'),node('h4','','Authentication order'),orderContainer);
+  profileAuth = createAuthOrder(orderContainer,'profile-auth-order'); profileAuth.set();
   const ssh = [
+    field('profile-backend', 'SSH connection', 'select', {values:[['openssh','System OpenSSH · advanced options'],['managed','Managed SSH · saved credentials']]}),
+    managed,
     field('profile-auth', 'Authentication', 'select', { values: [['auto', 'Automatic (OpenSSH)'], ['publickey', 'Public key'], ['password', 'Password'], ['keyboard-interactive', 'Keyboard interactive'], ['gssapi', 'GSSAPI']] }),
     field('profile-certificate', 'OpenSSH certificate file', 'text', { placeholder: 'Optional signed public-key certificate' }),
     field('profile-compression', 'Enable compression', 'checkbox'), field('profile-agent-forwarding', 'Forward SSH agent', 'checkbox'), field('profile-x11-forwarding', 'Forward X11 display', 'checkbox'),
     field('profile-keepalive', 'Keep-alive interval (seconds; 0 disables)', 'number', { min: 0, max: 3600 }), field('profile-keepalive-count', 'Keep-alive unanswered count', 'number', { min: 1, max: 100 }), field('profile-connect-timeout', 'Connect timeout (seconds)', 'number', { min: 1, max: 600 }),
     field('profile-remote-command', 'Remote command (optional)', 'textarea', { maxLength: 4096, rows: 2 }),
     field('profile-ciphers', 'Ciphers (comma-separated OpenSSH names)', 'text', { placeholder: 'Leave empty for OpenSSH defaults' }), field('profile-kex', 'Key exchange algorithms', 'text', { placeholder: 'Leave empty for OpenSSH defaults' }), field('profile-macs', 'MAC algorithms', 'text', { placeholder: 'Leave empty for OpenSSH defaults' }),
-    node('p', 'field-note', 'System OpenSSH verifies host keys and performs authentication. These options apply to the next connection. Agent and X11 forwarding give the remote host access to those services.')
+    node('p', 'field-note', 'Managed SSH supports saved credentials, private prompts, identity files and an SSH agent. Use System OpenSSH for jump hosts, forwarding, SSH certificates and GSSAPI. Advanced options apply to the next connection.')
   ];
   categoryDialog('profile-dialog', [
     { id: 'connection', label: 'Connection', elements: [] },
@@ -85,18 +94,29 @@ export function installOptionDialogs({ getSettings = () => ({}) } = {}) {
     { id: 'keyboard', label: 'Keyboard', child: true, elements: [field('profile-backspace', 'Backspace sends', 'select', { values: [['del', 'DEL (0x7F)'], ['bs', 'BS (0x08)']] }), field('profile-delete', 'Delete sends', 'select', { values: [['escape', 'Escape sequence'], ['del', 'DEL (0x7F)']] }), field('profile-emacs', 'Use Option / Alt as Meta (Emacs mode)', 'checkbox'), (() => { const container = node('div'); container.id = 'profile-mapped-keys'; return container; })()] }
   ]);
   installKeymapEditor($('profile-mapped-keys'));
+  secureConnections.register($('profile-credential'));
+  $('profile-backend').addEventListener('change', updateSshFields);
+  $('profile-credential').addEventListener('change', updateSshFields);
   categoryDialog('settings-dialog', [
     { id: 'general', label: 'General', elements: [] },
     { id: 'appearance', label: 'Terminal', title: 'Terminal — Appearance', elements: [field('settings-font-family', 'Font family', 'text', { maxLength: 200 }), field('settings-color-scheme', 'Color scheme', 'select', { values: schemes.slice(1) }), field('settings-match-colors', 'Match interface to default scheme', 'checkbox'), field('settings-cursor', 'Cursor', 'select', { values: [['block', 'Block'], ['bar', 'Vertical bar'], ['underline', 'Underline']] }), field('settings-cursor-blink', 'Blink cursor', 'checkbox'), field('settings-bell', 'Bell', 'select', { values: [['none', 'None'], ['visual', 'Visual flash']] }), field('settings-word-delimiters', 'Word selection delimiters', 'text', { maxLength: 120 }), field('settings-close-exit', 'Close session tab when terminal exits', 'checkbox')] },
     { id: 'mouse', label: 'Mouse and paste', child: true, elements: [field('settings-copy-select', 'Copy selected terminal text automatically', 'checkbox'), field('settings-paste-right', 'Paste on right-click', 'checkbox'), field('settings-confirm-paste', 'Review multiline clipboard paste', 'checkbox'), field('settings-history-limit', 'Command history entries (0 disables)', 'number', { min: 0, max: 200 }), node('p', 'field-note', 'Command Window history is saved locally. Passwords entered directly into a terminal are not added to this history.')] },
     { id: 'keywords', label: 'Keyword Highlighting', child: true, elements: [field('settings-keywords-enabled', 'Enable keyword highlighting', 'checkbox'), node('p', 'field-note', 'Each rule matches literal words or substrings. Regular expressions are not yet supported.'), (() => { const editor = node('div'); editor.id = 'keyword-editor'; return editor; })(), (() => { const add = node('button', 'secondary-button', 'Add keyword'); add.type = 'button'; add.id = 'add-keyword'; return add; })()] }
   ]);
+  $('settings-dialog-general').append(field('settings-show-quick', 'Show Quick Connect on startup', 'checkbox'));
   $('settings-dialog').querySelector('.settings-preview')?.remove();
   profilePreview = createSchemePreview($('profile-color-scheme'), { getInheritedScheme: () => getSettings().colorScheme });
   $('profile-color-scheme').closest('label').after(profilePreview.element);
   settingsPreview = createSchemePreview($('settings-color-scheme'));
   $('settings-color-scheme').closest('label').after(settingsPreview.element);
   $('settings-match-colors').addEventListener('change', updateInterfaceChoice);
+}
+
+export function updateSshFields() {
+  const managed = $('profile-backend').value === 'managed';
+  $('profile-managed-fields').hidden = !managed;
+  $('profile-auth').closest('label').hidden = managed;
+  $('profile-username').disabled = !['ssh','sftp'].includes($('profile-protocol-select').value) || managed && Boolean($('profile-credential').value);
 }
 
 function updateInterfaceChoice() {
@@ -106,7 +126,7 @@ function updateInterfaceChoice() {
 
 export const sessionExtraFields = {
   'profile-terminal-type': ['terminal', 'terminalType', 'xterm-256color'], 'profile-scrollback': ['terminal', 'scrollback', 0], 'profile-local-echo': ['terminal', 'localEcho', false], 'profile-font-family': ['terminal', 'fontFamily', ''], 'profile-font-size': ['terminal', 'fontSize', 0], 'profile-color-scheme': ['terminal', 'colorScheme', ''], 'profile-cursor': ['terminal', 'cursorStyle', ''], 'profile-cursor-blink': ['terminal', 'cursorBlink', null], 'profile-backspace': ['terminal', 'backspaceMode', 'del'], 'profile-delete': ['terminal', 'deleteMode', 'escape'], 'profile-emacs': ['terminal', 'emacsMode', false],
-  'profile-auth': ['ssh', 'authMethod', 'auto'], 'profile-certificate': ['ssh', 'certificateFile', ''], 'profile-compression': ['ssh', 'compression', false], 'profile-agent-forwarding': ['ssh', 'agentForwarding', false], 'profile-x11-forwarding': ['ssh', 'x11Forwarding', false], 'profile-keepalive': ['ssh', 'keepAliveInterval', 30], 'profile-keepalive-count': ['ssh', 'keepAliveCountMax', 3], 'profile-connect-timeout': ['ssh', 'connectTimeout', 15], 'profile-remote-command': ['ssh', 'remoteCommand', ''], 'profile-ciphers': ['ssh', 'ciphers', []], 'profile-kex': ['ssh', 'keyExchanges', []], 'profile-macs': ['ssh', 'macs', []],
+  'profile-backend': ['ssh', 'backend', 'openssh'], 'profile-auth': ['ssh', 'authMethod', 'auto'], 'profile-certificate': ['ssh', 'certificateFile', ''], 'profile-compression': ['ssh', 'compression', false], 'profile-agent-forwarding': ['ssh', 'agentForwarding', false], 'profile-x11-forwarding': ['ssh', 'x11Forwarding', false], 'profile-keepalive': ['ssh', 'keepAliveInterval', 30], 'profile-keepalive-count': ['ssh', 'keepAliveCountMax', 3], 'profile-connect-timeout': ['ssh', 'connectTimeout', 15], 'profile-remote-command': ['ssh', 'remoteCommand', ''], 'profile-ciphers': ['ssh', 'ciphers', []], 'profile-kex': ['ssh', 'keyExchanges', []], 'profile-macs': ['ssh', 'macs', []],
   'profile-serial-path': ['serial', 'path', ''], 'profile-serial-baud': ['serial', 'baudRate', 9600], 'profile-serial-bits': ['serial', 'dataBits', 8], 'profile-serial-stop': ['serial', 'stopBits', 1], 'profile-serial-parity': ['serial', 'parity', 'none'], 'profile-serial-flow': ['serial', 'flowControl', 'none']
 };
 
@@ -117,6 +137,7 @@ export function loadExtraProfile(profile = {}) {
     if (control.type === 'checkbox') control.checked = Boolean(value);
     else control.value = Array.isArray(value) ? value.join(', ') : value === null ? 'inherit' : String(value);
   }
+  profileAuth.set(profile.ssh?.authOrder); secureConnections.select($('profile-credential'), profile.credentialId || ''); updateSshFields();
   profilePreview?.refresh();
 }
 
@@ -130,11 +151,16 @@ export function readExtraProfile() {
     if (fallback === null) value = value === 'inherit' ? null : value === 'true';
     result[section][key] = value;
   }
+  const managedSsh = ['ssh', 'sftp'].includes($('profile-protocol-select').value) && result.ssh.backend === 'managed';
+  result.ssh.authOrder = managedSsh ? profileAuth.get() : ['publickey', 'keyboard-interactive', 'password'];
+  if (result.ssh.backend === 'managed') result.ssh.authMethod = 'auto';
+  result.credentialId = managedSsh ? $('profile-credential').value : '';
   result.terminal.mappedKeys = readMappings();
   return result;
 }
 
 export const globalExtraFields = {
+  'settings-show-quick': ['showQuickConnectOnStartup', false],
   'settings-match-colors': ['matchColorScheme', false],
   'settings-font-family': ['fontFamily', '"SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace'], 'settings-color-scheme': ['colorScheme', 'traditional'], 'settings-cursor': ['cursorStyle', 'block'], 'settings-cursor-blink': ['cursorBlink', true], 'settings-bell': ['bellStyle', 'none'], 'settings-word-delimiters': ['wordDelimiters', ' ()[]{}\'"'], 'settings-close-exit': ['closeOnExit', false], 'settings-copy-select': ['copyOnSelect', false], 'settings-paste-right': ['pasteOnRightClick', false], 'settings-confirm-paste': ['confirmPaste', true], 'settings-history-limit': ['commandHistoryLimit', 100], 'settings-keywords-enabled': ['keywordHighlightEnabled', true]
 };

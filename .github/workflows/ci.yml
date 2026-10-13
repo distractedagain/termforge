@@ -66,6 +66,9 @@ jobs:
       - name: Check project editor workflows without launching Electron
         if: runner.os == 'Linux'
         run: npm run test:projects
+      - name: Check credential and file transfer interfaces without launching Electron
+        if: runner.os == 'Linux'
+        run: npm run test:secure-ui
       - name: Install isolated localhost automation test runtime
         if: runner.os != 'Windows'
         run: python -m pip install ansible-core==2.21.5 ansible-runner==2.4.3

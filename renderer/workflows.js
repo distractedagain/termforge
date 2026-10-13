@@ -1,4 +1,5 @@
 import { createIcon } from './icons.js';
+import { createAuthOrder } from './secure-connections.js';
 import { pruneLayout } from '../app/snapshot-layout.cjs';
 
 const $ = (id) => document.getElementById(id);
@@ -7,6 +8,7 @@ const make = (tag, className, text) => { const node = document.createElement(tag
 export function createWorkflows(context) {
   const { api, getState, setState, getConnections, getActiveId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets, setPane, confirmAction, toast, getSelection, setSelection, getLayout, setLayout, restoreLayout, renderSessions } = context;
   let manager = 'sessions';
+  let quickAuth;
   let selectedCommandId = null;
   let snapshotBusy = false;
   const collapsed = new Set();
@@ -112,22 +114,36 @@ export function createWorkflows(context) {
     const remote = ['ssh', 'sftp', 'telnet', 'raw'].includes(protocol);
     for (const key of ['host', 'port']) { $(`quick-${key}-label`).hidden = !remote; $(`quick-${key}`).disabled = !remote; }
     $('quick-host').required = remote;
-    $('quick-user-label').hidden = !['ssh', 'sftp'].includes(protocol); $('quick-user').disabled = !['ssh', 'sftp'].includes(protocol);
+    const ssh = ['ssh', 'sftp'].includes(protocol);
+    $('quick-sftp-label').hidden = protocol !== 'ssh'; $('quick-backend-label').hidden = !ssh;
+    if (protocol === 'sftp' || $('quick-sftp').checked) { $('quick-backend').value = 'managed'; $('quick-backend').disabled = true; } else $('quick-backend').disabled = !ssh;
+    const useManaged = $('quick-backend').value === 'managed';
+    if (!useManaged) $('quick-use-username').checked = true;
+    $('quick-auth-fields').hidden = !ssh; $('quick-user').disabled = !ssh || $('quick-use-credential').checked;
+    $('quick-credentials-label').hidden = !useManaged; $('quick-managed-auth').hidden = !useManaged;
+    $('quick-credential').disabled = !ssh || !useManaged || !$('quick-use-credential').checked;
+    $('quick-credential').required = ssh && useManaged && $('quick-use-credential').checked;
+    $('quick-auth-note').textContent = useManaged ? 'Managed SSH verifies the server before requesting credentials. Jump hosts, forwarding, SSH certificates and GSSAPI use System OpenSSH in Session Options.' : 'System OpenSSH verifies host keys and prompts in the terminal. Configure jump hosts, forwarding, certificates and GSSAPI in Session Options.';
     $('quick-serial-label').hidden = protocol !== 'serial'; $('quick-serial').disabled = protocol !== 'serial'; $('quick-serial').required = protocol === 'serial';
     $('quick-cwd-label').hidden = protocol !== 'local'; $('quick-cwd').disabled = protocol !== 'local';
     $('quick-name-label').hidden = !$('quick-save').checked; $('quick-name').required = $('quick-save').checked;
   }
   function openQuickConnect() {
-    $('quick-connect-form').reset(); $('quick-error').hidden = true; quickFields(); dialog('quick-connect-dialog'); $('quick-host').focus();
+    $('quick-connect-form').reset(); $('quick-startup').checked = Boolean(state().settings.showQuickConnectOnStartup); quickAuth.set(); context.secureConnections.select($('quick-credential')); $('quick-error').hidden = true; quickFields(); dialog('quick-connect-dialog'); $('quick-host').focus();
   }
   async function submitQuick(event) {
     event.preventDefault(); const protocol = $('quick-protocol').value;
     const profile = { name: $('quick-name').value.trim() || $('quick-host').value.trim() || (protocol === 'local' ? 'Local shell' : 'Serial'), protocol, host: $('quick-host').value.trim(), port: Number($('quick-port').value), username: $('quick-user').value.trim(), cwd: $('quick-cwd').value.trim(), serial: { path: $('quick-serial').value.trim(), baudRate: 9600 }, forwardings: [] };
+    const ssh = ['ssh', 'sftp'].includes(protocol); const fileSession = protocol === 'sftp' || protocol === 'ssh' && $('quick-sftp').checked;
+    if (ssh) { profile.ssh = {backend:$('quick-backend').value,authOrder:$('quick-backend').value === 'managed' ? quickAuth.get() : ['publickey', 'keyboard-interactive', 'password']}; profile.identityFile = $('quick-identity').value.trim(); if (profile.ssh.backend === 'managed' && $('quick-use-credential').checked) { profile.credentialId = $('quick-credential').value; profile.username = ''; } }
+    if (fileSession) profile.protocol = 'sftp';
     $('quick-submit').disabled = true;
     try {
+      if (ssh && profile.ssh.backend === 'managed' && !profile.ssh.authOrder.length) throw new Error('Enable at least one authentication method.');
+      if (Boolean(state().settings.showQuickConnectOnStartup) !== $('quick-startup').checked) setState({settings:await api.saveSettings({...state().settings,showQuickConnectOnStartup:$('quick-startup').checked})});
       let target = profile;
       if ($('quick-save').checked) { target = await api.saveSession(profile); setState({ sessions: [...state().sessions, target] }); renderSessions(); refresh(); }
-      $('quick-connect-dialog').close(); await openConnection(target);
+      $('quick-connect-dialog').close(); if (fileSession) await context.openFileTransfer(target); else await openConnection(target);
     } catch (error) { $('quick-error').textContent = error.message || String(error); $('quick-error').hidden = false; }
     finally { $('quick-submit').disabled = false; }
   }
@@ -266,6 +282,10 @@ export function createWorkflows(context) {
     }
   }
   function install() {
+    quickAuth = createAuthOrder($('quick-auth-order'), 'quick-auth'); quickAuth.set(); context.secureConnections.register($('quick-credential'));
+    for (const id of ['quick-backend','quick-use-username','quick-use-credential','quick-sftp']) $(id).addEventListener('change', quickFields);
+    $('quick-manage-credentials').addEventListener('click', () => attempt(() => context.secureConnections.openCredentials()));
+    $('quick-choose-identity').addEventListener('click', () => attempt(async () => { const file = await api.chooseIdentityFile(); if (file) $('quick-identity').value = file; }));
     for (const name of ['sessions', 'commands', 'active']) $(`dock-${name}`).addEventListener('click', () => showManager(name));
     $('command-filter').addEventListener('input', renderCommands); $('active-filter').addEventListener('input', renderActive);
     $('command-edit').addEventListener('click', showSnippets); $('command-new').addEventListener('click', showSnippets);
@@ -276,5 +296,5 @@ export function createWorkflows(context) {
     $('bulk-form').addEventListener('submit', saveBulk); $('snapshot-save').addEventListener('click', () => attempt(saveSnapshot));
     $('command-history').addEventListener('change', () => { if ($('command-history').value === '') return; context.clearCommandDraft?.(); $('command-input').value = state().commandHistory[Number($('command-history').value)] || ''; $('command-input').focus(); $('command-history').value = ''; });
   }
-  return { install, refresh, showManager, recordHistory, bulkOptions, perform, renderHistory, renderCommands, renderActive };
+  return { install, openQuickConnect, refresh, showManager, recordHistory, bulkOptions, perform, renderHistory, renderCommands, renderActive };
 }

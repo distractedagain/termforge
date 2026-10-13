@@ -25,9 +25,18 @@ module.exports = async () => {
     ['node-pty/deps/winpty/LICENSE', 'winpty.txt'],
     ['node-addon-api/LICENSE.md', 'node-addon-api.txt'],
     ['serialport/LICENSE', 'serialport.txt'],
+    ['ssh2/LICENSE', 'ssh2.txt'],
+    ['asn1/LICENSE', 'asn1.txt'],
+    ['bcrypt-pbkdf/LICENSE', 'bcrypt-pbkdf.txt'],
+    ['tweetnacl/LICENSE', 'tweetnacl.txt'],
+    ['safer-buffer/LICENSE', 'safer-buffer.txt'],
     ['node-gyp-build/LICENSE', 'node-gyp-build.txt']
   ];
   for (const [source, destination] of notices) fs.copyFileSync(path.join(root, 'node_modules', source), path.join(directory, destination));
+  for (const [source, destination] of [['cpu-features/LICENSE', 'cpu-features.txt'], ['cpu-features/deps/cpu_features/LICENSE', 'cpu-features-upstream.txt'], ['buildcheck/LICENSE', 'buildcheck.txt'], ['nan/LICENSE.md', 'nan.txt']]) {
+    const filename = path.join(root, 'node_modules', source);
+    if (fs.existsSync(filename)) fs.copyFileSync(filename, path.join(directory, destination));
+  }
   const serialModules = path.join(root, 'node_modules', '@serialport');
   for (const entry of fs.readdirSync(serialModules, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-z0-9-]+$/.test(entry.name)) continue;

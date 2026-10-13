@@ -11,7 +11,7 @@ const MAX_INPUT_BYTES = 256 * 1024;
 const MAX_EARLY_OUTPUT = 1024 * 1024;
 const MAX_LOG_BYTES = 128 * 1024 * 1024;
 
-function createTerminalManager({ spawn, transport = createTransport, emitData = () => {}, emitExit = () => {}, platform = process.platform, env = process.env, cwd = process.cwd() } = {}) {
+function createTerminalManager({ spawn, transport = createTransport, managedTransport, emitData = () => {}, emitExit = () => {}, platform = process.platform, env = process.env, cwd = process.cwd() } = {}) {
   const terminals = new Map();
   const spawnPty = spawn || ((file, args, options) => require('node-pty').spawn(file, args, options));
 
@@ -71,8 +71,11 @@ function createTerminalManager({ spawn, transport = createTransport, emitData = 
     open(input) {
       if (terminals.size >= MAX_TERMINALS) throw new Error(`At most ${MAX_TERMINALS} terminals can be open at once.`);
       const session = validateSession(input);
-      const launch = ['ssh', 'local', 'sftp'].includes(session.protocol) ? buildLaunch(session, { platform, env, cwd }) : null;
-      const processHandle = launch ? spawnPty(launch.file, launch.args, { ...launch.options, encoding: 'utf8' }) : transport(session);
+      if (session.protocol === 'sftp' && (session.ssh.backend === 'managed' || session.credentialId)) throw new Error('Managed SFTP sessions open in the graphical file transfer workspace.');
+      const managed = session.protocol === 'ssh' && session.ssh.backend === 'managed';
+      if (managed && typeof managedTransport !== 'function') throw new Error('Managed SSH is unavailable.');
+      const launch = !managed && ['ssh', 'local', 'sftp'].includes(session.protocol) ? buildLaunch(session, { platform, env, cwd }) : null;
+      const processHandle = managed ? managedTransport(session) : launch ? spawnPty(launch.file, launch.args, { ...launch.options, encoding: 'utf8' }) : transport(session);
       if (!processHandle || !['write', 'resize', 'kill', 'onData', 'onExit'].every(method => typeof processHandle[method] === 'function')) {
         try { processHandle?.kill?.(); } catch { /* Invalid process handles still need cleanup. */ }
         throw new Error('The native terminal could not be started.');

@@ -9,8 +9,8 @@ const { COLOR_SCHEME_IDS: COLOR_SCHEMES } = require('./color-schemes.cjs');
 const { validateInstanceLayout, pruneSnapshotSession } = require('./snapshot-layout.cjs');
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
-const SESSION_KEYS = ['id', 'name', 'folder', 'protocol', 'host', 'port', 'username', 'identityFile', 'jumpHost', 'cwd', 'description', 'color', 'forwardings', 'terminal', 'ssh', 'serial'];
-const SETTINGS_KEYS = ['theme', 'fontSize', 'scrollback', 'fontFamily', 'colorScheme', 'matchColorScheme', 'cursorStyle', 'cursorBlink', 'bellStyle', 'copyOnSelect', 'pasteOnRightClick', 'confirmPaste', 'wordDelimiters', 'closeOnExit', 'commandHistoryLimit', 'keywords', 'keywordHighlightEnabled'];
+const SESSION_KEYS = ['id', 'name', 'folder', 'protocol', 'host', 'port', 'username', 'credentialId', 'identityFile', 'jumpHost', 'cwd', 'description', 'color', 'forwardings', 'terminal', 'ssh', 'serial'];
+const SETTINGS_KEYS = ['theme', 'fontSize', 'scrollback', 'fontFamily', 'colorScheme', 'matchColorScheme', 'cursorStyle', 'cursorBlink', 'bellStyle', 'copyOnSelect', 'pasteOnRightClick', 'confirmPaste', 'wordDelimiters', 'closeOnExit', 'commandHistoryLimit', 'keywords', 'keywordHighlightEnabled', 'showQuickConnectOnStartup'];
 const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', fontSize: 14, scrollback: 5000, fontFamily: 'Menlo, Monaco, Consolas, monospace', colorScheme: 'traditional', matchColorScheme: false, cursorStyle: 'block', cursorBlink: true, bellStyle: 'none', copyOnSelect: false, pasteOnRightClick: false, confirmPaste: true, wordDelimiters: ' ()[]{}\'"', closeOnExit: false, commandHistoryLimit: 100, keywords: [], keywordHighlightEnabled: true });
 
 function boolean(value, label, fallback = false) {
@@ -56,8 +56,11 @@ function validateMappings(input = []) {
   return keymap.validateMappings(input);
 }
 function validateSSH(input = {}) {
-  object(input, 'SSH options', ['compression', 'agentForwarding', 'x11Forwarding', 'keepAliveInterval', 'keepAliveCountMax', 'connectTimeout', 'authMethod', 'remoteCommand', 'certificateFile', 'ciphers', 'keyExchanges', 'macs']);
+  object(input, 'SSH options', ['compression', 'agentForwarding', 'x11Forwarding', 'keepAliveInterval', 'keepAliveCountMax', 'connectTimeout', 'authMethod', 'remoteCommand', 'certificateFile', 'ciphers', 'keyExchanges', 'macs', 'backend', 'authOrder']);
+  const authOrder = input.authOrder === undefined ? ['publickey', 'keyboard-interactive', 'password'] : input.authOrder;
+  if (!Array.isArray(authOrder) || authOrder.length < 1 || authOrder.length > 3 || new Set(authOrder).size !== authOrder.length || authOrder.some(value => !['publickey', 'keyboard-interactive', 'password'].includes(value))) fail('Choose one or more unique SSH authentication methods.');
   return {
+    backend: choice(input.backend, 'SSH connection engine', ['openssh', 'managed'], 'openssh'), authOrder: [...authOrder],
     compression: boolean(input.compression, 'Compression'), agentForwarding: boolean(input.agentForwarding, 'Agent forwarding'), x11Forwarding: boolean(input.x11Forwarding, 'X11 forwarding'),
     keepAliveInterval: integer(input.keepAliveInterval, 'Keepalive interval', 0, 3600, 30), keepAliveCountMax: integer(input.keepAliveCountMax, 'Keepalive attempts', 1, 100, 3), connectTimeout: integer(input.connectTimeout, 'Connection timeout', 1, 600, 15),
     authMethod: choice(input.authMethod, 'Authentication method', ['auto', 'publickey', 'password', 'keyboard-interactive', 'gssapi'], 'auto'),
@@ -161,12 +164,15 @@ function validateSession(input) {
   const forwardings = validateForwardings(input.forwardings);
   if (protocol !== 'ssh' && forwardings.length) fail('Port forwarding is available for SSH sessions only.');
   const accent = color(input.color, 'Color', '#60a5fa');
+  const credentialId = input.credentialId === undefined || input.credentialId === '' ? '' : id(input.credentialId);
+  const ssh = validateSSH(input.ssh);
+  if (credentialId && (!['ssh', 'sftp'].includes(protocol) || ssh.backend !== 'managed')) fail('Saved credentials require a managed SSH or graphical SFTP connection.');
   return {
     id: id(input.id), name, folder: folder(input.folder), protocol, host,
-    port: integer(input.port, 'Port', 1, 65535, ['telnet', 'raw'].includes(protocol) ? 23 : 22), username: username(input.username),
+    port: integer(input.port, 'Port', 1, 65535, ['telnet', 'raw'].includes(protocol) ? 23 : 22), username: credentialId ? '' : username(input.username), credentialId,
     identityFile: filePath(input.identityFile, 'Identity file'), jumpHost: jumpHost(input.jumpHost),
     cwd: filePath(input.cwd, 'Working directory'), description: string(input.description, 'Description', 4096), color: accent, forwardings,
-    terminal: validateTerminal(input.terminal), ssh: validateSSH(input.ssh), serial: validateSerial(input.serial, protocol === 'serial'),
+    terminal: validateTerminal(input.terminal), ssh, serial: validateSerial(input.serial, protocol === 'serial'),
   };
 }
 function validateSettings(input = {}) {
@@ -175,6 +181,7 @@ function validateSettings(input = {}) {
   if (!['dark', 'light'].includes(theme)) fail('Theme must be dark or light.');
   if (input.keywords !== undefined && (!Array.isArray(input.keywords) || input.keywords.length > 32)) fail('Keywords must contain at most 32 literal rules.');
   return {
+    showQuickConnectOnStartup: boolean(input.showQuickConnectOnStartup, 'Show Quick Connect on startup'),
     theme, fontSize: integer(input.fontSize, 'Font size', 8, 72, DEFAULT_SETTINGS.fontSize), scrollback: integer(input.scrollback, 'Scrollback', 100, 128000, DEFAULT_SETTINGS.scrollback),
     fontFamily: singleLine(input.fontFamily, 'Font family', 240, DEFAULT_SETTINGS.fontFamily), colorScheme: choice(input.colorScheme, 'Color scheme', COLOR_SCHEMES, DEFAULT_SETTINGS.colorScheme),
     matchColorScheme: boolean(input.matchColorScheme, 'Match interface to terminal colors', DEFAULT_SETTINGS.matchColorScheme),
@@ -242,6 +249,7 @@ function expandHome(value, env) {
 }
 function buildLaunch(input, { platform = process.platform, env = process.env, cwd = process.cwd() } = {}) {
   const session = validateSession(input);
+  if (session.credentialId) fail('Saved credentials cannot be passed to a system command. Choose a managed connection.');
   if (!['local', 'ssh', 'sftp'].includes(session.protocol)) fail('This protocol uses a device or socket transport, not a local process.');
   const options = { name: session.terminal.terminalType, cols: 100, rows: 30, cwd: expandHome(session.cwd || cwd, env), env: { ...env, TERM: session.terminal.terminalType, COLORTERM: 'truecolor' } };
   if (session.protocol === 'local') {
@@ -319,7 +327,8 @@ function validateConfig(input, { imported = false } = {}) {
   if ((!imported || input.version !== undefined) && ![1, 2].includes(input.version)) fail('Unsupported configuration version. Expected version 1 or 2.');
   if (!Array.isArray(input.sessions) || input.sessions.length > 1000) fail('Configuration sessions must be an array with at most 1000 entries.');
   if (!imported && (input.settings === undefined || input.snippets === undefined)) fail('Configuration settings or snippets are missing.');
-  const sessions = input.sessions.map(validateSession);
+  // Imports cannot select an existing local vault entry, even if its ID is known.
+  const sessions = input.sessions.map(item => validateSession(imported ? { ...item, credentialId: '' } : item));
   const ids = new Set();
   for (const session of sessions) {
     if (ids.has(session.id)) fail('Session IDs must be unique.');
@@ -431,7 +440,7 @@ function createStore(directory) {
       state.commandHistory = validateCommandHistory(state.commandHistory, state.settings.commandHistoryLimit);
       return persist(state);
     },
-    exportConfig() { return clone(load()); },
+    exportConfig() { const exported = clone(load()); for (const session of exported.sessions) session.credentialId = ''; return exported; },
   };
 }
 
