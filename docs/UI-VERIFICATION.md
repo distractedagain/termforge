@@ -1,16 +1,26 @@
 # TermForge interface verification
 
-## TermForge 0.8 project workspace — local verification
+## TermForge 0.8 project workspace — source verification
 
-The existing **97/97 headless interface checks** and **13/13 project interface checks** passed with no browser console/page errors. The local backend suite passed **200/200 tests**, with no failures or skips. Native CI results are pending; no packaged desktop or real WSL result is claimed by this report.
+The existing **97/97 headless interface checks** and **13/13 project interface checks** passed with no browser console/page errors. The local backend suite passed **200/200 tests**, with no failures or skips. Linux CI also passed all three suites at source `c2d00e3c9284a6c304f821cf2698a50f46dce847`. No interactive release-package or real WSL result is claimed by this report.
 
 `scripts/project-ui-check.cjs` exercises the bundled Monaco editor through headless Chromium. Its project bridge uses real temporary files and a temporary Git repository; AI responses and Ansible run events are synthetic. Passed coverage includes edit/save conflicts, same-folder reopening, backup preview/restoration, Git diffs, native-menu event handling for editor actions, reviewed AI file proposals, Ansible trust/confirmation/cancellation controls, local JSON worker validation, and compact/light layouts. The existing terminal/AI harness uses synthetic sessions and model responses.
 
 Separately, `scripts/ansible-check.cjs` passed **7/7 real localhost integration checks** using Python 3.14.8, Ansible Core 2.21.5 and Runner 2.4.3. That integration creates and removes a temporary localhost fixture; it verifies runtime availability, syntax, supported check/diff behavior, an explicit fixture write, changed-input rejection, task failure and cancellation. It does not contact network devices or prove every collection's behavior.
 
-No local Electron window was launched for these checks. Real WSL, packaged interaction and live model inference remain outside this evidence.
+No Electron window was launched on the development laptop. Real WSL, packaged interaction and live model inference remain outside this evidence.
 
-The expanded `npm run smoke` check is configured for Linux CI only and has not yet run at this source revision. It will exercise the actual Electron preload bridge, JSON worker messages/diagnostics over `termforge://`, native clipboard copy/paste, real fixture-file saves, CSP behavior and absence of terminal writes from editor actions. The native folder-selection result is stubbed, so it does not establish interactive OS-picker behavior. Existing PTY and isolated loopback SSH checks remain part of that smoke. Source configuration alone is not a passing native result.
+The expanded `npm run smoke` passed in the [Linux CI job](https://github.com/distractedagain/termforge/actions/runs/38342881401/job/115117592974) at that source. It ran the source app in real Electron under Xvfb and verified:
+
+- The actual preload/native clipboard path, with write completion awaited before acknowledgement, complete-document copy and editor paste.
+- YAML and JSON edits saved to real fixture files without writing to any open terminal.
+- The actual JSON worker over `termforge://`, with **10 worker messages, zero worker errors**, and diagnostics that cleared after correction.
+- **Zero CSP violations**, plus successful desktop and editor PNG captures.
+- Existing real PTY, terminal/broadcast and isolated loopback SSH checks.
+
+The native folder-selection result is stubbed, so this establishes the IPC path rather than interactive OS-picker behavior. The Electron run did not use an installed release package. Earlier CI attempts exposed an Xvfb capture problem and an asynchronous clipboard assumption; the final run retains strict worker, clipboard and save assertions and includes the clipboard IPC completion correction. Screenshot availability is recorded separately, with a warning if capture fails; both captures succeeded in the final run.
+
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38342881401) and all four [packaging jobs](https://github.com/distractedagain/termforge/actions/runs/38342904453) passed at the same source; packaging succeeded on its first attempt. Both Macs and Linux passed 200 backend tests each; Windows passed 195 with five expected POSIX/symlink skips. The two Macs and Linux also passed all 7 real localhost Ansible checks. The final Intel Mac run used Python 3.13.15, Ansible Core 2.21.5 and Runner 2.4.3. Both Mac packages passed `codesign --verify --deep --strict`, with ad-hoc signatures and no Developer ID or notarization. Build success and the Linux source-app smoke do not establish interactive packaged behavior on all platforms.
 
 ## TermForge 0.7 modern interface — historical verification
 
