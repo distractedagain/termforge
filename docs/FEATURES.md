@@ -2,11 +2,12 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. SecureCRT 9.7 macOS is the visual reference; the overall feature goal covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.5.0
+## Current source scope — TermForge 0.6.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
 | Desktop | Electron with native PTYs and socket/device adapters; versioned CI/package evidence below | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
+| AI Assistant | Local Ollama or OpenRouter free router, explicit editable context, streamed answers, reviewed commands pinned to the original terminal | Free online quotas apply; temporary user API key required online; no bundled ChatGPT/Claude API, autonomous execution, saved chat history or live model verification; see [AI guide](AI-ASSISTANT.md) |
 | Terminal | xterm.js scrollback, selection, resize, search, per-session fonts/schemes/cursor | TERM hints do not create distinct VT/ANSI engines; specialized emulations remain missing |
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Installed system OpenSSH | Installed client/server determine authentication and algorithm support; no authentication-state detector |
@@ -48,6 +49,8 @@ The limited INI reader imports nonsecret SSH2 connection metadata, not passwords
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+The 0.6 development checks passed **152 backend tests and 91 headless interface checks**, with no failures or console errors. Local AI tests use real isolated HTTP fixtures; online tests simulate HTTPS/SSE. Interface tests exercise consent, exact selected-context sharing, temporary API-key clearing, clipboard focus, streaming/cancellation and reviewed commands pinned to their original terminal. These results do not establish live provider availability or packaged desktop behavior.
 
 The 0.5 update passed **115 local backend tests and 72 headless interface checks**, without failures or browser console errors. [Native CI](https://github.com/distractedagain/termforge/actions/runs/38328313996), [packaging](https://github.com/distractedagain/termforge/actions/runs/38328332260), and [publication](https://github.com/distractedagain/termforge/actions/runs/38328921919) succeeded on the first attempt at tagged source `a3697bcbb7c803edfde80d23e5c5769c621671ba`. Both Macs and Linux passed 115 tests each; Windows passed 112 with three expected POSIX-only skips. Linux passed 72 headless checks. All thirteen public assets matched the manifest and asset digests; anonymously downloaded build records confirmed the tagged source. These checks cover source/build provenance and synthetic renderer behavior, with packaged interactive testing still pending.
 

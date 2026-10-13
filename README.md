@@ -12,7 +12,7 @@ This 0.3 image uses synthetic sessions and output; no device is connected. It wa
 
 [Earlier TermForge v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [historical Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0) downloads remain available. They do not include the new 0.5 tab groups and detailed snapshots; v0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
-The source is available under the MIT license. There is no subscription, activation, account, or cloud service requirement.
+The source is available under the MIT license. Core terminal features require no subscription, activation, account, or cloud service. Optional free online AI requires your own OpenRouter account and API key; local AI uses a separately installed Ollama model.
 
 ### Opening the macOS preview
 
@@ -26,7 +26,19 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.5 — tab groups and workspace snapshots
+## New in 0.6 source — AI Assistant
+
+Open **View → AI Assistant** to investigate output, explain errors or draft commands. Choose **Ollama (local)** or **Free online models (OpenRouter)**. Online requests use only the free router with zero price caps and no paid fallback; provider quotas and availability apply. Free ChatGPT and Claude chat accounts are not bundled API access.
+
+Terminal text is attached explicitly with an editable preview. Online sending requires a masked, temporary API key and a sharing opt-in. Completed command suggestions enter the Command Window for review and confirmation against their original terminal. No commands run automatically. See [AI Assistant setup, privacy and limits](docs/AI-ASSISTANT.md).
+
+The 0.6 development checks passed **152 backend tests and 91 headless interface checks**, with no failures or browser console errors. Model responses were simulated; live provider inference and packaged interactive behavior remain unverified.
+
+![AI Assistant with a synthetic free online response](docs/images/ai-assistant-online.png)
+
+This 0.6 image uses a synthetic terminal and simulated AI response in a headless browser. No real model or device was contacted.
+
+## Tab groups and workspace snapshots added in 0.5
 
 The 0.5 preview adds independent tab groups with adjustable splits, tab movement, and per-group selected terminals. Use **Window → New Vertical Tab Group**, **New Horizontal Tab Group**, or **Collapse Tab Groups**. Existing tile commands remain available.
 
@@ -54,6 +66,7 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 
 ## Included
 
+- Optional AI Assistant with local Ollama or the OpenRouter free router, explicit context sharing, streaming/cancellation and reviewed commands pinned to their original terminal.
 - SSH, interactive SFTP, and local shells through installed system tools; native Telnet and Raw TCP connections; serial device selection and connection settings.
 - Saved session folders, filtering, Quick Connect, Connect Bar, multi-selection and selected-field bulk editing.
 - Reorderable/cloned tabs, independent resizable tab groups, horizontal/vertical/grid tiling, an Active Sessions list, and snapshots retaining repeated saved-session connections and group layouts.

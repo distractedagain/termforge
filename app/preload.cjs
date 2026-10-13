@@ -9,6 +9,10 @@ const subscribe = (name) => (callback) => {
 };
 contextBridge.exposeInMainWorld('termforge', {
   getState: invoke('getState'),
+  aiModels: invoke('aiModels'),
+  aiStart: invoke('aiStart'),
+  aiCancel: invoke('aiCancel'),
+  onAiEvent: subscribe('aiEvent'),
   saveSession: invoke('saveSession'),
   saveSessions: invoke('saveSessions'),
   deleteSession: invoke('deleteSession'),

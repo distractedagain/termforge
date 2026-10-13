@@ -10,6 +10,7 @@ const { matchingMapping } = require('./keymap.cjs');
 const { createTftpServer } = require('./tftp.cjs');
 const { stopOwnedResources } = require('./lifecycle.cjs');
 const { writePrivateFile, resolveDataDirectory } = require('./files.cjs');
+const { createAiAssistant } = require('./ai-assistant.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -17,6 +18,7 @@ let window;
 let store;
 let terminals;
 let automation;
+let localAi;
 let activeTerminalId = null;
 let focusedTerminalId = null;
 let tftp = null;
@@ -32,6 +34,7 @@ function send(channel, value) {
   if (window && !window.isDestroyed()) window.webContents.send(`termforge:${channel}`, value);
 }
 async function cleanupTerminals() {
+  localAi?.close();
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
   screenRequests.clear();
   const server = tftp;
@@ -51,7 +54,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -79,14 +82,15 @@ function applicationMenu() {
       ...(process.platform === 'darwin' ? [] : [{ role: 'quit' }])
     ] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, separator, { role: 'cut' },
-      action('Copy Terminal Selection', 'copy', process.platform === 'darwin' ? 'Command+C' : 'Control+Shift+C'),
-      action('Paste into Terminal', 'paste', process.platform === 'darwin' ? 'Command+V' : 'Control+Shift+V'),
-      action('Select Terminal Output', 'select-all'), separator,
+      action('Copy', 'copy', process.platform === 'darwin' ? 'Command+C' : 'Control+Shift+C'),
+      action('Paste', 'paste', process.platform === 'darwin' ? 'Command+V' : 'Control+Shift+V'),
+      action('Select All', 'select-all'), separator,
       action('Find…', 'find', 'CommandOrControl+F')
     ] },
     { label: 'View', submenu: [
       action('Session Manager', 'show-session-manager'), action('Command Window', 'show-command-window'),
       action('Button Bar', 'show-button-bar'), separator,
+      action('AI Assistant', 'local-ai'), separator,
       action('Connect Bar', 'connect-bar'), action('Command Manager', 'show-command-manager'), action('Active Sessions Manager', 'show-active-sessions'), separator,
       action('Clear Screen', 'clear-screen'), action('Reset Terminal', 'reset-terminal'), separator,
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, separator, { role: 'togglefullscreen' }
@@ -137,6 +141,9 @@ async function importSecureCRT() {
 
 function registerHandlers() {
   handle('getState', getState);
+  handle('aiModels', (options) => localAi.listModels(options));
+  handle('aiStart', (request) => localAi.start(request));
+  handle('aiCancel', (requestId) => localAi.cancel(requestId));
   handle('saveSession', (input) => {
     const profile = validateSession(input);
     store.saveSession(profile);
@@ -304,6 +311,7 @@ async function boot() {
     getScreen: readScreen, activateTerminal: (id) => { if (!terminals.has(requiredId(id))) throw new Error('Terminal is no longer open.'); activeTerminalId = id; send('terminalActivated', { id }); },
     emitOutput: (data) => send('scriptOutput', data), emitStatus: (data) => send('scriptStatus', data),
   });
+  localAi = createAiAssistant({ emit: (event) => send('aiEvent', event) });
   registerHandlers();
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !focusedTerminalId) return;

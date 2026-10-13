@@ -1,6 +1,6 @@
 # Security
 
-TermForge is in early development. Version 0.4 is the current published preview. It has not received an independent security audit and has no established support or security-update service. Each release has its own verification limits.
+TermForge is in early development. See the README for the current published preview. It has not received an independent security audit and has no established support or security-update service. Each release has its own verification limits.
 
 ## macOS preview approval
 
@@ -23,6 +23,8 @@ For a trusted release copy, use the app-specific **Open Anyway** exception descr
 - Input recording is explicit and may capture passwords or other sensitive commands typed while active. Review and remove sensitive events before exporting or replaying generated Python. Command history and recordings are ordinary local data, not an encrypted vault.
 
 ## Electron and dependencies
+
+The optional AI Assistant sends only the typed prompt and explicitly attached, editable context. Common secret masking is incomplete; review the preview. Online requests require explicit opt-in and send text to OpenRouter and its model provider, whose retention policies apply. API keys are temporary and are not saved to settings or exports. Local mode uses a fixed loopback Ollama endpoint and verifies local-model metadata before sending prompts. AI replies are untrusted text; command suggestions are staged, pinned to their original session and confirmed before execution. There is no autonomous terminal or filesystem tool access. See [AI privacy and limits](docs/AI-ASSISTANT.md).
 
 The renderer receives a constrained preload API; privileged terminal and file operations belong in the main process. Keep context isolation enabled, Node integration disabled in the renderer, local content protected by a content-security policy, and external navigation blocked. Do not extend the preload bridge into a generic command, filesystem, or IPC interface.
 

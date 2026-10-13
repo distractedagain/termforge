@@ -27,6 +27,7 @@ export function createWorkflows(context) {
     if (name === 'active') renderActive();
   }
   function previewCommand(command) {
+    context.clearCommandDraft?.();
     setPane('commandWindow', true); $('command-input').value = command.command; $('command-input').focus();
   }
   async function launchCommand(command) {
@@ -272,7 +273,7 @@ export function createWorkflows(context) {
     $('quick-connect').addEventListener('click', openQuickConnect); $('quick-protocol').addEventListener('change', () => { $('quick-port').value = ['telnet', 'raw'].includes($('quick-protocol').value) ? '23' : '22'; quickFields(); }); $('quick-save').addEventListener('change', quickFields);
     $('quick-connect-form').addEventListener('submit', submitQuick); $('connect-address').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); attempt(connectAddress); } });
     $('bulk-form').addEventListener('submit', saveBulk); $('snapshot-save').addEventListener('click', () => attempt(saveSnapshot));
-    $('command-history').addEventListener('change', () => { if ($('command-history').value === '') return; $('command-input').value = state().commandHistory[Number($('command-history').value)] || ''; $('command-input').focus(); $('command-history').value = ''; });
+    $('command-history').addEventListener('change', () => { if ($('command-history').value === '') return; context.clearCommandDraft?.(); $('command-input').value = state().commandHistory[Number($('command-history').value)] || ''; $('command-input').focus(); $('command-history').value = ''; });
   }
   return { install, refresh, showManager, recordHistory, bulkOptions, perform, renderHistory, renderCommands, renderActive };
 }

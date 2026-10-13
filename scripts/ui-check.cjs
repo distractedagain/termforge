@@ -591,6 +591,233 @@ async function runWorkspaceChecks() {
   });
 }
 
+async function openLocalAi(page) {
+  await action(page, 'local-ai');
+  await page.locator('#local-ai-panel').waitFor({ state: 'visible' });
+  await page.locator('#local-ai-refresh').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#local-ai-model option')].some(option => option.value === 'synthetic-local:4b'));
+  await page.locator('#local-ai-model').selectOption('synthetic-local:4b');
+}
+async function startLocalAi(page, prompt = 'Explain this synthetic output', mode = 'ask') {
+  const before = (await calls(page)).aiStarts.length;
+  await page.locator('#local-ai-mode').selectOption(mode);
+  await page.locator('#local-ai-prompt').fill(prompt);
+  await page.locator('#local-ai-send').click();
+  await page.waitForFunction(before => window.__qa.calls.aiStarts.length === before + 1, before);
+  return (await calls(page)).aiStarts.at(-1);
+}
+async function replyLocalAi(page, request, text) {
+  await page.evaluate(({ requestId, text }) => { window.__qa.emitAi({ requestId, type: 'delta', text }); window.__qa.emitAi({ requestId, type: 'done' }); }, { requestId: request.requestId, text });
+  await page.waitForFunction(() => document.querySelector('#local-ai-cancel').disabled || document.querySelector('#local-ai-cancel').hidden);
+}
+async function writeScreenFixture(page, id, data, name) {
+  await page.evaluate(({ id, data, name }) => { window.__qa.emitData(id, data); window.__qa.emitScreen({ requestId: name, id }); }, { id, data, name });
+  await page.waitForFunction(name => window.__qa.calls.screens.some(screen => screen.requestId === name), name);
+}
+async function runLocalAiChecks() {
+  const ai = await pageFor();
+  await check('Local AI starts hidden without model discovery, inference, or terminal input', ai, async () => {
+    assert.equal(await ai.locator('#local-ai-panel').isVisible(), false);
+    const before = await calls(ai); assert.deepEqual(before.aiModels, []); assert.deepEqual(before.aiStarts, []); assert.deepEqual(before.aiCancels, []); assert.deepEqual(before.writes, []);
+    await openLocalAi(ai);
+    assert.equal(await ai.locator('#local-ai-port').inputValue(), '11434');
+    assert.equal(await ai.locator('#local-ai-prompt').getAttribute('maxlength'), '8192'); assert.equal(await ai.locator('#local-ai-context').getAttribute('maxlength'), '16384');
+    assert.ok((await calls(ai)).aiModels.every(request => request.port === 11434));
+    assert.equal((await calls(ai)).aiStarts.length, 0); assert.equal((await calls(ai)).opens.length, 0);
+  });
+  const first = await openProfile(ai); const second = await openProfile(ai, 'switch-01');
+  await ai.evaluate(id => window.__qa.emitActivated(id), first.id);
+  await check('A typed Local AI question sends only the entered prompt and no terminal or profile context', ai, async () => {
+    await writeScreenFixture(ai, first.id, '\x1b[2J\x1b[HAUTO-CONTEXT-MUST-NOT-LEAVE-TERMINAL', 'ai-private-screen');
+    const request = await startLocalAi(ai, 'What does show interfaces mean?');
+    assert.equal(request.prompt, 'What does show interfaces mean?'); assert.equal(request.context, ''); assert.equal(request.mode, 'ask'); assert.equal(request.port, 11434); assert.equal(request.model, 'synthetic-local:4b'); assert.ok(request.requestId);
+    assert.deepEqual(Object.keys(request).sort(), ['context', 'mode', 'model', 'port', 'prompt', 'requestId']);
+    assert.equal(JSON.stringify(request).includes('AUTO-CONTEXT'), false); assert.equal(JSON.stringify(request).includes('router-01'), false);
+    const hostile = '<img src=x onerror="window.__qaAiInjected=true">\n<script>window.__qaAiInjected=true</script>\n日本語 🔧 café';
+    await replyLocalAi(ai, request, hostile);
+    assert.ok((await ai.locator('#local-ai-response').textContent()).includes(hostile));
+    assert.equal(await ai.locator('#local-ai-response img, #local-ai-response script').count(), 0); assert.equal(await ai.evaluate(() => window.__qaAiInjected === true), false); assert.equal((await calls(ai)).writes.length, 0);
+  });
+  await check('Explicit selection attachment redacts obvious secrets and sends the editable preview exactly', ai, async () => {
+    await writeScreenFixture(ai, first.id, '\x1b[3J\x1b[2J\x1b[HSELECTED-ONLY-CONTEXT\r\npassword=synthetic-password\r\nAuthorization: Bearer synthetic-bearer\r\napi_key=synthetic-api-key\r\n-----BEGIN PGP PRIVATE KEY BLOCK-----\r\nsynthetic-private-key-material\r\n-----END PGP PRIVATE KEY BLOCK-----\r\n', 'ai-selection-screen');
+    await ai.locator(`.terminal-pane[data-connection-id="${first.id}"] .xterm-helper-textarea`).focus();
+    await action(ai, 'select-all'); await ai.locator('#local-ai-attach-selection').click();
+    const captured = await ai.locator('#local-ai-context').inputValue();
+    assert.ok(captured.includes('SELECTED-ONLY-CONTEXT')); for (const secret of ['synthetic-password', 'synthetic-bearer', 'synthetic-api-key', 'synthetic-private-key-material']) assert.equal(captured.includes(secret), false);
+    assert.match(await ai.locator('#local-ai-context-source').innerText(), /router-01/);
+    assert.equal((await calls(ai)).aiStarts.length, 1);
+    const edited = 'Only this manually reviewed context: 接続 failed.';
+    await ai.locator('#local-ai-context').fill(edited);
+    const request = await startLocalAi(ai, 'Explain the attached output.', 'explain');
+    assert.equal(request.context, edited); assert.equal(request.mode, 'explain'); await replyLocalAi(ai, request, 'Synthetic explanation only.');
+    await ai.locator('#local-ai-remove-context').click();
+    const without = await startLocalAi(ai, 'What should I check next?'); assert.equal(without.context, ''); await replyLocalAi(ai, without, 'Check the interface status.');
+  });
+  await check('Visible-screen attachment excludes scrollback and never captures another tab implicitly', ai, async () => {
+    const lines = ['OFFSCREEN-PRIVATE-SENTINEL', ...Array.from({ length: 160 }, (_, index) => `synthetic filler line ${index}`), 'VISIBLE-SCREEN-ONLY-SENTINEL'];
+    await writeScreenFixture(ai, first.id, '\x1b[3J\x1b[2J\x1b[H' + lines.join('\r\n'), 'ai-visible-screen');
+    await ai.locator('#local-ai-attach-screen').click();
+    const context = await ai.locator('#local-ai-context').inputValue(); assert.ok(context.includes('VISIBLE-SCREEN-ONLY-SENTINEL')); assert.equal(context.includes('OFFSCREEN-PRIVATE-SENTINEL'), false);
+    await ai.evaluate(id => window.__qa.emitActivated(id), second.id);
+    const request = await startLocalAi(ai, 'Suggest a read-only command for this captured context.', 'command');
+    assert.equal(request.context, context); assert.match(await ai.locator('#local-ai-request-target').innerText(), /router-01/);
+    await replyLocalAi(ai, request, '```sh\nshow interfaces status\n```');
+    await action(ai, 'show-command-window'); await ai.locator('#command-input').fill('existing draft');
+    await ai.locator('.local-ai-use-command').first().click();
+    assert.equal(await ai.locator('#command-input').inputValue(), 'existing draft'); assert.equal((await calls(ai)).writes.length, 0);
+    assert.match(await ai.locator('#local-ai-error').innerText(), /target|active|switch|session/i);
+    await ai.locator('#local-ai-remove-context').click();
+  });
+  await check('An AI command remains a draft, clears broadcast, and requires explicit command review', ai, async () => {
+    await ai.evaluate(id => window.__qa.emitActivated(id), first.id);
+    const request = await startLocalAi(ai, 'Suggest an interface status command.', 'command'); await replyLocalAi(ai, request, 'Review the output with:\n```shell\nshow interfaces status\n```');
+    await ai.locator('#broadcast-mode').check(); const before = (await calls(ai)).writes.length;
+    await ai.locator('.local-ai-use-command').first().click();
+    assert.equal(await ai.locator('#command-input').inputValue(), 'show interfaces status'); assert.equal(await ai.locator('#broadcast-mode').isChecked(), false); assert.equal((await calls(ai)).writes.length, before);
+    await ai.locator('#send-command').click(); await ai.locator('#confirm-dialog').waitFor({ state: 'visible' });
+    assert.equal(await ai.locator('#confirm-preview').textContent(), 'show interfaces status'); assert.equal(await ai.locator('.confirm-target-item').count(), 1); assert.match(await ai.locator('#confirm-targets').innerText(), /router-01/);
+    await ai.locator('#confirm-cancel').click(); assert.equal((await calls(ai)).writes.length, before);
+    await ai.evaluate(id => window.__qa.emitActivated(id), second.id); await ai.locator('#send-command').click();
+    assert.equal((await calls(ai)).writes.length, before); assert.equal(await ai.locator('#confirm-dialog').isVisible(), false);
+    await ai.locator('#toast-stack .toast.error').filter({ hasText: 'AI drafts can only be sent' }).click();
+    await ai.evaluate(id => window.__qa.emitActivated(id), first.id); await ai.locator('#send-command').click(); await ai.locator('#confirm-accept').click();
+    await ai.waitForFunction(before => window.__qa.calls.writes.length === before + 1, before);
+    assert.deepEqual((await calls(ai)).writes.at(-1), { id: first.id, data: 'show interfaces status\r' });
+  });
+  await check('Changing the active target while an AI command review is open prevents sending', ai, async () => {
+    await ai.locator('.local-ai-use-command').first().click(); const before = (await calls(ai)).writes.length;
+    await ai.locator('#send-command').click(); await ai.locator('#confirm-dialog').waitFor({ state: 'visible' });
+    await ai.evaluate(id => window.__qa.emitActivated(id), second.id); await ai.locator('#confirm-accept').click();
+    assert.equal((await calls(ai)).writes.length, before);
+    await ai.evaluate(id => window.__qa.emitActivated(id), first.id);
+  });
+  await check('A completed suggestion cannot stage against a closed terminal', ai, async () => {
+    const request = await startLocalAi(ai, 'Suggest a read-only status command.', 'command'); await replyLocalAi(ai, request, '```sh\nshow clock\n```');
+    await ai.locator('#command-input').fill('preserve this draft');
+    await ai.evaluate(id => window.__qa.emitExit(id), first.id); await action(ai, 'close-tab'); await ai.locator(`.terminal-pane[data-connection-id="${first.id}"]`).waitFor({ state: 'detached' });
+    const before = (await calls(ai)).writes.length; await ai.locator('.local-ai-use-command').first().click();
+    assert.equal(await ai.locator('#command-input').inputValue(), 'preserve this draft'); assert.equal((await calls(ai)).writes.length, before); assert.match(await ai.locator('#local-ai-error').innerText(), /target|closed|active|session/i);
+  });
+  await check('Cancel stops one request and stale streaming events cannot contaminate a new answer', ai, async () => {
+    const request = await startLocalAi(ai, 'Long first question');
+    await ai.evaluate(requestId => window.__qa.emitAi({ requestId, type: 'delta', text: 'First partial response' }), request.requestId);
+    await ai.locator('#local-ai-cancel').click(); assert.ok((await calls(ai)).aiCancels.includes(request.requestId));
+    const fresh = await startLocalAi(ai, 'Fresh second question'); assert.notEqual(fresh.requestId, request.requestId);
+    await ai.evaluate(({ oldId, id }) => { window.__qa.emitAi({ requestId: oldId, type: 'delta', text: 'STALE-RESPONSE-MUST-BE-IGNORED' }); window.__qa.emitAi({ requestId: oldId, type: 'done' }); window.__qa.emitAi({ requestId: id, type: 'delta', text: 'Fresh response 日本語 🔧' }); window.__qa.emitAi({ requestId: id, type: 'done' }); }, { oldId: request.requestId, id: fresh.requestId });
+    const answer = await ai.locator('#local-ai-response').textContent(); assert.ok(answer.includes('Fresh response 日本語 🔧')); assert.equal(answer.includes('STALE-RESPONSE'), false);
+  });
+  await check('Local AI transport and stream errors remain visible and allow a clean retry', ai, async () => {
+    await ai.evaluate(() => window.__qa.setAiStartError('Synthetic local model request failed.'));
+    await startLocalAi(ai, 'Trigger a synthetic failure'); await ai.locator('#local-ai-error').waitFor({ state: 'visible' }); assert.match(await ai.locator('#local-ai-error').innerText(), /Synthetic local model request failed/);
+    await ai.evaluate(() => window.__qa.setAiStartError(''));
+    const request = await startLocalAi(ai, 'Retry'); await ai.evaluate(requestId => window.__qa.emitAi({ requestId, type: 'error', error: 'Synthetic stream interruption.' }), request.requestId);
+    assert.match(await ai.locator('#local-ai-error').innerText(), /Synthetic stream interruption/);
+    const retry = await startLocalAi(ai, 'Retry again'); await replyLocalAi(ai, retry, 'Recovered.'); assert.match(await ai.locator('#local-ai-response').innerText(), /Recovered/);
+  });
+  await check('Closing Local AI cancels in-flight generation and retains no background inference', ai, async () => {
+    const request = await startLocalAi(ai, 'Close during generation'); await ai.locator('#local-ai-close').click();
+    assert.equal(await ai.locator('#local-ai-panel').isVisible(), false); assert.ok((await calls(ai)).aiCancels.includes(request.requestId));
+    const before = await calls(ai); await ai.evaluate(requestId => { window.__qa.emitAi({ requestId, type: 'delta', text: 'HIDDEN-STALE-RESPONSE' }); window.__qa.emitAi({ requestId, type: 'done' }); }, request.requestId);
+    assert.equal((await calls(ai)).aiStarts.length, before.aiStarts.length); assert.equal((await calls(ai)).writes.length, before.writes.length);
+  });
+  const setup = await pageFor();
+  await check('Empty or unavailable local model servers give an inline setup hint and can be refreshed', setup, async () => {
+    await setup.evaluate(() => window.__qa.setAiModels([])); await action(setup, 'local-ai'); await setup.locator('#local-ai-refresh').click();
+    await setup.waitForFunction(() => !document.querySelector('#local-ai-refresh').disabled);
+    assert.match(await setup.locator('#local-ai-panel').innerText(), /Ollama|model|download|install/i); assert.equal(await setup.locator('#local-ai-send').isDisabled(), true); assert.equal((await calls(setup)).aiStarts.length, 0);
+    await setup.evaluate(() => window.__qa.setAiModelError('Cannot reach Ollama on 127.0.0.1:11434.'));
+    await setup.locator('#local-ai-refresh').click(); await setup.locator('#local-ai-error').waitFor({ state: 'visible' }); assert.match(await setup.locator('#local-ai-error').innerText(), /Cannot reach Ollama/);
+    await setup.evaluate(() => { window.__qa.setAiModelError(''); window.__qa.setAiModels([{ name: 'synthetic-local:4b', size: 2500000000, parameterSize: '4B' }]); });
+    await setup.locator('#local-ai-refresh').click(); await setup.waitForFunction(() => [...document.querySelectorAll('#local-ai-model option')].some(option => option.value === 'synthetic-local:4b'));
+    assert.equal((await calls(setup)).aiStarts.length, 0); assert.equal((await calls(setup)).writes.length, 0);
+  });
+  await check('The Local AI panel follows Solarized chrome and fits an 850 by 600 workspace', setup, async () => {
+    await applyPalette(setup, 'solarized-dark', true); await setup.setViewportSize({ width: 850, height: 600 });
+    const request = await startLocalAi(setup, 'Explain a network interface status.', 'ask'); await replyLocalAi(setup, request, 'SYNTHETIC LOCAL AI PREVIEW — no model or device connected.\nAn interface can be administratively enabled while its physical link is down. Check link state before changing configuration.');
+    const layout = await setup.evaluate(() => {
+      const panel = document.getElementById('local-ai-panel'); const rect = panel.getBoundingClientRect();
+      return { body: { width: document.body.scrollWidth, height: document.body.scrollHeight }, panel: rect.toJSON(), chrome: getComputedStyle(document.documentElement).getPropertyValue('--chrome').trim(), background: getComputedStyle(panel).backgroundColor };
+    });
+    assert.deepEqual(layout.body, { width: 850, height: 600 }); assert.ok(layout.panel.x >= 0 && layout.panel.right <= 850 && layout.panel.bottom <= 600); assert.equal(layout.chrome, '#073642');
+    await screenshot(setup, 'macos-local-ai-solarized-850x600'); return layout;
+  });
+  for (const platform of ['win32', 'linux']) {
+    const page = await pageFor(platform);
+    await check(`${platform} exposes Local AI through View without starting inference`, page, async () => {
+      await page.locator('[data-menu="view"]').click(); await page.locator('#menu-dropdown [data-action="local-ai"]').click();
+      await page.locator('#local-ai-panel').waitFor({ state: 'visible' }); assert.equal((await calls(page)).aiStarts.length, 0); assert.equal((await calls(page)).writes.length, 0);
+    });
+  }
+  const cloud = await pageFor(); const cloudTarget = await openProfile(cloud);
+  await check('Free online AI is an explicit choice and requires a key plus disclosure consent', cloud, async () => {
+    assert.deepEqual((await calls(cloud)).aiModels, []); assert.deepEqual((await calls(cloud)).aiStarts, []);
+    await openLocalAi(cloud); assert.equal(await cloud.locator('#ai-provider').inputValue(), 'ollama');
+    await cloud.locator('#ai-provider').selectOption('openrouter-free');
+    await cloud.waitForFunction(() => [...document.querySelectorAll('#local-ai-model option')].some(option => option.value === 'openrouter/free'));
+    assert.equal(await cloud.locator('#ai-cloud-consent').isChecked(), false); assert.equal(await cloud.locator('#ai-api-key').getAttribute('type'), 'password');
+    await cloud.locator('#local-ai-prompt').fill('Explain a network link state.'); assert.equal(await cloud.locator('#local-ai-send').isDisabled(), true);
+    await cloud.locator('#ai-api-key').fill('synthetic-session-only-key'); assert.equal(await cloud.locator('#local-ai-send').isDisabled(), true);
+    assert.equal((await calls(cloud)).aiStarts.length, 0); assert.ok((await calls(cloud)).aiModels.some(request => JSON.stringify(request) === JSON.stringify({ provider: 'openrouter-free' })));
+    assert.match(await cloud.locator('#local-ai-panel').innerText(), /OpenRouter/i); assert.match(await cloud.locator('#local-ai-panel').innerText(), /sent|send|leave|online/i);
+  });
+  await check('Native menu Paste and Select All stay in the AI key field without terminal input', cloud, async () => {
+    const before = await calls(cloud);
+    await cloud.evaluate(() => window.__qa.setClipboard('synthetic-session-only-key'));
+    await cloud.locator('#ai-api-key').fill(''); await cloud.locator('#ai-api-key').focus(); await action(cloud, 'paste');
+    await cloud.waitForFunction(() => document.getElementById('ai-api-key').value === 'synthetic-session-only-key');
+    await action(cloud, 'select-all');
+    assert.deepEqual(await cloud.locator('#ai-api-key').evaluate(input => [input.selectionStart, input.selectionEnd]), [0, 'synthetic-session-only-key'.length]);
+    assert.equal((await calls(cloud)).writes.length, before.writes.length); assert.equal((await calls(cloud)).aiStarts.length, before.aiStarts.length);
+  });
+  await check('Free online requests contain only the reviewed text and use the fixed free router', cloud, async () => {
+    await writeScreenFixture(cloud, cloudTarget.id, '\x1b[3J\x1b[2J\x1b[HCLOUD-AUTO-CONTEXT-MUST-NOT-BE-SENT\r\npassword=synthetic-cloud-password\r\n', 'ai-cloud-screen');
+    await cloud.locator('#ai-cloud-consent').check();
+    const promptOnly = await startLocalAi(cloud, 'What does link down mean?');
+    assert.deepEqual(Object.keys(promptOnly).sort(), ['apiKey', 'cloudConsent', 'context', 'mode', 'model', 'prompt', 'provider', 'requestId']);
+    assert.equal(promptOnly.provider, 'openrouter-free'); assert.equal(promptOnly.model, 'openrouter/free'); assert.equal(promptOnly.cloudConsent, true); assert.equal(promptOnly.apiKey, 'synthetic-session-only-key'); assert.equal(promptOnly.context, ''); assert.equal(promptOnly.prompt, 'What does link down mean?');
+    assert.equal(JSON.stringify(promptOnly).includes('router-01'), false); assert.equal(JSON.stringify(promptOnly).includes('CLOUD-AUTO-CONTEXT'), false);
+    await replyLocalAi(cloud, promptOnly, 'Synthetic free online answer.');
+    await cloud.locator('#local-ai-attach-screen').click();
+    assert.equal((await cloud.locator('#local-ai-context').inputValue()).includes('synthetic-cloud-password'), false);
+    await cloud.locator('#local-ai-context').fill('The interface is administratively up, operationally down.');
+    const attached = await startLocalAi(cloud, 'Explain only this reviewed text.', 'explain');
+    assert.equal(attached.context, 'The interface is administratively up, operationally down.'); assert.equal(attached.mode, 'explain'); assert.equal(attached.provider, 'openrouter-free'); assert.equal(attached.model, 'openrouter/free');
+    await replyLocalAi(cloud, attached, 'Synthetic explanation.');
+    const saved = JSON.stringify(await state(cloud)); assert.equal(saved.includes('synthetic-session-only-key'), false); assert.equal(saved.includes('Explain only this reviewed text'), false);
+    assert.equal((await calls(cloud)).writes.length, 0); assert.deepEqual((await calls(cloud)).history, []);
+  });
+  await check('Free online quota errors do not retry through a paid or alternate provider', cloud, async () => {
+    const request = await startLocalAi(cloud, 'Trigger a synthetic quota error'); const before = await calls(cloud);
+    await cloud.evaluate(requestId => window.__qa.emitAi({ requestId, type: 'error', error: 'Free request quota exhausted. Try again later; no paid fallback is enabled.' }), request.requestId);
+    await cloud.locator('#local-ai-error').waitFor({ state: 'visible' }); assert.match(await cloud.locator('#local-ai-error').innerText(), /quota exhausted/);
+    const after = await calls(cloud); assert.equal(after.aiStarts.length, before.aiStarts.length); assert.equal(after.aiModels.length, before.aiModels.length); assert.equal(after.writes.length, before.writes.length);
+    assert.ok(after.aiStarts.every(request => request.provider === 'openrouter-free' && request.model === 'openrouter/free'));
+  });
+  await check('Closing or changing the AI provider clears the session-only online key', cloud, async () => {
+    await cloud.locator('#local-ai-close').click(); assert.equal(await cloud.locator('#ai-api-key').inputValue(), '');
+    await action(cloud, 'local-ai'); await cloud.locator('#local-ai-panel').waitFor({ state: 'visible' });
+    assert.equal(await cloud.locator('#ai-api-key').inputValue(), ''); assert.equal(await cloud.locator('#local-ai-send').isDisabled(), true);
+    await cloud.locator('#ai-api-key').fill('synthetic-second-online-key');
+    await cloud.locator('#ai-provider').selectOption('ollama'); assert.equal(await cloud.locator('#ai-api-key').inputValue(), '');
+    await cloud.locator('#ai-provider').selectOption('openrouter-free'); assert.equal(await cloud.locator('#ai-api-key').inputValue(), ''); assert.equal(await cloud.locator('#ai-cloud-consent').isChecked(), false);
+    const storage = await cloud.evaluate(() => ({ local: Object.fromEntries(Object.entries(localStorage)), session: Object.fromEntries(Object.entries(sessionStorage)) }));
+    assert.ok(Object.keys(storage.local).every(key => key === 'termforge-classic-layout')); assert.deepEqual(storage.session, {});
+    assert.equal(JSON.stringify(storage).includes('synthetic-second-online-key'), false); assert.equal(JSON.stringify(storage).includes('synthetic-session-only-key'), false);
+    assert.equal(JSON.stringify(await state(cloud)).includes('synthetic-second-online-key'), false);
+  });
+  // Separate, explicitly synthetic setup/response views: the compact assistant
+  // scrolls naturally, so neither preview hides controls or changes CSS for QA.
+  await cloud.locator('#local-ai-new').click();
+  await writeScreenFixture(cloud, cloudTarget.id, '\x1b[3J\x1b[2J\x1b[HDEMO SESSION — Synthetic preview; no device connected\r\n\r\nrouter-01# show interfaces status\r\nPort    Status          VLAN  Speed\r\nGi0/1   connected       10    1G\r\nGi0/2   administratively down 1G\r\n\r\nrouter-01# ', 'ai-online-preview-screen');
+  await cloud.waitForFunction(() => [...document.querySelectorAll('#local-ai-model option')].some(option => option.value === 'openrouter/free'));
+  await cloud.locator('#ai-api-key').fill('synthetic-preview-key-not-a-real-credential'); await cloud.locator('#ai-cloud-consent').check();
+  const previewRequest = await startLocalAi(cloud, 'Explain administratively down and suggest a read-only check.');
+  await replyLocalAi(cloud, previewRequest, 'SYNTHETIC AI PREVIEW — no AI service contacted.\n\nAdministratively down means the interface is disabled in configuration. Review the intended configuration and current interface status before making changes.\n\n```sh\nshow interfaces status\n```');
+  await cloud.locator('#local-ai-resizer').focus(); await cloud.locator('#local-ai-resizer').press('End');
+  await cloud.locator('.local-ai-body').evaluate(body => { body.scrollTop = 0; }); await screenshot(cloud, 'macos-ai-online-setup-1280x800');
+  await cloud.locator('#local-ai-response').scrollIntoViewIfNeeded(); await screenshot(cloud, 'macos-ai-online-response-1280x800');
+}
+
 async function run() {
   const mac = await pageFor();
   await check('macOS uses a single toolbar, vertical managers, and no duplicate menu', mac, async () => {
@@ -716,7 +943,9 @@ async function run() {
     await nativeDialog(transfers, 'log', 'confirm-dialog'); await transfers.locator('#confirm-accept').click(); await transfers.waitForFunction(() => window.__qa.calls.logs.length === 1); await action(transfers, 'pause-log'); await transfers.waitForFunction(() => window.__qa.calls.logs.length === 2); assert.equal((await calls(transfers)).logs[1].paused, true); await action(transfers, 'pause-log'); await transfers.waitForFunction(() => window.__qa.calls.logs.length === 3); assert.equal((await calls(transfers)).logs[2].paused, false); assert.equal((await calls(transfers)).logs.filter(item => 'enabled' in item).length, 1);
   });
   await check('Multiline clipboard paste is reviewed and cancellation is inert', transfers, async () => {
-    await transfers.evaluate(() => window.__qa.setClipboard('show clock\nshow version\n')); const before = (await calls(transfers)).writes.length; await nativeDialog(transfers, 'paste', 'confirm-dialog'); await transfers.locator('#confirm-cancel').click(); assert.equal((await calls(transfers)).writes.length, before); await nativeDialog(transfers, 'paste', 'confirm-dialog'); await transfers.locator('#confirm-accept').click(); await transfers.waitForFunction(before => window.__qa.calls.writes.length > before, before); assert.ok((await calls(transfers)).writes.at(-1).data.includes('show version'));
+    await transfers.evaluate(() => window.__qa.setClipboard('show clock\nshow version\n')); const before = (await calls(transfers)).writes.length;
+    await transfers.locator('.terminal-pane:visible .xterm-helper-textarea').first().focus(); await nativeDialog(transfers, 'paste', 'confirm-dialog'); await transfers.locator('#confirm-cancel').click(); assert.equal((await calls(transfers)).writes.length, before);
+    await transfers.locator('.terminal-pane:visible .xterm-helper-textarea').first().focus(); await nativeDialog(transfers, 'paste', 'confirm-dialog'); await transfers.locator('#confirm-accept').click(); await transfers.waitForFunction(before => window.__qa.calls.writes.length > before, before); assert.ok((await calls(transfers)).writes.at(-1).data.includes('show version'));
   });
   await check('Backspace and Delete mappings send the configured bytes', transfers, async () => {
     await transfers.locator('.tab-label').filter({ hasText: 'router-01' }).click(); await transfers.locator(`.terminal-pane[data-connection-id="${first.id}"] .xterm-helper-textarea`).focus(); const before = (await calls(transfers)).writes.length; await transfers.keyboard.press('Backspace'); await transfers.keyboard.press('Delete'); await transfers.waitForFunction(before => window.__qa.calls.writes.length === before + 2, before); assert.deepEqual((await calls(transfers)).writes.slice(before).map(write => write.data), ['\x08', '\x7f']);
@@ -798,6 +1027,7 @@ async function run() {
   }
   await runColorChecks();
   await runWorkspaceChecks();
+  await runLocalAiChecks();
   // Separate, clearly labelled synthetic previews. Test notifications and
   // modified profiles from the preceding checks never appear in these images.
   const preview = await pageFor('darwin', { theme: 'dark', fontSize: 15, keywords: [{ text: 'DEMO SESSION', caseSensitive: false, foreground: '#000000', background: '#70e330' }] });

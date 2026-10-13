@@ -16,6 +16,8 @@ import { resolveColorScheme } from '../app/color-schemes.cjs';
 import { createColorPicker } from './color-picker.js';
 import { applyInterfaceColors, applyTerminalColors } from './appearance.js';
 import { createTabGroups } from './tab-groups.js';
+import { createLocalAiUi } from './local-ai.js';
+import './ai-draft.css';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -33,6 +35,7 @@ const pendingExits = new Map();
 const closedIds = new Set();
 const collapsedFolders = new Set();
 let activeId = null;
+let aiDraft = null;
 let tileView = false;
 let tileOrientation = 'grid';
 const tabGroups = createTabGroups();
@@ -54,17 +57,19 @@ const selectedSessionIds = new Set();
 let selectedFolderPath = null;
 let focusedTreeKey = 'folder:';
 let openMenuName = null;
+let menuEditTarget = null;
 const panes = { sessionManager: true, commandWindow: true, buttonBar: true };
 const workflows = createWorkflows({ api, getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
   getSelection: () => selectedSessionIds,
   setSelection: (ids) => { selectedSessionIds.clear(); for (const id of ids) selectedSessionIds.add(id); selectedSessionId = ids[0] || null; },
   getLayout: () => tabGroups.getLayout(),
   setLayout: (layout) => { if (layout.tile) tabGroups.tile(layout.orientation); else tabGroups.collapse(); refreshGroups(); },
-  restoreLayout: (layout, idMap, previousLayout) => { if (tabGroups.restore(layout, idMap, previousLayout)) refreshGroups(); }, renderSessions
+  restoreLayout: (layout, idMap, previousLayout) => { if (tabGroups.restore(layout, idMap, previousLayout)) refreshGroups(); }, renderSessions, clearCommandDraft: clearAiDraft
 });
 const scripts = createScriptUi({ api, getActiveId: () => activeId, toast });
 const recorder = createRecorder({ api, getConnection: () => connections.get(activeId), confirmAction, toast, changed: updateWorkspaceStatus });
 const transfers = createTransferUi({ api });
+const localAi = createLocalAiUi({ api, getConnection: () => connections.get(activeId) || null, stageCommand: stageAiCommand, toast, onLayout: () => requestAnimationFrame(fitVisible) });
 const colorPicker = createColorPicker({
   getSettings: () => state.settings,
   async saveSettings(patch) {
@@ -76,6 +81,7 @@ const colorPicker = createColorPicker({
 });
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const iconPaths = {
+  ai: 'M4 3h16v14H9l-5 4V3 M8 7h8 M8 11h6',
   link: 'M9 14l6-6 M9 7l2-2a4 4 0 0 1 6 6l-2 2 M15 17l-2 2a4 4 0 0 1-6-6l2-2',
   close: 'M4 4l16 16 M20 4L4 20',
   switch: 'M4 8h14l-4-4 M18 8v6 M20 16H6l4 4 M6 16v-6',
@@ -377,6 +383,7 @@ function renderSnippets() {
     button.addEventListener('click', () => {
       setPane('commandWindow', true);
       $('command-input').value = snippet.command;
+      clearAiDraft();
       $('command-input').focus();
     });
     return button;
@@ -1033,14 +1040,39 @@ async function toggleLog(id) {
   finally { connection.logButton.disabled = connection.exited; }
 }
 
+function clearAiDraft() {
+  aiDraft = null;
+  if ($('ai-draft-notice')) $('ai-draft-notice').hidden = true;
+}
+
+function stageAiCommand(text, targetId) {
+  const target = connections.get(targetId);
+  if (!target || target.exited || activeId !== targetId) throw new Error('Return to the original active terminal before using this command.');
+  if (typeof text !== 'string' || !text.trim() || text.length > 16384 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(text)) throw new Error('This suggestion contains unsupported control characters or is too long.');
+  aiDraft = { id: targetId, target, title: target.title };
+  setPane('commandWindow', true);
+  $('broadcast-mode').checked = false;
+  $('command-input').value = text;
+  $('command-input').placeholder = 'Review this AI suggestion before sending it to the original terminal.';
+  $('ai-draft-label').textContent = `AI draft for ${target.title} — review before sending`;
+  $('ai-draft-notice').hidden = false;
+  $('command-input').focus();
+  updateWorkspaceStatus();
+  return true;
+}
+
 async function sendCommand() {
   const raw = $('command-input').value;
   if (!raw.trim()) return;
+  const draft = aiDraft;
+  const validDraft = () => aiDraft === draft && activeId === draft.id && connections.get(draft.id) === draft.target && !draft.target.exited && !$('broadcast-mode').checked && $('command-input').value === raw;
+  if (draft && !validDraft()) { toast('AI drafts can only be sent to their original active terminal with broadcast disabled.', true); return; }
   let targets = $('broadcast-mode').checked ? [...connections.values()].filter((c) => !c.exited) : [connections.get(activeId)].filter((c) => c && !c.exited);
   if (!targets.length) { toast('There is no active terminal to receive this command.'); return; }
-  if ($('broadcast-mode').checked || /[\r\n]/.test(raw)) {
-    const accepted = await confirmAction({ title: targets.length > 1 ? `Send to ${targets.length} terminals?` : 'Review command', message: 'This sends the command exactly as shown, followed by Enter. Check each target before continuing.', preview: raw, targets: targets.map((c) => `${c.title} · ${c.protocol.toUpperCase()} · ${profileDetail(c.profile)}`), accept: targets.length > 1 ? 'Send to all targets' : 'Send command', eyebrow: 'COMMAND PREVIEW' });
+  if (draft || $('broadcast-mode').checked || /[\r\n]/.test(raw)) {
+    const accepted = await confirmAction({ title: draft ? 'Review AI command' : targets.length > 1 ? `Send to ${targets.length} terminals?` : 'Review command', message: 'This sends the command exactly as shown, followed by Enter. Check each target before continuing.', preview: raw, targets: targets.map((c) => `${c.title} · ${c.protocol.toUpperCase()} · ${profileDetail(c.profile)}`), accept: targets.length > 1 ? 'Send to all targets' : 'Send command', eyebrow: draft ? 'AI COMMAND PREVIEW' : 'COMMAND PREVIEW' });
     if (!accepted) return;
+    if (draft && !validDraft()) { toast('The AI draft or active target changed during review. Review the command again.', true); return; }
     targets = targets.filter((c) => connections.has(c.id) && !c.exited);
     if (!targets.length) { toast('The target connections ended before sending.'); return; }
   }
@@ -1052,7 +1084,7 @@ async function sendCommand() {
   if (failed < targets.length) {
     try { await workflows.recordHistory(raw); } catch (error) { toast(`Command sent, but history could not be saved: ${errorMessage(error)}`, true); }
   }
-  if (!failed) $('command-input').value = '';
+  if (!failed && $('command-input').value === raw && aiDraft === draft) { $('command-input').value = ''; clearAiDraft(); }
   connections.get(activeId)?.term.focus();
 }
 
@@ -1060,6 +1092,34 @@ async function copySelection(connection) {
   const selection = connection.term.getSelection();
   if (!selection) return;
   try { await api.clipboardWrite(selection); } catch (error) { toast(errorMessage(error), true); }
+}
+
+function focusedEditTarget() {
+  const target = document.activeElement;
+  return target && target.matches('input, textarea') && !target.classList.contains('xterm-helper-textarea') ? target : null;
+}
+
+async function editField(action, target) {
+  if (!target.isConnected || target.disabled) return;
+  target.focus();
+  if (action === 'select-all') { target.select(); return; }
+  const value = target.value;
+  const start = Number.isInteger(target.selectionStart) ? target.selectionStart : 0;
+  const end = Number.isInteger(target.selectionEnd) ? target.selectionEnd : value.length;
+  if (action === 'copy') {
+    if (end > start) await api.clipboardWrite(value.slice(start, end));
+    return;
+  }
+  if (target.readOnly) return;
+  let inserted = await api.clipboardRead();
+  // A clipboard operation must never spill into a terminal or overwrite a
+  // different edit that became active while the native clipboard was read.
+  if (!target.isConnected || target.disabled || target.readOnly || document.activeElement !== target || target.value !== value || (Number.isInteger(target.selectionStart) && (target.selectionStart !== start || target.selectionEnd !== end))) return;
+  if (typeof inserted !== 'string') return;
+  if (target.maxLength >= 0) inserted = inserted.slice(0, Math.max(0, target.maxLength - value.length + end - start));
+  if (Number.isInteger(target.selectionStart)) target.setRangeText(inserted, start, end, 'end');
+  else target.value = inserted;
+  target.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 async function pasteClipboard(connection) {
@@ -1212,7 +1272,8 @@ function showSessionOptions() {
   if (profile) openProfileDialog(profile);
 }
 
-async function performAction(action) {
+async function performAction(action, editTarget = null) {
+  if (editTarget && ['copy', 'paste', 'select-all'].includes(action)) { await editField(action, editTarget); return; }
   if (action.startsWith('activate:')) { activate(action.slice(9)); return; }
   if (await scripts.perform(action)) return;
   if (await recorder.perform(action)) return;
@@ -1220,6 +1281,7 @@ async function performAction(action) {
   if (await workflows.perform(action)) return;
   const current = connections.get(activeId);
   switch (action) {
+    case 'local-ai': localAi.toggle(); break;
     case 'new-session': openProfileDialog(); if (selectedFolderPath) $('profile-folder').value = selectedFolderPath; break;
     case 'connect': {
       const profiles = selectedSessionIds.size ? state.sessions.filter((profile) => selectedSessionIds.has(profile.id)) : selectedFolderPath !== null ? state.sessions.filter((profile) => !selectedFolderPath || normalizeFolder(profile.folder).join('/') === selectedFolderPath || normalizeFolder(profile.folder).join('/').startsWith(`${selectedFolderPath}/`)) : [];
@@ -1265,7 +1327,13 @@ async function performAction(action) {
     case 'settings': openSettings(); break;
     case 'color-schemes': colorPicker.open(); break;
     case 'import-export': dialogOpen('import-dialog'); break;
-    case 'copy': if (current) await copySelection(current); break;
+    case 'copy': {
+      const selection = window.getSelection();
+      const selectedElement = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement;
+      if (!document.activeElement?.classList.contains('xterm-helper-textarea') && selection?.toString() && !selectedElement?.closest('.terminal-mount')) await api.clipboardWrite(selection.toString());
+      else if (current) await copySelection(current);
+      break;
+    }
     case 'paste': if (current) await pasteClipboard(current); break;
     case 'select-all': if (current) { current.term.selectAll(); current.term.focus(); } break;
     case 'show-session-manager': if (panes.sessionManager && !$('sessions-manager-content').hidden) setPane('sessionManager', false); else workflows.showManager('sessions'); break;
@@ -1282,19 +1350,21 @@ async function performAction(action) {
 }
 
 function runAction(action) {
+  const editTarget = focusedEditTarget() || (openMenuName ? menuEditTarget : null);
   closeMenus();
-  Promise.resolve(performAction(action)).catch((error) => toast(errorMessage(error), true));
+  Promise.resolve(performAction(action, editTarget)).catch((error) => toast(errorMessage(error), true));
 }
 
 function menuDefinitions(name) {
   const current = connections.get(activeId);
+  const editTarget = focusedEditTarget() || menuEditTarget;
   const selected = selectedProfile();
   const mod = isMac ? '⌘' : 'Ctrl+';
   const item = (label, action, enabled = true, shortcut = '', checked = null) => ({ label, action, enabled, shortcut, checked });
   switch (name) {
     case 'file': return [item('Connect…', 'connect', Boolean(selected || selectedFolderPath !== null), 'Enter'), item('Quick Connect…', 'quick-connect'), item('New Session…', 'new-session'), item('Connect Bar', 'connect-bar'), item('Disconnect', 'disconnect', Boolean(current && !current.exited)), item('Reconnect', 'reconnect', Boolean(current && !current.reconnecting)), null, item('Local Shell', 'local-shell', true, `${mod}T`), item('Clone Session', 'clone-session', Boolean(current)), item('Close Tab', 'close-tab', Boolean(current), `${mod}W`), null, item('Snapshots…', 'snapshots'), item('Import / Export Sessions…', 'import-export')];
-    case 'edit': return [item('Copy', 'copy', Boolean(current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(current)), null, item('Find…', 'find', Boolean(current), `${mod}F`), item('Configure Button Bar…', 'snippets')];
-    case 'view': return [item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
+    case 'edit': return [item('Copy', 'copy', Boolean(editTarget || current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', editTarget ? !editTarget.disabled && !editTarget.readOnly : Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(editTarget || current)), null, item('Find…', 'find', Boolean(current), `${mod}F`), item('Configure Button Bar…', 'snippets')];
+    case 'view': return [item('AI Assistant', 'local-ai', true, '', localAi.isVisible()), null, item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
     case 'options': return [item('Session Options…', 'session-options', Boolean(actionProfile())), item('Global Options…', 'settings'), item('Color Schemes…', 'color-schemes')];
     case 'transfer': return [item('Open SFTP Session', 'sftp'), item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('SFTP Command Help…', 'help')];
     case 'script': return [item('Run Python Script…', 'script-run'), item('Cancel Script', 'script-cancel', scripts.hasRunning()), null, item(recorder.isRecording() ? 'Stop Recording…' : 'Record Input…', 'script-record', Boolean(current && !current.exited)), item('Script Output…', 'script-output')];
@@ -1320,6 +1390,7 @@ function fillMenu(container, entries) {
 
 function closeMenus() {
   $('menu-dropdown').hidden = true; $('session-context-menu').hidden = true; openMenuName = null;
+  menuEditTarget = null;
   for (const button of document.querySelectorAll('[data-menu]')) button.setAttribute('aria-expanded', 'false');
 }
 
@@ -1331,7 +1402,8 @@ function placeMenu(container, x, y) {
 }
 
 function showMenu(name, focus = false) {
-  closeMenus(); openMenuName = name;
+  const editTarget = focusedEditTarget() || menuEditTarget;
+  closeMenus(); openMenuName = name; menuEditTarget = editTarget;
   const button = document.querySelector(`[data-menu="${name}"]`); button.setAttribute('aria-expanded', 'true');
   const rect = button.getBoundingClientRect(); fillMenu($('menu-dropdown'), menuDefinitions(name)); placeMenu($('menu-dropdown'), rect.left, rect.bottom);
   if (focus) $('menu-dropdown').querySelector('button:not(:disabled)')?.focus();
@@ -1351,7 +1423,13 @@ function showSessionContext(x, y, profile, folder) {
 
 function setupMenus() {
   for (const button of document.querySelectorAll('[data-menu]')) {
-    button.addEventListener('click', () => { const wasOpen = openMenuName === button.dataset.menu; closeMenus(); if (!wasOpen) showMenu(button.dataset.menu); });
+    button.addEventListener('pointerdown', () => { menuEditTarget = focusedEditTarget() || menuEditTarget; });
+    button.addEventListener('click', () => {
+      const wasOpen = openMenuName === button.dataset.menu;
+      const editTarget = focusedEditTarget() || menuEditTarget;
+      closeMenus();
+      if (!wasOpen) { menuEditTarget = editTarget; showMenu(button.dataset.menu); }
+    });
     button.addEventListener('mouseenter', () => { if (openMenuName && openMenuName !== button.dataset.menu) showMenu(button.dataset.menu); });
     button.addEventListener('keydown', (event) => {
       const buttons = [...document.querySelectorAll('[data-menu]')]; const index = buttons.indexOf(button);
@@ -1371,7 +1449,7 @@ function setupMenus() {
 }
 
 function setupHandlers() {
-  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install();
+  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install(); localAi.install();
   $('profile-form').noValidate = true; $('settings-form').noValidate = true;
   addToolbarIcons(); setupMenus(); setupSplitters(); loadLayout();
   $('settings-font').min = '8'; $('settings-font').max = '72'; $('settings-scrollback').max = '128000';
@@ -1429,6 +1507,9 @@ function setupHandlers() {
   bindStripDrop($('tab-strip'), () => tabGroups.ordered()[0]?.id);
   bind('send-command', 'click', sendCommand);
   bind('command-input', 'keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); } });
+  bind('command-input', 'input', () => { if (!$('command-input').value.trim()) clearAiDraft(); });
+  bind('ai-draft-discard', 'click', () => { $('command-input').value = ''; clearAiDraft(); });
+  bind('local-ai-toggle', 'click', () => localAi.toggle());
   bind('broadcast-mode', 'change', () => { $('command-input').placeholder = $('broadcast-mode').checked ? 'Command for all active sessions. Review targets before sending.' : 'Enter a command here. Press Enter to send; Shift+Enter adds a line.'; updateWorkspaceStatus(); });
   bind('settings-button', 'click', openSettings);
   bind('settings-form', 'submit', saveSettings);
@@ -1476,7 +1557,10 @@ async function init() {
     renderSessions(); renderSnippets(); renderTabs();
     return;
   }
-  if (typeof api.onMenuAction === 'function') api.onMenuAction((action) => { if (!document.querySelector('dialog[open]')) runAction(String(action)); });
+  if (typeof api.onMenuAction === 'function') api.onMenuAction((action) => {
+    const name = String(action);
+    if (!document.querySelector('dialog[open]') || focusedEditTarget() && ['copy', 'paste', 'select-all'].includes(name)) runAction(name);
+  });
   api.onTerminalData(handleTerminalData);
   api.onTerminalExit(handleTerminalExit);
   if (typeof api.onTerminalOpened === 'function') api.onTerminalOpened((event) => { if (!connections.has(event.id) && event.profile) { createConnection(event, event.profile); activate(event.id); renderSessions(); workflows.refresh(); } });
