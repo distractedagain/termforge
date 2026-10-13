@@ -21,6 +21,7 @@ const { createQuickConnectWindow } = require('./quick-connect-window.cjs');
 const { createNativeMenu } = require('./native-menu.cjs');
 const { createDesktopActions } = require('./desktop-actions.cjs');
 const { createKeyTools } = require('./key-tools.cjs');
+const { createSessionImport } = require('./session-import.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -39,6 +40,7 @@ let quickConnect;
 let nativeMenu;
 let desktopActions;
 let keyTools;
+let sessionImport;
 let menuReady = false;
 const recentScripts = new Map();
 const dirtyProjects = new Set();
@@ -59,6 +61,7 @@ function send(channel, value) {
 }
 async function cleanupTerminals() {
   quickConnect?.close();
+  sessionImport?.close();
   await keyTools?.close();
   localAi?.close();
   authPrompts?.closeAll();
@@ -81,7 +84,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -192,6 +195,9 @@ function registerHandlers() {
   });
   handle('transferStart', input => secureTransfers.start(input));
   handle('transferCancel', id => secureTransfers.cancel(requiredId(id)));
+  handle('transferPrepareRemoteOperation', input => secureTransfers.prepareRemoteOperation(input));
+  handle('transferApplyRemoteOperation', input => secureTransfers.applyRemoteOperation(input));
+  handle('transferDiscardRemoteOperation', input => secureTransfers.discardRemoteOperation(input));
   handle('projectOpen', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Open automation project', properties: ['openDirectory'] });
     return result.canceled ? null : projects.open(result.filePaths[0]);
@@ -258,6 +264,10 @@ function registerHandlers() {
     return { count: Array.isArray(config.sessions) ? config.sessions.length : 0, skipped: imported.skipped || 0 };
   });
   handle('importSecureCRT', importSecureCRT);
+  handle('sessionImportChoose', () => sessionImport.choose());
+  handle('sessionImportPreview', input => sessionImport.preview(input));
+  handle('sessionImportApply', input => sessionImport.apply(input));
+  handle('sessionImportDiscard', input => sessionImport.discard(input));
   handle('terminalOpen', (request) => {
     const profile = connectionProfile(request);
     if (profile.protocol === 'sftp' && profile.ssh.backend === 'managed') throw new Error('Open this managed session in File Transfer.');
@@ -429,7 +439,28 @@ async function boot() {
   authPrompts = createAuthPrompts({ send });
   credentials = createCredentialVault({ directory: dataDirectory, safeStorage, confirmUse: ({ name, host, port, fingerprint, signal }) => approveNative({ title: 'Allow saved credential', message: `Use “${name}” with ${host}:${port}?`, detail: `Verified server key: ${fingerprint}\n\nThis allows this credential to authenticate to this host and key on future connections. Only approve servers you trust with these credentials.`, accept: 'Allow credential', signal }) });
   secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
-  secureTransfers = createSecureTransfers({ connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event), confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }) });
+  secureTransfers = createSecureTransfers({
+    connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event),
+    confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }),
+    confirmRemoteOperation: (review, { signal } = {}) => {
+      const labels = { mkdir: 'Create remote folder', rename: 'Rename remote item', delete: 'Delete remote item', chmod: 'Change remote permissions' };
+      return approveNative({ title: labels[review.operation], message: `${labels[review.operation]}?`,
+        detail: `Server: ${review.host}:${review.port}\nPath: ${review.path}${review.destination ? `\nNew path: ${review.destination}` : ''}${review.permissions ? `\nPermissions: ${review.permissions}` : ''}\n\n${review.operation === 'delete' ? 'Deletion is permanent. Only a regular file or empty directory can be removed.' : 'This changes the selected item on the remote server.'}`,
+        accept: labels[review.operation], signal });
+    }
+  });
+  sessionImport = createSessionImport({
+    chooseFile: async () => {
+      const result = await dialog.showOpenDialog(window, { title: 'Import sessions from CSV or text', properties: ['openFile'], filters: [{ name: 'Session lists', extensions: ['csv', 'tsv', 'txt'] }, { name: 'All files', extensions: ['*'] }] });
+      return result.canceled ? null : { path: result.filePaths[0] };
+    },
+    loadConfig: () => store.load(),
+    commitSessions: (sessions, options) => {
+      if (shuttingDown) throw new Error('TermForge is stopping its active work.');
+      return store.commitImportedSessions(sessions, options);
+    },
+    approveApply: review => approveNative({ title: 'Import reviewed sessions', message: `Save ${review.added + review.replaced} imported sessions?`, detail: `Add: ${review.added}\nReplace: ${review.replaced}\nSkip: ${review.skipped}\n\nExisting sessions selected for replacement keep their identifiers. No connections will be opened.`, accept: 'Import sessions' })
+  });
   quickConnect = createQuickConnectWindow({
     BrowserWindow, ipcMain, parent: window, preload: path.join(__dirname, 'quick-connect-preload.cjs'),
     workArea: screen.getDisplayMatching(window.getBounds()).workArea,

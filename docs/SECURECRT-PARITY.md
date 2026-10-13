@@ -310,6 +310,14 @@ The source includes vault/authentication coverage in `tests/credentials.test.cjs
 
 The full requested feature inventory remains a development goal. Rows not advanced here retain their earlier gaps, including specialized terminal emulations and encodings, legacy transfer protocols, broader scripting compatibility, richer logging, platform-specific integrations and the completion gates below. This addendum is not a claim that every SecureCRT or SecureFX feature is implemented.
 
+## Session migration and remote file management: TermForge 0.13
+
+SM-11 advances with an independent UTF-8 CSV/TSV/semicolon import wizard, header/field mapping, line diagnostics, explicit invalid-row exclusion, skip/rename/replace policies and reviewed atomic saving. Replacements preserve saved profile IDs and snapshot references; credentials are not imported and connections are not opened. SM-10 remains partial: this imports connection metadata, not the full XML/settings catalog. See [the import guide](SESSION-IMPORT.md).
+
+FT-08 advances with SFTP folder creation, same-directory new-only rename, regular-file/empty-directory deletion and basic permission changes. Targets and parents are inspected before review and rechecked after native confirmation. One-use plans exclude conflicting transfers, and unknown mutation outcomes close the connection without automatic retry. Links, special permission bits, recursive deletion, recursive transfer, synchronization and remote editing remain unavailable. SFTP v3 cannot make metadata checks and path mutation atomic against other remote processes. See [the file-transfer guide](SECURE-CONNECTIONS.md).
+
+Local and version-specific platform evidence belongs in [0.13 verification](VERIFICATION-v0.13.0.md). Tests use synthetic profiles and temporary loopback files; installed applications and arbitrary server interoperability are separate verification gaps.
+
 ## Required comparison and completion gates
 
 1. Inventory remaining SecureCRT 9.7 actions, defaults and shortcuts from public documentation or an authorized running installation, including applicable platform differences. Reference captures support functional analysis; redact user data and do not bundle reference artwork.

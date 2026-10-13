@@ -135,7 +135,7 @@ function buildMenus(input = {}, platform = 'linux') {
       unavailable('Change Credentials Password', 'credentials-password', 'Credentials use the operating system protected store; there is no TermForge master password.'), null,
       unavailable('Change Configuration Passphrase…', 'configuration-passphrase', 'Configuration encryption with a master passphrase is not implemented.'), null,
       item('Export Settings…', 'export-settings'), unavailable('Import Settings from XML File…', 'import-xml', 'SecureCRT XML configuration is not supported. Import session INI files instead.'),
-      unavailable('Import Settings from Text File…', 'import-text', 'Text session-list import is not implemented.'), null,
+      item('Import Settings from Text File…', 'import-text'), null,
       item('Import TermForge Settings…', 'import-json'), item('Import SecureCRT Sessions…', 'import-securecrt'), item('Trusted SSH Hosts…', 'ssh-hosts'), item('Clear Command History…', 'clear-history')
     ] },
     { id: 'window', label: 'Window', submenu: [

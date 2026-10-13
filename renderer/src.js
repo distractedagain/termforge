@@ -29,6 +29,7 @@ import './managers.css';
 import { buildMenus } from '../app/menu-model.cjs';
 import { initKeyTools } from './key-tools.js';
 import { createMenuExtras } from './menu-extras.js';
+import { createSessionImportUi } from './session-import.js';
 import './menus.css';
 
 const api = window.termforge;
@@ -82,6 +83,10 @@ const keyTools = initKeyTools({ api, toast });
 const menuExtras = createMenuExtras({ api, toast, confirmAction, getCurrent: () => connections.get(activeId), getConnections: () => connections, openConnection, onChange: updateToolbar });
 const secureConnections = createSecureConnections({api, toast, confirmAction});
 const secureTransfers = createSecureTransferUi({api, toast, confirmAction});
+const sessionImport = createSessionImportUi({ api, toast, onImported: async () => {
+  state = { ...state, ...await api.getState() };
+  renderSessions(); workflows.refresh(); updateToolbar();
+} });
 const workflows = createWorkflows({ api, secureConnections, openFileTransfer: profile => secureTransfers.open(profile), getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
   getSelection: () => selectedSessionIds,
   setSelection: (ids) => { selectedSessionIds.clear(); for (const id of ids) selectedSessionIds.add(id); selectedSessionId = ids[0] || null; },
@@ -1343,6 +1348,7 @@ async function performAction(action, editTarget = null) {
     case 'export-settings': await exportConfiguration(); break;
     case 'import-json': await importConfiguration('json'); break;
     case 'import-securecrt': await importConfiguration('securecrt'); break;
+    case 'import-text': await sessionImport.open(); break;
     case 'save-settings': await api.saveSettings(state.settings); saveLayout(); toast('Settings saved.'); break;
     case 'copy-paste': if (current?.term.hasSelection() && !current.exited) { const text = current.term.getSelection(); await api.clipboardWrite(text); await pasteText(current, text); } break;
     case 'paste-quotation': if (current && !current.exited) await pasteText(current, (await api.clipboardRead()).split(/\r?\n/).map(line => '> ' + line).join('\n')); break;
@@ -1430,7 +1436,7 @@ function runAction(action) {
 function menuState() {
   const current = connections.get(activeId), edit = focusedEditTarget() || menuEditTarget;
   const output = current?.outputState;
-  const capabilities = Object.fromEntries(['connect-tab','reconnect-all','disconnect-all','copy-paste','paste-quotation','print-selection','print-screen','print-scrollback','page-setup','focus-command-window','focus-session-window','focus-command-manager','focus-active-sessions','clear-scrollback','clear-screen-scrollback','show-toolbar','show-status-bar','zoom-in','zoom-out','zoom-reset','snapshot-save','script-record-start','script-record-stop','script-record-cancel','tabbed','about','feature-availability','vertical-scrollbar','recent-session','recent-script','snapshot-open','keymap-editor','export-settings','import-json','import-securecrt','save-settings','keyword-highlight'].map(key => [key, true]));
+  const capabilities = Object.fromEntries(['connect-tab','reconnect-all','disconnect-all','copy-paste','paste-quotation','print-selection','print-screen','print-scrollback','page-setup','focus-command-window','focus-session-window','focus-command-manager','focus-active-sessions','clear-scrollback','clear-screen-scrollback','show-toolbar','show-status-bar','zoom-in','zoom-out','zoom-reset','snapshot-save','script-record-start','script-record-stop','script-record-cancel','tabbed','about','feature-availability','vertical-scrollbar','recent-session','recent-script','snapshot-open','keymap-editor','export-settings','import-json','import-securecrt','import-text','save-settings','keyword-highlight'].map(key => [key, true]));
   Object.assign(capabilities, { 'hex-view': !!output?.capabilities?.hex, 'raw-log': !!output?.capabilities?.rawLog, 'send-binary': !!output?.capabilities?.binary, 'receive-ascii': !!api.terminalSetCapture, 'window-transparency': !!api.desktopAction && ['darwin','win32'].includes(state.platform), 'create-public-key': !!api.keyToolsGenerate, 'convert-private-key': !!api.keyToolsConvert, 'agent-keys': !!api.keyToolsAgentList });
   for (const action of ['minimize-window','zoom-window','close-window','toggle-fullscreen','bring-all-front','help-web','help-updates','help-support']) capabilities[action] = !!api.desktopAction;
   return { ready, dialogOpen: !!document.querySelector('dialog[open]'), capabilities, current: current ? { id: current.id, title: current.title, protocol: current.protocol, exited: current.exited, reconnecting: current.reconnecting, logging: current.logging, logPaused: current.logPaused, logMode: output?.log?.mode || 'text', capturing: !!output?.capture?.enabled, selection: current.term.hasSelection() } : null,
@@ -1590,7 +1596,7 @@ function setupHandlers() {
   for (const id of ['add-session-sidebar', 'new-session', 'welcome-new']) bind(id, 'click', () => runAction('new-session'));
   for (const id of ['quick-local', 'welcome-local']) bind(id, 'click', localShell);
   for (const button of document.querySelectorAll('.dialog-close')) button.addEventListener('click', () => button.closest('dialog').close());
-  for (const dialog of document.querySelectorAll('dialog:not(#color-scheme-dialog):not(#key-tools-dialog)')) dialog.addEventListener('click', (event) => {
+  for (const dialog of document.querySelectorAll('dialog:not(#color-scheme-dialog):not(#key-tools-dialog):not(#session-import-dialog):not(#remote-operation-dialog)')) dialog.addEventListener('click', (event) => {
     if (event.target !== dialog) return;
     const rect = dialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
@@ -1632,6 +1638,7 @@ function setupHandlers() {
   bind('welcome-import', 'click', () => dialogOpen('import-dialog'));
   bind('import-json', 'click', () => importConfiguration('json'));
   bind('import-securecrt', 'click', () => importConfiguration('securecrt'));
+  bind('import-text', 'click', () => { $('import-dialog').close(); sessionImport.open().catch(error => toast(errorMessage(error), true)); });
   bind('export-json', 'click', exportConfiguration);
   bind('footer-search', 'click', showSearch);
   bind('search-prev', 'click', () => findTerminal(true));

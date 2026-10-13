@@ -14,7 +14,7 @@ The screenshot's firewall/GSSAPI controls map to a separate **System OpenSSH** e
 
 ## Credential manager
 
-Open **Transfer → Credentials**. Give the credential a descriptive name, username and password. Create or replace requires entering both secret fields; stored passwords are never revealed in the UI. Saved profiles retain a credential identifier instead of a username/password. Deleting a credential leaves any dependent profiles in place so they can be assigned a new credential.
+Open **Tools → Manage Saved Credentials**. Give the credential a descriptive name, username and password. Create or replace requires entering both secret fields; stored passwords are never revealed in the UI. Saved profiles retain a credential identifier instead of a username/password. Deleting a credential leaves any dependent profiles in place so they can be assigned a new credential.
 
 The vault encrypts username, password and approved-host grants in the main process, in `credentials.json` within the application data directory. Names, IDs and update dates are visible metadata. Session JSON, exports, terminal input history and AI attachments do not receive the decrypted vault payload. Both JSON import and export clear credential references; assign a local credential after import. The vault is not a portable or recoverable encrypted backup.
 
@@ -24,7 +24,7 @@ These mechanisms protect stored data with the operating system's guarantees. The
 
 ## Server identity and credential approval
 
-Managed SSH presents a native confirmation showing the server's SHA-256 host-key fingerprint before reading a stored credential or private key. Compare it with a fingerprint supplied independently by the server administrator. Acceptance pins the key for the host and port. A changed key blocks the connection. **Transfer → Trusted SSH Hosts** lists the managed keys; forgetting a key requires confirmation and makes the next connection prompt again.
+Managed SSH presents a native confirmation showing the server's SHA-256 host-key fingerprint before reading a stored credential or private key. Compare it with a fingerprint supplied independently by the server administrator. Acceptance pins the key for the host and port. A changed key blocks the connection. **Tools → Trusted SSH Hosts** lists the managed keys; forgetting a key requires confirmation and makes the next connection prompt again.
 
 The first use of a saved credential with a hostname, port and verified key needs a separate native approval. Changing any of those requires a new approval. Replacing the credential clears those grants. This prevents an imported profile or another host from silently obtaining a saved password. Native host-key and credential approvals default to Cancel. Authentication prompts expire and are cleared on cancellation or disconnection.
 
@@ -32,7 +32,7 @@ Managed host keys are stored separately from system OpenSSH's `known_hosts`. Ope
 
 ## File Transfer
 
-Use the transfer toolbar or **Transfer → File Transfer** with an SSH profile selected. The left pane browses local files; the right pane browses the server. Double-click directories, select regular files, then use Upload or Download. The queue shows progress, completion, errors and cancellation. File names are displayed as text.
+Use the transfer toolbar or **Transfer → SFTP / SCP File Transfer** with an SSH profile selected. The left pane browses local files; the right pane browses the server. Double-click directories, select regular files, then use Upload or Download. The queue shows progress, completion, errors and cancellation. File names are displayed as text.
 
 Choose **SFTP** for normal transfers or **SCP** for actual `scp -t`/`scp -f` file payloads on the same verified SSH connection. SCP mode still requires SFTP for directory browsing, destination checks, staging and commit, and a compatible `scp` executable on the remote server. SCP-only servers are not supported. Both modes currently copy regular files, with multiple selected files queued individually. Directory recursion, symbolic-link copying, resume, synchronization, remote editing, drag and drop, and permission/time preservation are not included.
 
@@ -43,6 +43,16 @@ Transfers use temporary files and ask before replacing an existing destination. 
 The local destination filesystem must permit hard links, which TermForge uses to commit a download without silently overwriting a competing file. Filesystems without hard-link support, including FAT/exFAT volumes, cannot receive downloads. Before replacing an existing local file, TermForge checks this capability and leaves that file in place if the check fails. Choose another local folder or filesystem.
 
 Cancellation stops queued jobs and active copying. Once replacement has begun, TermForge waits for its outcome: an acknowledged replacement reports Completed. If the server disconnects before acknowledging a rename, the job reports an uncertain outcome, retains available recovery files and stops that transfer connection. Inspect the named paths before retrying. Quitting with an active transfer connection requires confirmation and waits for owned cleanup.
+
+## Remote file management
+
+Version 0.13 adds **New folder**, **Rename**, **Delete** and **Permissions** above the remote listing. Select one regular file or directory for an existing-item action. Enter the new name or three-digit permissions, then click **Review**. The application inspects the target and shows its canonical path and server. The action button opens a separate native confirmation before any mutation.
+
+New folders use mode 0700. Rename stays within the selected directory and requires a missing destination. Delete permanently removes one regular file or empty directory; it is not recursive and does not use a trash folder. Permissions accepts 000–777 and refuses files or directories with setuid, setgid or sticky bits. Symbolic links in the target or parent path, root/dot paths and special files are rejected. The review shows permissions from fresh server metadata.
+
+Review tokens last 60 seconds and can be used only once. Pending operations block other transfers and file changes across this transfer manager, including separately opened connections that may address the same paths. Before committing, the backend rechecks parents and target metadata, including size, timestamp, owner/group and mode. Closing the connection invalidates the review. Native confirmation can be canceled; once the mutation is sent, the app waits for its bounded outcome.
+
+SFTP v3 provides no conditional inode-based mutation. A different process can still replace a path after the final check, and equal metadata does not prove file identity. Standard rename also depends on the server honoring no-overwrite semantics. Avoid operations on paths being changed concurrently. A timeout or lost transport after sending a mutation is reported as **outcome unknown** and closes the connection; reconnect and inspect the named paths before trying again. There is no automatic retry or rollback.
 
 ## Verification scope
 

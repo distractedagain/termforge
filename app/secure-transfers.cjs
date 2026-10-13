@@ -5,6 +5,7 @@ const fsp = fs.promises;
 const path = require('node:path');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
+const { createRemoteFiles } = require('./remote-files.cjs');
 
 const BLOCK = 64 * 1024;
 const MAX_FILE = 1024 ** 4;
@@ -40,7 +41,8 @@ function kind(stat) {
   return 'other';
 }
 function summary(stat) {
-  return { type: kind(stat), size: stat.size, mtime: stat.mtimeMs ?? stat.mtime * 1000 };
+  return { type: kind(stat), size: stat.size, mtime: stat.mtimeMs ?? stat.mtime * 1000,
+    ...(Number.isInteger(stat.mode) ? { permissions: (stat.mode & 0o777).toString(8).padStart(3, '0') } : {}) };
 }
 function same(a, b, moved = false) {
   if (!a || !b) return a === b;
@@ -154,13 +156,17 @@ async function writeChannel(channel, data, signal) {
   await bounded(new Promise((resolve, reject) => { channel.write(data, error => error ? reject(error) : resolve()); }), signal);
 }
 
-function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = async () => false, home = os.homedir(), commitTimeoutMs = 30000 } = {}) {
+function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = async () => false, confirmRemoteOperation = async () => false,
+  home = os.homedir(), commitTimeoutMs = 30000, remotePlanLifetimeMs = 60000 } = {}) {
   if (typeof connect !== 'function') throw new TypeError('A verified SSH connection factory is required.');
   if (!Number.isInteger(commitTimeoutMs) || commitTimeoutMs < 1 || commitTimeoutMs > 30000) throw new TypeError('Invalid commit operation timeout.');
+  if (!Number.isInteger(remotePlanLifetimeMs) || remotePlanLifetimeMs < 1 || remotePlanLifetimeMs > 60000) throw new TypeError('Invalid remote operation plan lifetime.');
   const sessions = new Map(); const jobs = new Map(); const queue = []; const pendingOpens = new Set();
   let processing = false; let stopped = false;
 
   function getSession(id) { const session = sessions.get(id); if (!session || session.closed) throw new Error('The file-transfer session is closed.'); return session; }
+  const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => [...jobs.values()].some(job => !DONE.has(job.status)),
+    call, stat: remoteStat, summary, confirm: confirmRemoteOperation, timeout: commitTimeoutMs, planLifetimeMs: remotePlanLifetimeMs });
   function view(job) {
     return { transferId: job.transferId, id: job.id, sessionId: job.id, direction: job.direction, protocol: job.protocol,
       localPath: job.localPath, remotePath: job.remotePath, status: job.status, bytes: job.bytes, transferred: job.bytes,
@@ -186,10 +192,11 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
       const currentPath = remotePath(await call(sftp, 'realpath', ['.'], signal));
       if (stopped) throw new Error('The transfer manager is stopping.');
       const id = randomUUID();
-      const session = { id, client, sftp, remotePath: currentPath, closed: false };
+      const session = { id, client, sftp, remotePath: currentPath, closed: false, host: profile.host || profile.hostname || '', port: profile.port || 22 };
       sessions.set(id, session);
       client.once('close', () => {
         session.closed = true; sessions.delete(id);
+        remoteFiles.disconnected(id);
         for (const job of jobs.values()) if (job.id === id && !DONE.has(job.status)) job.controller.abort();
         try { emit({ type: 'connection', id, status: 'closed' }); } catch {}
       });
@@ -464,6 +471,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   }
   function start(input = {}) {
     const session = getSession(input.id);
+    remoteFiles.available(input.id);
     if (!['upload', 'download'].includes(input.direction)) throw new Error('Choose upload or download.');
     if (!['sftp', 'scp'].includes(input.protocol)) throw new Error('Choose SFTP or SCP.');
     for (const [id, job] of jobs) { if (jobs.size < MAX_JOBS) break; if (DONE.has(job.status)) jobs.delete(id); }
@@ -487,6 +495,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   async function close(id) {
     const session = sessions.get(id); if (!session) return false;
     session.closed = true;
+    await remoteFiles.close(id);
     await Promise.all([...jobs.values()].filter(job => job.id === id && !DONE.has(job.status)).map(job => cancel(job.transferId)));
     sessions.delete(id); session.sftp.end(); session.client.end(); return true;
   }
@@ -496,13 +505,16 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     // A disconnected session leaves the map before its job's finally cleanup
     // has finished. Await those jobs independently of the live connections.
     const stoppingJobs = [...jobs.values()].filter(job => !DONE.has(job.status)).map(job => cancel(job.transferId));
-    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs));
+    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs, remoteFiles.closeAll()));
   }
 
-  return { open, close, closeAll, listLocal, listRemote, start, cancel, listJobs: () => [...jobs.values()].map(view),
+  return { open, close, closeAll, listLocal, listRemote, start, cancel,
+    prepareRemoteOperation: remoteFiles.prepare, applyRemoteOperation: remoteFiles.apply, discardRemoteOperation: remoteFiles.discard,
+    listJobs: () => [...jobs.values()].map(view),
     get count() {
       const owned = new Set(sessions.keys());
       for (const job of jobs.values()) if (!DONE.has(job.status)) owned.add(job.id);
+      for (const id of remoteFiles.activeIds) owned.add(id);
       return owned.size + pendingOpens.size;
     } };
 }

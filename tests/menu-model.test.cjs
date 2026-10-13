@@ -48,12 +48,15 @@ test('menus reflect logging, recording, running scripts and dock layout state', 
 });
 
 test('unimplemented features cannot be enabled by supplying capabilities', () => {
-  for (const action of ['send-kermit', 'receive-xmodem', 'zmodem-upload', 'cascade', 'detach-tab', 'lock-session', 'configuration-passphrase', 'import-xml', 'import-text']) {
+  for (const action of ['send-kermit', 'receive-xmodem', 'zmodem-upload', 'cascade', 'detach-tab', 'lock-session', 'configuration-passphrase', 'import-xml']) {
     const entry = get({ current: live, capabilities: { [action]: true } }, action);
     assert.equal(entry.enabled, false, action); assert.ok(entry.unavailableReason.length > 15, action);
   }
   assert.equal(get({}, 'create-public-key').enabled, false);
   assert.equal(get({ capabilities: { 'create-public-key': true } }, 'create-public-key').enabled, true);
+  assert.equal(get({ capabilities: { 'import-text': true } }, 'import-text').enabled, true);
+  assert.equal(get({ capabilities: { 'import-text': true }, dialogOpen: true }, 'import-text').enabled, false);
+  assert.equal(get({ capabilities: { 'import-text': true }, quickConnectFocused: true }, 'import-text').enabled, false);
 });
 
 test('dynamic menus encode identifiers, reflect tab targets, and empty lists cannot execute', () => {

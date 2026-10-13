@@ -62,6 +62,9 @@ async function startFixture(directory, approved, options = {}) {
         action('WRITE', async (id, handle, offset, data) => { await lookup(handle).file.write(data, 0, data.length, offset); stream.status(id, STATUS_CODE.OK); });
         action('CLOSE', async (id, handle) => { const record = lookup(handle); handles.delete(handle.readUInt32BE()); await record.file?.close(); stream.status(id, STATUS_CODE.OK); });
         action('REMOVE', async (id, name) => { await fsp.unlink(remoteFile(name)); stream.status(id, STATUS_CODE.OK); });
+        action('MKDIR', async (id, name, attrs) => { await fsp.mkdir(remoteFile(name), { mode: attrs.mode || 0o755 }); stream.status(id, STATUS_CODE.OK); });
+        action('RMDIR', async (id, name) => { await fsp.rmdir(remoteFile(name)); stream.status(id, STATUS_CODE.OK); });
+        action('SETSTAT', async (id, name, attrs) => { assert.equal(typeof attrs.mode, 'number'); await fsp.chmod(remoteFile(name), attrs.mode); stream.status(id, STATUS_CODE.OK); });
         action('RENAME', async (id, from, to) => { await fsp.link(remoteFile(from), remoteFile(to)); await fsp.unlink(remoteFile(from)); stream.status(id, STATUS_CODE.OK); });
         stream.on('close', () => { for (const handle of handles.values()) handle.file?.close().catch(() => {}); handles.clear(); });
       });
@@ -80,7 +83,7 @@ module.exports = async ({ window, terminals, directory }) => {
   assert.equal(path.dirname(profileDirectory), path.resolve(directory), 'Secure smoke requires a profile inside the isolated smoke directory');
   assert.equal(path.basename(profileDirectory), 'profile', 'Secure smoke cannot use a real application profile');
   const fixtureDirectory = await fsp.mkdtemp(path.join(directory, 'secure-fixture-'));
-  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, fixture, changed;
+  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, fixture, changed;
   const originalDialog = dialog.showMessageBox, originalWrite = terminals.write;
   const writes = [], report = {};
   const secret = { name: 'Native smoke credential', username: 'native-fixture-user', password: 'Native-fixture-password-123!' };
@@ -116,6 +119,11 @@ module.exports = async ({ window, terminals, directory }) => {
       }
       if (options.title === 'Delete saved credential') {
         assert.equal(options.message, `Delete “${secret.name}”?`); deletionApprovals++; return { response: 1 };
+      }
+      if (['Create remote folder', 'Rename remote item', 'Delete remote item', 'Change remote permissions'].includes(options.title)) {
+        assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
+        assert.match(options.detail, /Path: \/(native-folder|upload\.bin|renamed\.bin)/);
+        remoteApprovals++; return { response: 1 };
       }
       throw new Error('Unexpected native dialog during isolated secure smoke: ' + options.title);
     };
@@ -189,12 +197,33 @@ module.exports = async ({ window, terminals, directory }) => {
       const downloaded = await window.termforge.transferStart({id:connection.id,direction:'download',protocol:'sftp',localPath:${JSON.stringify(download)},remotePath:'/upload.bin'});
       await wait(() => ['completed','failed','cancelled'].includes(state.jobs[downloaded.transferId]?.status), 'SFTP download completion IPC');
       if (state.jobs[downloaded.transferId].status !== 'completed' || state.jobs[downloaded.transferId].bytes !== 140000) throw new Error('Native SFTP download failed');
+      const operations = [
+        {operation:'mkdir',path:'/',name:'native-folder'},
+        {operation:'rename',path:'/upload.bin',name:'renamed.bin'},
+        {operation:'chmod',path:'/renamed.bin',permissions:'640'},
+        {operation:'delete',path:'/native-folder'},
+        {operation:'rename',path:'/renamed.bin',name:'upload.bin'}
+      ];
+      for (const operation of operations) {
+        const plan = await window.termforge.transferPrepareRemoteOperation({id:connection.id,...operation});
+        if (!plan.planId || plan.id !== connection.id) throw new Error('Native remote operation did not return its reviewed target');
+        const applied = await window.termforge.transferApplyRemoteOperation({planId:plan.planId});
+        if (!applied.applied) throw new Error('Native remote operation did not apply');
+        let reused = false; try { await window.termforge.transferApplyRemoteOperation({planId:plan.planId}); reused = true; } catch {}
+        if (reused) throw new Error('Remote operation token was reusable');
+      }
+      const afterOperations = await window.termforge.transferListRemote({id:connection.id,path:'/'});
+      const changedFile = afterOperations.entries.find(entry => entry.name === 'upload.bin');
+      if (afterOperations.entries.length !== 1 || changedFile?.permissions !== '640') throw new Error('Native remote operations did not update listing and permissions');
       await window.termforge.transferClose(connection.id);
     `);
     assert.deepEqual(await fsp.readFile(path.join(fixture.remote, 'upload.bin')), payload);
     assert.deepEqual(await fsp.readFile(download), payload);
     assert.deepEqual((await fsp.readdir(fixture.local)).sort(), ['download.bin', 'upload.bin']);
     assert.deepEqual(await fsp.readdir(fixture.remote), ['upload.bin']);
+    assert.equal((await fsp.stat(path.join(fixture.remote, 'upload.bin'))).mode & 0o777, 0o640);
+    assert.equal(remoteApprovals, 5);
+    report.nativeRemoteFileManagement = true;
     report.nativeSftpRoundTrip = true;
     console.log('PASS native managed SSH masked prompts, trust, terminal I/O and SFTP upload/download over real preload');
     const authBeforeCancel = fixture.authentication.length;

@@ -78,6 +78,12 @@ jobs:
       - name: Check SSH key tool forms without reading personal keys
         if: runner.os == 'Linux'
         run: npm run test:key-tools-ui
+      - name: Check mapped session import workflows
+        if: runner.os == 'Linux'
+        run: npm run test:session-import-ui
+      - name: Check reviewed remote file operations
+        if: runner.os == 'Linux'
+        run: npm run test:remote-files-ui
       - name: Install isolated localhost automation test runtime
         if: runner.os != 'Windows'
         run: python -m pip install ansible-core==2.21.5 ansible-runner==2.4.3

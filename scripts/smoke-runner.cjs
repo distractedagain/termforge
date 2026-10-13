@@ -233,7 +233,10 @@ module.exports = async ({ window, terminals, store }) => {
   console.log('START native application menu, focus, byte-transfer and capture checks');
   const menus = await require('./menu-smoke.cjs')({ window, terminals, directory });
   assert.equal(errors.length, 0, errors.join('\n'));
-  Object.assign(report, project, secure, quickConnect, menus, {behavioralChecksPassed:true});
+  console.log('START native reviewed session import checks');
+  const sessionImport = await require('./session-import-smoke.cjs')({ window, terminals, store, directory });
+  assert.equal(errors.length, 0, errors.join('\n'));
+  Object.assign(report, project, secure, quickConnect, menus, sessionImport, {behavioralChecksPassed:true});
   await persist();
   console.log('START project editor screenshot capture');
   report.screenshots.projectEditor = await screenshot(window, directory, 'project-editor.png');

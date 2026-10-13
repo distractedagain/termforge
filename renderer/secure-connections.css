@@ -86,3 +86,24 @@
 #profile-auth-order .option-check { margin:0; }
 #profile-auth-order .auth-method { padding:9px 12px; }
 .file-transfer-modal { overflow-y:auto; }
+.remote-file-actions { display:flex;gap:5px;flex-wrap:wrap;padding:7px 8px;border-bottom:1px solid var(--border-soft);background:var(--panel); }
+.remote-file-actions button { padding:5px 9px;font-size:11px; }
+.remote-file-table .file-table-heading,.remote-file-table .file-entry { grid-template-columns:minmax(0,1fr) 70px 65px;gap:8px; }
+.file-entry-permissions { font-family:monospace;font-size:11px;color:var(--muted); }
+.remote-operation-modal { width:min(590px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow-y:auto; }
+.remote-operation-modal .modal-header h2 { margin:0;font-size:17px; }
+.remote-operation-body { display:grid;gap:14px; }
+.remote-operation-body p,.remote-operation-body label { margin:0; }
+.remote-operation-body label { display:grid;gap:7px;min-width:0;font-size:12px; }
+.remote-operation-body input { width:100%;min-width:0; }
+.remote-operation-body [hidden],.remote-operation-modal [hidden] { display:none; }
+.remote-operation-target { padding:10px 12px;border:1px solid var(--border-soft);border-radius:7px;background:var(--panel);overflow-wrap:anywhere;font:12px/1.5 monospace; }
+.remote-operation-review { padding:13px;border:1px solid var(--border);border-radius:8px;background:var(--panel); }
+.remote-operation-review h3 { margin:0 0 12px;font-size:13px; }
+.remote-operation-review dl { display:grid;grid-template-columns:120px minmax(0,1fr);gap:9px 12px;margin:0;font-size:12px;line-height:1.5; }
+.remote-operation-review dt { color:var(--muted); }
+.remote-operation-review dd { margin:0;overflow-wrap:anywhere;white-space:pre-wrap; }
+.remote-operation-spacer { flex:1; }
+#remote-operation-permissions { max-width:110px;font-family:monospace; }
+#remote-permissions-preview { font-size:11px;line-height:1.5; }
+@media(max-width:500px) { .remote-operation-modal .modal-body { padding:14px; }.remote-operation-modal .modal-footer { padding:12px 14px;gap:7px; }.remote-operation-review dl { grid-template-columns:1fr;gap:3px; }.remote-operation-review dd+dt { margin-top:7px; }.remote-file-table .file-table-heading,.remote-file-table .file-entry { grid-template-columns:minmax(0,1fr) 65px 60px;gap:5px;padding-left:8px;padding-right:8px; } }

@@ -26,6 +26,18 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.13 — Session imports and remote file management
+
+![Reviewed CSV session import](docs/images/session-import-v0.13.png)
+
+Headless application preview using synthetic profiles; no device is connected.
+
+**Tools → Import Settings from Text File** now opens a CSV/TSV wizard: map fields, inspect errors, choose duplicate handling and review the selected profiles before one atomic save. Replacements keep session IDs and snapshot references. Imports do not open connections. See the [import guide](docs/SESSION-IMPORT.md).
+
+The SFTP workspace adds **New folder**, **Rename**, **Delete** and **Permissions**. Actions review the exact remote target, require native confirmation and recheck metadata before applying. Renames do not overwrite existing destinations; deletion is limited to regular files and empty directories; chmod refuses special permission bits. See the [file-transfer guide](docs/SECURE-CONNECTIONS.md).
+
+This is another step toward functional coverage. Full XML import, recursive transfers/synchronization, detached windows, session locking and legacy modem protocols remain missing. Platform release checks are pending; the public download remains v0.12.0. See [0.13 verification](docs/VERIFICATION-v0.13.0.md).
+
 ## New in 0.12 — Shared desktop menus and terminal tools
 
 ![TermForge File menu and Print submenu](docs/images/menus-v0.12.png)

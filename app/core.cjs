@@ -425,6 +425,19 @@ function createStore(directory) {
       state.sessions = [...merged.values()];
       return persist(state);
     },
+    commitImportedSessions(input, { expectedSessions } = {}) {
+      if (!Array.isArray(input) || input.length > 1000 || !Array.isArray(expectedSessions)) fail('Invalid session import plan.');
+      const sessions = input.map(validateSession);
+      const sessionIds = new Set(sessions.map(session => session.id));
+      if (sessionIds.size !== sessions.length) fail('Imported session IDs must be unique.');
+      const state = load();
+      // This comparison and the atomic file replacement run synchronously in
+      // the main process. Unrelated preferences keep their latest values.
+      if (JSON.stringify(state.sessions) !== JSON.stringify(expectedSessions)) fail('Saved sessions changed after preview. Review the import again.');
+      if (state.sessions.some(session => !sessionIds.has(session.id))) fail('An import cannot remove existing sessions.');
+      state.sessions = sessions;
+      return persist(state);
+    },
     deleteSession(sessionId) {
       if (typeof sessionId !== 'string' || !sessionId) fail('Session ID is required.');
       const state = load(); state.sessions = state.sessions.filter(item => item.id !== sessionId);

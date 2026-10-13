@@ -2,7 +2,7 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original workspace includes a separate native Quick Connect window and docked manager layout informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.12.0
+## Current source scope — TermForge 0.13.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | SSH | Managed ssh2 transport with verified host pins, ordered key/agent/password/interactive authentication and masked prompts; existing system OpenSSH option | Managed transport excludes jumps, forwarding, certificates, GSSAPI and X11; OpenSSH keeps its separate host database |
 | Credentials | Named OS-encrypted username/password entries, metadata-only UI, host/port/fingerprint grants, reference-based profiles | Refuses insecure/unavailable Linux backend; no separate vault lock, master password, portable backup or proprietary-secret import; see [security/storage guide](SECURE-CONNECTIONS.md) |
 | SFTP / SCP / ASCII | Two-pane local/remote file browser, queued regular-file SFTP and actual SCP payloads, progress/cancel and reviewed overwrites; existing interactive SFTP and ASCII text send retained | SCP mode also requires SFTP for browsing/staging; no recursive copy, resume, sync, drag/drop or remote editor; remote race/cleanup limits documented |
+| Remote file management | Reviewed SFTP folder creation, new-only rename, regular-file/empty-directory deletion, mode 000–777 editing and permissions display | No symbolic links, recursive deletion or special permission bits; remote path races and uncertain outcomes are documented |
 | Telnet / Raw TCP | Original adapters; Telnet option/NAWS/terminal-type/echo handling and break | UTF-8 text stream; real loopback tests, no external-device interoperability coverage |
 | Serial | Device enumeration, baud/data/stop/parity/flow options, streaming/break, asynchronous close/retry and byte-aware Hex View | Mock/injected adapter tests; no physical hardware/device interoperability verification |
 | Saved sessions | Nested inferred folders/filter, expanded Quick Connect with credential/auth-order/SFTP/startup options, Connect Bar, selected/folder connect and selected-field bulk edits | Up to 1,000 profiles; no explicit empty folders, complete bulk option catalog or default/auto session system; startup form never connects automatically |
@@ -36,7 +37,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | TFTP | Explicit restricted octet downloads and opt-in new-file uploads, root/client/bind/port and status | One root, no overwrite, loopback 6969 default, no privileged-port helper; see [TFTP limits](TFTP.md) |
 | SSH controls and keys | Identity/certificate paths, auth preference, forwarding/compression/keepalive, host-key management; encrypted Ed25519/RSA-3072 generation, OpenSSH/PEM conversion and agent fingerprint listing | Key utilities require OpenSSH; no proprietary-format converter, remote key installer, agent add/remove or token manager; advanced connection options remain OpenSSH-dependent |
 | Jump / tunnels | One OpenSSH jump and loopback-requested local/remote/dynamic forwarding | No gateway session graph/multiple hops; server policy may reject or alter forwarding |
-| Configuration | Version-2 JSON with version-1 schema migration, commands/history/snapshots; limited plain SSH2 INI import | No CSV/text wizard, broad XML compatibility, encrypted-secret recovery or full conflict-policy UI |
+| Configuration | Version-2 JSON, limited plain SSH2 INI import and mapped UTF-8 CSV/TSV session imports with reviewed skip/rename/replace policies and atomic commit | Text import supports connection profiles only; no broad XML compatibility or encrypted-secret recovery; see [import guide](SESSION-IMPORT.md) |
 
 ## Color schemes added in 0.4
 
@@ -61,6 +62,8 @@ The limited INI reader imports nonsecret SSH2 connection metadata, not passwords
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+Version 0.13.0 adds mapped session-list imports and reviewed remote file operations. Final platform checks and publication are pending; see [0.13 verification](VERIFICATION-v0.13.0.md).
 
 Version 0.12.0 adds the shared menus and bounded terminal/key tools. All four source CI and installer jobs passed at `5dad1ad30e16436d3317f73433ceb754bd1c2f25`: both Macs and Linux passed 338 backend tests each, Windows passed 330 with eight expected platform-specific skips, and Linux passed 198 interface checks plus the real Electron smoke and 15 native menu checks. Both Macs and Linux also passed seven localhost Ansible checks each. Production audits and both Mac ad-hoc signature integrity checks passed. [Version 0.12.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.12.0); its source tag, thirteen assets and twelve checksum entries passed anonymous public verification. The manifest and four build records were independently downloaded and hashed; installer hashes were compared with GitHub's SHA-256 metadata. See [0.12 verification](VERIFICATION-v0.12.0.md) for exact evidence and limits.
 

@@ -1,0 +1,19 @@
+.session-import-modal { width: min(1040px, calc(100vw - 40px)); max-height: calc(100vh - 40px); }
+.session-import-modal > .modal-body { overflow: auto; max-height: calc(100vh - 200px); }
+.session-import-source { font-weight: 600; overflow-wrap: anywhere; }
+.session-import-controls, .session-import-mapping { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.session-import-modal label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.session-import-modal label.option-check { flex-direction: row; align-items: center; }
+.session-import-modal select { width: 100%; min-width: 0; }
+.session-import-preview-actions { display: flex; gap: 12px; align-items: center; }
+.session-import-table-wrap { overflow: auto; max-height: 340px; border: 1px solid var(--border, #c8ccd0); border-radius: 6px; }
+.session-import-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.session-import-table th { position: sticky; top: 0; background: var(--field, #fff); text-align: left; z-index: 1; }
+.session-import-table td, .session-import-table th { padding: 9px; vertical-align: top; border-bottom: 1px solid var(--border, #c8ccd0); overflow-wrap: anywhere; }
+.session-import-table td { min-width: 70px; max-width: 240px; }
+.session-import-table td:first-child, .session-import-table td:nth-child(2) { min-width: 30px; }
+.session-import-table strong, .session-import-table small { display: block; }
+.session-import-table small { margin-top: 3px; }
+.session-import-table details p { white-space: pre-wrap; }
+.session-import-invalid td { background: color-mix(in srgb, #b42318 7%, transparent); }
+@media (max-width: 700px) { .session-import-controls, .session-import-mapping { grid-template-columns: repeat(2, minmax(0, 1fr)); } .session-import-modal { width: calc(100vw - 24px); } }
