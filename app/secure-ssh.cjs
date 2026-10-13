@@ -247,16 +247,21 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
   }
   function createTerminal(input) {
     const profile = validateManaged(input);
-    const abort = new AbortController(), dataListeners = new Set(), exitListeners = new Set();
+    const abort = new AbortController(), dataListeners = new Set(), rawListeners = new Set(), exitListeners = new Set();
     const decoder = new StringDecoder('utf8'), errorDecoder = new StringDecoder('utf8');
     let client, channel, stopped = false, queue = [], queuedBytes = 0, blocked = false, cols = 100, rows = 30;
+    const receiveBytes = (bytes, decoder) => {
+      if (stopped) return;
+      for (const listener of rawListeners) listener(Buffer.from(bytes));
+      output(decoder.write(bytes));
+    };
     const output = value => { if (value && !stopped) for (const listener of dataListeners) listener(value); };
     function finish(event = { exitCode: 0, signal: null }) {
       if (stopped) return;
       output(decoder.end()); output(errorDecoder.end());
       stopped = true; queue = []; queuedBytes = 0; abort.abort(); channel?.destroy(); client?.destroy();
       for (const listener of exitListeners) listener(event);
-      dataListeners.clear(); exitListeners.clear();
+      dataListeners.clear(); rawListeners.clear(); exitListeners.clear();
     }
     function flush() {
       try { while (!stopped && channel && !blocked && queue.length) { const value = queue.shift(); queuedBytes -= Buffer.byteLength(value); blocked = !channel.write(value); } }
@@ -273,8 +278,8 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
           if (error) { output('\r\n[TermForge: The SSH server could not open the terminal.]\r\n'); finish({ exitCode: 1, signal: 'error' }); return; }
           if (stopped) { stream.destroy(); return; }
           channel = stream;
-          stream.on('data', bytes => output(decoder.write(bytes)));
-          stream.stderr.on('data', bytes => output(errorDecoder.write(bytes)));
+          stream.on('data', bytes => receiveBytes(bytes, decoder));
+          stream.stderr.on('data', bytes => receiveBytes(bytes, errorDecoder));
           stream.on('drain', () => { blocked = false; flush(); });
           stream.on('error', () => { output('\r\n[TermForge: The SSH terminal stream failed.]\r\n'); finish({ exitCode: 1, signal: 'error' }); });
           stream.on('close', (code, signal) => finish({ exitCode: Number.isInteger(code) ? code : 0, signal: typeof signal === 'string' ? text(signal, 32) : null }));
@@ -293,8 +298,18 @@ function createSecureSsh({ directory, getCredential = async () => null, requestA
         if (queuedBytes + Buffer.byteLength(value) > MAX_QUEUE) throw new Error('SSH terminal input queue exceeds 1 MiB.');
         queue.push(value); queuedBytes += Buffer.byteLength(value); flush();
       },
+      writeBytes(bytes) {
+        if (stopped) throw new Error('SSH terminal is no longer open.');
+        if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_INPUT) throw new Error('Binary input must contain at most 256 KiB.');
+        if (queuedBytes + bytes.byteLength > MAX_QUEUE) throw new Error('SSH terminal input queue exceeds 1 MiB.');
+        const value = Buffer.from(bytes); queue.push(value); queuedBytes += value.length; flush();
+      },
       resize(nextCols, nextRows) { if (!Number.isInteger(nextCols) || nextCols < 1 || nextCols > 500 || !Number.isInteger(nextRows) || nextRows < 1 || nextRows > 300) throw new Error('Invalid terminal dimensions.'); cols = nextCols; rows = nextRows; if (!stopped && channel) channel.setWindow(rows, cols, 0, 0); },
       kill() { finish({ exitCode: 0, signal: 'closed' }); },
+      onRawData(listener) {
+        if (typeof listener !== 'function') throw new Error('Raw data callback is required.');
+        rawListeners.add(listener); return { dispose() { rawListeners.delete(listener); } };
+      },
       onData(listener) { dataListeners.add(listener); return { dispose() { dataListeners.delete(listener); } }; },
       onExit(listener) { exitListeners.add(listener); return { dispose() { exitListeners.delete(listener); } }; },
     };

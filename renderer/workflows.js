@@ -231,6 +231,8 @@ export function createWorkflows(context) {
     } finally { snapshotBusy = false; $('snapshot-save').disabled = false; }
   }
   async function perform(action) {
+    if (action.startsWith('snapshot-open:')) { const snapshot = (state().snapshots || []).find(item => item.id === decodeURIComponent(action.slice(14))); if (snapshot) await connectSnapshot(snapshot); return true; }
+    if (action === 'snapshot-save') { renderSnapshots(); dialog('snapshots-dialog'); $('snapshot-name').focus(); return true; }
     switch (action) {
       case 'quick-connect': openQuickConnect(); return true;
       case 'connect-bar': $('connect-address').focus(); $('connect-address').select(); return true;

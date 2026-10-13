@@ -142,7 +142,7 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
   const network = serial ? null : (net || require('node:net'));
   if (!serial && typeof network.createConnection !== 'function') throw new Error('TCP support is unavailable.');
   const decoder = new StringDecoder('utf8');
-  const dataListeners = new Set(), exitListeners = new Set();
+  const dataListeners = new Set(), rawListeners = new Set(), exitListeners = new Set();
   let stream = null, open = false, blocked = false, finished = false, timer = null, breakTimer = null, closeRequested = false;
   let inFlightWrites = 0, guardTimer = null, detached = false;
   let serialOpening = false, closing = false, closeFailure = false;
@@ -162,6 +162,10 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
       if (earlyBytes + size > MAX_QUEUED_BYTES) { earlyOutput = ['\r\n[TermForge: output before subscription exceeded 1 MiB.]\r\n']; earlyBytes = 64; }
       else { earlyOutput.push(text); earlyBytes += size; }
     }
+  }
+  function receiveBytes(bytes) {
+    for (const callback of [...rawListeners]) callback(Buffer.from(bytes));
+    output(decoder.write(bytes));
   }
   const status = message => output(`\r\n[TermForge: ${message}]\r\n`);
   function detach() {
@@ -191,7 +195,7 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
     output(decoder.end());
     exitEvent = { exitCode, signal };
     for (const callback of [...exitListeners]) callback(exitEvent);
-    dataListeners.clear(); exitListeners.clear();
+    dataListeners.clear(); rawListeners.clear(); exitListeners.clear();
   }
   function closeTcp() {
     if (!stream || closeRequested) return;
@@ -292,13 +296,13 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
       } catch (error) { written(error); }
     }
   }
-  function send(bytes) {
+  function send(bytes, strict = false) {
     if (finished) return;
     const buffered = Number.isFinite(stream?.writableLength) ? stream.writableLength : 0;
-    if (pendingBytes + buffered + bytes.length > MAX_QUEUED_BYTES) { fail(new Error('Transport output queue exceeds 1 MiB.')); return; }
+    if (pendingBytes + buffered + bytes.length > MAX_QUEUED_BYTES) { const error = new Error('Transport output queue exceeds 1 MiB.'); if (strict) throw error; fail(error); return; }
     pending.push(bytes); pendingBytes += bytes.length; flush();
   }
-  const telnet = session.protocol === 'telnet' ? createTelnet({ send, receive: bytes => output(decoder.write(bytes)), terminalType: type }) : null;
+  const telnet = session.protocol === 'telnet' ? createTelnet({ send, receive: receiveBytes, terminalType: type }) : null;
 
   queueMicrotask(() => {
     if (finished) return;
@@ -308,7 +312,7 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
       listen('error', fail);
       listen('data', bytes => {
         if (finished) return;
-        try { if (telnet) telnet.feed(Buffer.from(bytes)); else output(decoder.write(Buffer.from(bytes))); } catch (error) { fail(error); }
+        try { if (telnet) telnet.feed(Buffer.from(bytes)); else receiveBytes(Buffer.from(bytes)); } catch (error) { fail(error); }
       });
       listen('drain', () => { blocked = false; flush(); });
       listen('close', error => {
@@ -361,6 +365,15 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
       send(telnet ? telnet.encode(text) : Buffer.from(text, 'utf8'));
       if (telnet?.localEcho() && !finished) output(text.replace(/\r\n|\r|\n/gu, '\r\n'));
     },
+    ...(!telnet && (!serial || (settings.dataBits === 8 && !settings.xon && !settings.xoff)) ? { writeBytes(bytes) {
+      if (finished) throw new Error('Transport is no longer open.');
+      if (closing) throw new Error('Transport is closing.');
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_INPUT_BYTES) throw new Error('Binary input must contain at most 256 KiB.');
+      // Refuse nontransparent serial settings instead of silently truncating
+      // high bytes or treating XON/XOFF bytes as flow-control instructions.
+      if (serial && (settings.dataBits !== 8 || settings.xon || settings.xoff)) throw new Error('Binary sending requires 8 data bits and no software flow control.');
+      send(Buffer.from(bytes), true);
+    } } : {}),
     resize(cols, rows) {
       if (!Number.isInteger(cols) || cols < 1 || cols > 65535 || !Number.isInteger(rows) || rows < 1 || rows > 65535) throw new Error('Transport dimensions must be from 1 to 65535.');
       if (!finished) telnet?.resize(cols, rows);
@@ -383,6 +396,11 @@ function createTransport(session, { net, SerialPort, timeoutMs = 15000 } = {}) {
           if (!finished) stream.set({ brk: false }, resetError => { if (resetError) fail(resetError); });
         }, 250);
       });
+    },
+    onRawData(callback) {
+      if (typeof callback !== 'function') throw new Error('Raw data callback is required.');
+      rawListeners.add(callback);
+      return { dispose() { rawListeners.delete(callback); } };
     },
     onData(callback) {
       if (typeof callback !== 'function') throw new Error('Data callback is required.');

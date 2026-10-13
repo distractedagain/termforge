@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu, safeStorage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, dialog, clipboard, Menu, safeStorage, screen, shell } = require('electron');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { createStore, validateSession, parseSecureCRTIni } = require('./core.cjs');
@@ -18,6 +18,9 @@ const { createAuthPrompts } = require('./auth-prompts.cjs');
 const { createSecureSsh } = require('./secure-ssh.cjs');
 const { createSecureTransfers } = require('./secure-transfers.cjs');
 const { createQuickConnectWindow } = require('./quick-connect-window.cjs');
+const { createNativeMenu } = require('./native-menu.cjs');
+const { createDesktopActions } = require('./desktop-actions.cjs');
+const { createKeyTools } = require('./key-tools.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -33,6 +36,11 @@ let authPrompts;
 let secureSsh;
 let secureTransfers;
 let quickConnect;
+let nativeMenu;
+let desktopActions;
+let keyTools;
+let menuReady = false;
+const recentScripts = new Map();
 const dirtyProjects = new Set();
 const savingProjects = new Map();
 let activeTerminalId = null;
@@ -51,6 +59,7 @@ function send(channel, value) {
 }
 async function cleanupTerminals() {
   quickConnect?.close();
+  await keyTools?.close();
   localAi?.close();
   authPrompts?.closeAll();
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
@@ -72,7 +81,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'credentialSave'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -95,45 +104,20 @@ async function approveNative({ title, message, detail, accept, signal }) {
   return result.response === 1 && !signal?.aborted && !shuttingDown;
 }
 
-function applicationMenu() {
-  const action = (label, key, accelerator) => ({ label, ...(accelerator ? { accelerator } : {}), click: () => { if (!quickConnect?.routeMenuAction(key)) send('menuAction', key); } });
-  const separator = { type: 'separator' };
-  return Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [{ role: 'about' }, separator, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, separator, { role: 'quit' }] }] : []),
-    { label: 'File', submenu: [
-      action('Open Project…', 'open-project', 'CommandOrControl+Shift+O'),
-      action('Save Project File', 'save-project-file', 'CommandOrControl+S'), separator,
-      action('New Session…', 'new-session', 'CommandOrControl+N'),
-      action('Connect', 'connect', 'CommandOrControl+O'),
-      action('Quick Connect…', 'quick-connect'),
-      action('Local Shell', 'local-shell', 'CommandOrControl+T'), separator,
-      action('Disconnect', 'disconnect'), action('Reconnect', 'reconnect'), separator,
-      action('Import / Export…', 'import-export'), separator,
-      action('Close Tab', 'close-tab', 'CommandOrControl+W'),
-      ...(process.platform === 'darwin' ? [] : [{ role: 'quit' }])
-    ] },
-    { label: 'Edit', submenu: [action('Undo', 'undo', 'CommandOrControl+Z'), action('Redo', 'redo', 'CommandOrControl+Shift+Z'), separator, action('Cut', 'cut', 'CommandOrControl+X'),
-      action('Copy', 'copy', process.platform === 'darwin' ? 'Command+C' : 'Control+Shift+C'),
-      action('Paste', 'paste', process.platform === 'darwin' ? 'Command+V' : 'Control+Shift+V'),
-      action('Select All', 'select-all'), separator,
-      action('Find…', 'find', 'CommandOrControl+F')
-    ] },
-    { label: 'View', submenu: [
-      action('Project Workspace', 'project-workspace'),
-      action('Session Manager', 'show-session-manager'), action('Command Window', 'show-command-window'),
-      action('Button Bar', 'show-button-bar'), separator,
-      action('AI Assistant', 'local-ai'), separator,
-      action('Connect Bar', 'connect-bar'), action('Command Manager', 'show-command-manager'), action('Active Sessions Manager', 'show-active-sessions'), separator,
-      action('Clear Screen', 'clear-screen'), action('Reset Terminal', 'reset-terminal'), separator,
-      { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, separator, { role: 'togglefullscreen' }
-    ] },
-    { label: 'Options', submenu: [action('Session Options…', 'session-options'), action('Global Options…', 'settings'), action('Color Schemes…', 'color-schemes'), action('Keyword Highlighting…', 'keyword-options')] },
-    { label: 'Transfer', submenu: [action('File Transfer…', 'sftp'), action('Credentials…', 'credentials'), action('Trusted SSH Hosts…', 'ssh-hosts'), separator, action('Send ASCII File…', 'send-ascii'), action('Send Break', 'send-break'), action('TFTP Server…', 'tftp-server'), separator, action('Log Session…', 'log'), action('Pause / Resume Log', 'pause-log')] },
-    { label: 'Script', submenu: [action('Run Python Script…', 'script-run'), action('Cancel Running Script', 'script-cancel'), separator, action('Record Input…', 'script-record'), action('Script Output', 'script-output')] },
-    { label: 'Tools', submenu: [action('Edit Button Bar…', 'snippets'), action('Import / Export…', 'import-export')] },
-    { label: 'Window', submenu: [action('Clone Session', 'clone-session'), action('Snapshots…', 'snapshots'), separator, action('New Vertical Tab Group', 'group-vertical'), action('New Horizontal Tab Group', 'group-horizontal'), action('Move Tab to Next Group', 'group-move-next'), action('Collapse Tab Groups', 'group-collapse'), separator, action('Tile Sessions', 'tile'), action('Tile Horizontally', 'tile-horizontal'), action('Tile Vertically', 'tile-vertical'), action('Tile as Grid', 'tile-grid'), separator, { role: 'minimize' }, { label: 'Close Window', role: 'close', accelerator: 'CommandOrControl+Shift+W' }] },
-    { label: 'Help', submenu: [action('TermForge Help', 'help')] }
-  ]);
+function initializeMenu() {
+  desktopActions = createDesktopActions({ BrowserWindow, shell, getWindow: () => window, getActionWindow: () => {
+    const focused = BrowserWindow.getFocusedWindow();
+    return focused && (focused === window || focused.webContents.getURL() === 'termforge://app/quick-connect.html') ? focused : window;
+  } });
+  nativeMenu = createNativeMenu({ Menu, platform: process.platform, appName: app.name,
+    getContext: () => ({ ready: menuReady, quickConnectFocused: BrowserWindow.getFocusedWindow()?.webContents?.getURL() === 'termforge://app/quick-connect.html' }),
+    dispatch: action => { if (!quickConnect?.routeMenuAction(action)) send('menuAction', action); },
+    runNative: action => action === 'quit' ? window.close() : desktopActions.perform(action),
+    onError: error => dialog.showErrorBox('Menu command failed', error.message)
+  });
+  nativeMenu.refresh();
+  app.on('browser-window-focus', () => nativeMenu.refresh());
+  app.on('browser-window-blur', () => nativeMenu.refresh());
 }
 
 async function importSecureCRT() {
@@ -312,12 +296,24 @@ function registerHandlers() {
     return { name: path.basename(filename), size: bytes.length, text };
   });
   handle('scriptRun', async (request = {}) => {
-    if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(key => !['terminalId', 'arguments'].includes(key))) throw new Error('Invalid script request.');
+    if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(key => !['terminalId', 'arguments', 'recentId'].includes(key))) throw new Error('Invalid script request.');
     const terminalId = request.terminalId || activeTerminalId;
     if (terminalId && !terminals.has(requiredId(terminalId))) throw new Error('Choose an open terminal for the script.');
-    const selected = await dialog.showOpenDialog(window, { title: 'Run Python script', properties: ['openFile'], filters: [{ name: 'Python script', extensions: ['py'] }] });
-    if (selected.canceled) return null;
-    return automation.run({ filename: selected.filePaths[0], terminalId, arguments: request.arguments || [] });
+    let filename;
+    if (request.recentId !== undefined) {
+      filename = recentScripts.get(requiredId(request.recentId));
+      if (!filename) throw new Error('This recent script is no longer available.');
+      if (!await approveNative({ title:'Run recent Python script', message:`Run ${path.basename(filename)}?`, detail:`${filename}\nPython scripts run with your user privileges and can modify files or connected systems. The file may have changed since its last run.`, accept:'Run script' })) return null;
+    } else {
+      const selected = await dialog.showOpenDialog(window, { title:'Run Python script', properties:['openFile'], filters:[{name:'Python script',extensions:['py']}] });
+      if (selected.canceled) return null;
+      filename = selected.filePaths[0];
+    }
+    const result = await automation.run({ filename, terminalId, arguments:request.arguments || [] });
+    for (const [id, previous] of recentScripts) if (previous === filename) recentScripts.delete(id);
+    recentScripts.set(require('node:crypto').randomUUID(), filename);
+    while (recentScripts.size > 10) recentScripts.delete(recentScripts.keys().next().value);
+    return result;
   });
   handle('scriptCancel', (id) => automation.cancel(requiredId(id)));
   handle('chooseTftpRoot', async () => {
@@ -363,12 +359,42 @@ function registerHandlers() {
   handle('terminalSetLog', async (request) => {
     if (!request || typeof request.enabled !== 'boolean') throw new Error('Invalid logging request');
     const id = requiredId(request.id);
+    if (request.mode !== undefined && !['raw','text'].includes(request.mode)) throw new Error('Invalid log mode.');
+    if (request.enabled && request.mode === 'raw' && !terminals.outputState(id).capabilities.rawLog) throw new Error('Raw byte logging is unavailable for this connection.');
     if (!request.enabled) { terminals.disableLog(id); return { enabled: false }; }
     const result = await dialog.showSaveDialog(window, { title: 'Save terminal output log — output may contain secrets', defaultPath: `termforge-${new Date().toISOString().replace(/[:.]/g, '-')}.log`, filters: [{ name: 'Terminal log', extensions: ['log'] }] });
-    if (result.canceled || !result.filePath) return { enabled: false };
-    terminals.enableLog(id, result.filePath);
+    if (result.canceled || !result.filePath) { const log = terminals.outputState(id).log; return { canceled:true, enabled:log.enabled, path:log.path }; }
+    terminals.enableLog(id, result.filePath, { mode: request.mode === 'raw' ? 'raw' : 'text' });
     return { enabled: true, path: result.filePath };
   });
+  handle('menuState', input => { menuReady = input?.ready === true; nativeMenu?.update(input); return true; });
+  handle('desktopAction', (action, value) => desktopActions.perform(action, value));
+  handle('printTerminal', input => desktopActions.print(input));
+  handle('terminalOutputState', id => terminals.outputState(requiredId(id)));
+  handle('terminalReadRaw', id => terminals.readRaw(requiredId(id)));
+  handle('terminalSetCapture', async request => {
+    if (!request || typeof request.enabled !== 'boolean') throw new Error('Invalid ASCII capture request.');
+    const id = requiredId(request.id);
+    if (!request.enabled) return terminals.disableCapture(id);
+    terminals.outputState(id);
+    const result = await dialog.showSaveDialog(window, { title:'Receive ASCII into a new text file', defaultPath:'termforge-received.txt', filters:[{name:'Text',extensions:['txt']}] });
+    if (result.canceled || !result.filePath) return null;
+    return terminals.enableCapture(id, result.filePath);
+  });
+  handle('terminalSendBinary', async id => {
+    id = requiredId(id);
+    if (!terminals.outputState(id).capabilities.binary) throw new Error('This connection cannot send transparent binary bytes.');
+    const result = await dialog.showOpenDialog(window, { title:'Choose binary data to send', properties:['openFile'] });
+    if (result.canceled) return null;
+    const filename = result.filePaths[0], file = await fsp.open(filename, 'r');
+    let bytes;
+    try { const stat = await file.stat(); if (!stat.isFile() || stat.size > 256 * 1024) throw new Error('Choose a regular file no larger than 256 KiB.'); bytes = Buffer.alloc(256 * 1024 + 1); let total = 0; while (total < bytes.length) { const read = await file.read(bytes, total, bytes.length - total, total); if (!read.bytesRead) break; total += read.bytesRead; } if (total > 256 * 1024) throw new Error('Binary input exceeds 256 KiB.'); bytes = bytes.subarray(0, total); } finally { await file.close(); }
+    const target = terminals.describe(id);
+    const accepted = await approveNative({ title:'Send binary data', message:`Send ${bytes.length} bytes to ${target.title}?`, detail:`File: ${path.basename(filename)}\nThis sends raw bytes to the session. The receiving application must be ready; control bytes may trigger commands. This does not upload a named remote file.`, accept:'Send binary data' });
+    if (!accepted) return null;
+    return terminals.writeBinary({ id, data:bytes });
+  });
+  handle('scriptRecent', () => [...recentScripts].reverse().map(([id, filename]) => ({ id, name:path.basename(filename) })));
   handle('clipboardRead', () => clipboard.readText());
   handle('clipboardWrite', async (text) => {
     if (typeof text !== 'string' || text.length > 1024 * 1024) throw new Error('Clipboard text exceeds 1 MiB');
@@ -424,7 +450,7 @@ async function boot() {
     }
   });
   window.on('closed', () => quickConnect.dispose());
-  terminals = createTerminalManager({ managedTransport: profile => secureSsh.createTerminal(profile), cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });
+  terminals = createTerminalManager({ managedTransport: profile => secureSsh.createTerminal(profile), cwd: app.getPath('home'), emitData: (data) => { automation?.feedData(data); send('terminalData', data); }, emitOutputState: data => send('terminalOutputState', data), emitExit: (data) => { automation?.feedExit(data); if (activeTerminalId === data.id) activeTerminalId = null; send('terminalExit', data); } });
   automation = createAutomationManager({
     getSessionProfiles: () => store.load().sessions,
     getActiveTerminalId: () => activeTerminalId,
@@ -435,6 +461,8 @@ async function boot() {
     emitOutput: (data) => send('scriptOutput', data), emitStatus: (data) => send('scriptStatus', data),
   });
   localAi = createAiAssistant({ emit: (event) => send('aiEvent', event) });
+  keyTools = createKeyTools({ dialog, getWindow: () => window, register: handle, approve: approveNative });
+  initializeMenu();
   registerHandlers();
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !focusedTerminalId) return;
@@ -457,16 +485,17 @@ async function boot() {
     const serverState = tftp?.status();
     const serverOwned = serverState && (serverState.state !== 'stopped' || serverState.activeTransfers > 0);
     const transferConnections = secureTransfers?.count || 0;
-    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections) return;
+    const keyOperations = keyTools?.count || 0;
+    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size && !transferConnections && !keyOperations) return;
     event.preventDefault();
     if (shuttingDown) return;
-    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${transferConnections} file-transfer connection(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
+    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${transferConnections} file-transfer connection(s), ${keyOperations} SSH key operation(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
     if (choice === 1) {
       shuttingDown = true;
       cleanupTerminals().then(() => { quitting = true; app.quit(); }).catch(error => { shuttingDown = false; dialog.showErrorBox('Active work could not stop', error.message); });
     }
   });
-  Menu.setApplicationMenu(applicationMenu());
+
   if (process.platform !== 'darwin') window.setMenuBarVisibility(false);
   await window.loadURL(trustedURL);
   if (process.argv.includes('--termforge-smoke') || process.argv.includes('--termforge-package-smoke')) {

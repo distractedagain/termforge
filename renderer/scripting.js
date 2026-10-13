@@ -1,8 +1,9 @@
 const $ = (id) => document.getElementById(id);
 
-export function createScriptUi({ api, getActiveId, toast }) {
+export function createScriptUi({ api, getActiveId, toast, changed = () => {} }) {
   const runs = new Map();
   let selectedId = null;
+  let recent = [];
   const running = (run) => ['starting', 'running'].includes(run?.state);
   function render() {
     $('script-list').replaceChildren();
@@ -26,7 +27,7 @@ export function createScriptUi({ api, getActiveId, toast }) {
     runs.set(event.id, { ...previous, ...event });
     if (!selectedId || event.state === 'starting') selectedId = event.id;
     if (runs.size > 50) { const removable = [...runs.values()].find((run) => !running(run) && run.id !== selectedId); if (removable) runs.delete(removable.id); }
-    render();
+    render(); changed();
     if (event.state === 'failed') toast(`Script failed: ${event.error || event.filename || 'Python script'}`, true);
   }
   function output(event) {
@@ -36,9 +37,11 @@ export function createScriptUi({ api, getActiveId, toast }) {
     if (event.id === selectedId && $('script-output-dialog').open) render();
   }
   async function perform(action) {
+    if (action.startsWith('recent-script:')) { const result = await api.scriptRun({ terminalId: getActiveId() || undefined, recentId: decodeURIComponent(action.slice(14)), arguments: [] }); if (result) { selectedId = result.id; show(); } return true; }
     switch (action) {
       case 'script-run': {
         const result = await api.scriptRun({ terminalId: getActiveId() || undefined, arguments: [] });
+        if (api.scriptRecent) { recent = await api.scriptRecent(); changed(); }
         if (result) { selectedId = result.id; if (!runs.has(result.id)) runs.set(result.id, { ...result, state: 'starting', output: '' }); show(); }
         return true;
       }
@@ -53,5 +56,5 @@ export function createScriptUi({ api, getActiveId, toast }) {
     if (typeof api?.onScriptStatus === 'function') api.onScriptStatus(status);
     if (typeof api?.onScriptOutput === 'function') api.onScriptOutput(output);
   }
-  return { install, perform, hasRunning: () => [...runs.values()].some(running) };
+  return { install, perform, recent: () => recent, hasRunning: () => [...runs.values()].some(running) };
 }

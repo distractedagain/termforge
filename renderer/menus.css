@@ -1,0 +1,15 @@
+.menu-dropdown { min-width: 265px; max-width: min(460px, calc(100vw - 16px)); padding: 5px; border-radius: 7px; box-shadow: 0 8px 28px #0003; }
+.menu-dropdown .menu-item { min-height: 27px; border-radius: 3px; padding: 3px 10px 3px 5px; font-weight: 400; }
+.menu-dropdown .menu-check { flex: 0 0 18px; }
+.menu-dropdown .menu-shortcut { margin-left: 22px; }
+.menu-submenu { position: fixed; z-index: 110; }
+.menu-dropdown .menu-item[aria-expanded="true"],
+.menu-dropdown .menu-item[aria-expanded="true"]:hover:enabled,
+.menu-dropdown .menu-item[aria-expanded="true"]:focus-visible { background: var(--accent); color: var(--accent-ink); }
+.menu-arrow { margin-left: auto; padding-left: 20px; }
+.hex-data { max-height: 55vh; overflow: auto; font: 12px ui-monospace, monospace; white-space: pre; user-select: text; }
+#hex-dialog { width: min(780px, 96vw); }
+#menu-availability-dialog { width: min(680px, 96vw); }
+#main-toolbar[hidden], .workspace-footer[hidden] { display: none !important; }
+.hide-terminal-scrollbar .xterm-viewport { scrollbar-width: none; }
+.hide-terminal-scrollbar .xterm-viewport::-webkit-scrollbar { display: none; }

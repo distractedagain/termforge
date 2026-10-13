@@ -199,3 +199,76 @@ test('live terminal metadata follows dragged order without replacing process han
   assert.throws(() => state.manager.reorder([first.id, first.id]), /Invalid terminal order/);
   state.manager.close(second.id); state.manager.reorder([second.id, first.id]); assert.deepEqual(state.manager.list().map(terminal => terminal.id), [first.id]);
 });
+
+function rawSetup() {
+  const changes = [], data = [], writes = [];
+  const handle = { write() {}, resize() {}, kill() { this.exit?.({ exitCode: 0 }); },
+    writeBytes(bytes) { writes.push(bytes); },
+    onData(callback) { this.data = callback; return { dispose() {} }; },
+    onRawData(callback) { this.raw = callback; return { dispose() {} }; },
+    onExit(callback) { this.exit = callback; return { dispose() {} }; },
+  };
+  const manager = createTerminalManager({ transport: () => handle, emitOutputState: state => changes.push(state), emitData: value => data.push(value) });
+  const terminal = manager.open({ protocol: 'raw', host: '127.0.0.1', port: 1234 });
+  return { manager, handle, terminal, changes, data, writes };
+}
+
+test('raw logging and independent ASCII receive capture exact bytes and filtered text with independent stop/pause', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'termforge-log-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const state = rawSetup(); t.after(() => state.manager.closeAll());
+  const id = state.terminal.id, raw = path.join(directory, 'raw.bin'), text = path.join(directory, 'receive.txt');
+  state.handle.data('before capture');
+  state.manager.enableLog(id, raw, { mode: 'raw' }); state.manager.enableCapture(id, text);
+  const first = Buffer.from([0xff, 0, 0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x41]);
+  state.handle.raw(first); state.handle.data('\uFFFD\0\x1b[31mA');
+  state.manager.pauseLog(id, true); state.handle.raw(Buffer.from('paused')); state.handle.data('during pause');
+  state.manager.pauseLog(id, false); state.handle.raw(Buffer.from('last')); state.handle.data('\x1b[0mlast');
+  state.manager.disableCapture(id); state.handle.data('not received'); state.manager.disableLog(id);
+  assert.deepEqual(fs.readFileSync(raw), Buffer.concat([first, Buffer.from('last')]));
+  assert.equal(fs.readFileSync(text, 'utf8'), '\uFFFDA' + 'during pauselast');
+  assert.equal(state.manager.outputState(id).log.enabled, false); assert.equal(state.manager.outputState(id).capture.enabled, false);
+  assert.ok(state.changes.some(value => value.log.paused)); assert.equal(state.changes.at(-1).log.enabled, false);
+});
+
+test('Hex View retains only the newest 64 KiB of received bytes with a truthful absolute offset', t => {
+  const state = rawSetup(); t.after(() => state.manager.closeAll()); const id = state.terminal.id;
+  state.handle.data('synthetic status is not received bytes'); state.handle.raw(Buffer.alloc(70000, 0xff));
+  state.handle.raw(Buffer.from([0x00, 0xc0, 0xff]));
+  const result = state.manager.readRaw(id), bytes = Buffer.from(result.base64, 'base64');
+  assert.equal(bytes.length, 65536); assert.equal(result.offset, 70003 - 65536); assert.equal(result.totalBytes, 70003);
+  assert.deepEqual(bytes.subarray(-3), Buffer.from([0x00, 0xc0, 0xff]));
+  assert.equal(state.manager.outputState(id).capabilities.hex, true);
+  state.manager.close(id); assert.throws(() => state.manager.readRaw(id), /no longer open/);
+});
+
+test('binary send preserves every byte, copies caller buffers and rejects overflow and text', t => {
+  const state = rawSetup(); t.after(() => state.manager.closeAll()); const id = state.terminal.id;
+  const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+  assert.deepEqual(state.manager.writeBinary({ id, data: bytes }), { id, bytes: 256 });
+  bytes.fill(0); assert.deepEqual(state.writes[0], Buffer.from(Array.from({ length: 256 }, (_, i) => i)));
+  assert.throws(() => state.manager.writeBinary({ id, data: 'text' }), /256 KiB/);
+  assert.throws(() => state.manager.writeBinary({ id, data: Buffer.alloc(256 * 1024 + 1) }), /256 KiB/);
+  assert.equal(state.writes.length, 1);
+});
+
+test('decoded native PTYs cannot claim raw logging, binary sending or Hex View capabilities', t => {
+  const state = setup(); t.after(() => state.manager.closeAll()); const terminal = state.manager.open({ protocol: 'local' });
+  assert.deepEqual(state.manager.outputState(terminal.id).capabilities, { rawLog: false, binary: false, hex: false });
+  assert.throws(() => state.manager.enableLog(terminal.id, path.join(os.tmpdir(), 'unused-raw.log'), { mode: 'raw' }), /decoded text/);
+  assert.throws(() => state.manager.readRaw(terminal.id), /decoded text/);
+  assert.throws(() => state.manager.writeBinary({ id: terminal.id, data: Buffer.from([255]) }), /requires/);
+});
+
+test('file write errors stop the affected capture and publish its disabled state while preserving the terminal', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'termforge-log-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const state = rawSetup(); t.after(() => state.manager.closeAll()); const id = state.terminal.id;
+  state.manager.enableCapture(id, path.join(directory, 'capture.txt'));
+  t.mock.method(fs, 'writeSync', () => { throw Object.assign(new Error('I/O failure'), { code: 'EIO' }); });
+  state.handle.data('output');
+  assert.equal(state.manager.outputState(id).capture.enabled, false);
+  assert.equal(state.changes.at(-1).capture.enabled, false);
+  assert.equal(state.manager.has(id), true);
+  assert.match(state.data.at(-2).data, /ASCII receive stopped/); assert.equal(state.data.at(-1).data, 'output');
+});

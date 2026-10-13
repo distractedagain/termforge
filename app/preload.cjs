@@ -9,6 +9,18 @@ const subscribe = (name) => (callback) => {
 };
 contextBridge.exposeInMainWorld('termforge', {
   getState: invoke('getState'),
+  menuState: invoke('menuState'),
+  desktopAction: invoke('desktopAction'),
+  printTerminal: invoke('printTerminal'),
+  keyToolsGenerate: invoke('keyToolsGenerate'),
+  keyToolsConvert: invoke('keyToolsConvert'),
+  keyToolsAgentList: invoke('keyToolsAgentList'),
+  terminalOutputState: invoke('terminalOutputState'),
+  terminalReadRaw: invoke('terminalReadRaw'),
+  terminalSetCapture: invoke('terminalSetCapture'),
+  terminalSendBinary: invoke('terminalSendBinary'),
+  onTerminalOutputState: subscribe('terminalOutputState'),
+  scriptRecent: invoke('scriptRecent'),
   quickConnectOpen: invoke('quickConnectOpen'),
   quickConnectAccept: invoke('quickConnectAccept'),
   quickConnectResume: invoke('quickConnectResume'),

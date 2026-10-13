@@ -72,6 +72,12 @@ jobs:
       - name: Check the separate Quick Connect interface without launching Electron
         if: runner.os == 'Linux'
         run: npm run test:quick-connect
+      - name: Check shared menus and reviewed commands without launching Electron
+        if: runner.os == 'Linux'
+        run: npm run test:menus
+      - name: Check SSH key tool forms without reading personal keys
+        if: runner.os == 'Linux'
+        run: npm run test:key-tools-ui
       - name: Install isolated localhost automation test runtime
         if: runner.os != 'Windows'
         run: python -m pip install ansible-core==2.21.5 ansible-runner==2.4.3

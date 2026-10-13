@@ -672,7 +672,8 @@ async function runColorChecks() {
     const desktop = await pageFor(platform);
     await check(`${platform} Options menu opens color schemes without a session`, desktop, async () => {
       await desktop.locator('[data-menu="options"]').click();
-      await desktop.locator('#menu-dropdown .menu-item').filter({ hasText: 'Color Schemes' }).click();
+      await desktop.locator('#menu-dropdown .menu-item').filter({ hasText: 'Configure' }).click();
+      await desktop.locator('.menu-submenu .menu-item').filter({ hasText: 'Color Schemes' }).click();
       await desktop.locator('#color-scheme-dialog').waitFor({ state: 'visible' });
       assert.equal(await desktop.locator('#color-scheme-grid input[type="radio"]').count(), COLOR_SCHEME_IDS.length);
       assert.equal((await calls(desktop)).opens.length, 0); await desktop.locator('#color-scheme-cancel').click();
@@ -1114,7 +1115,8 @@ async function runLocalAiChecks() {
     await cloud.locator('#ai-provider').selectOption('ollama'); assert.equal(await cloud.locator('#ai-api-key').inputValue(), '');
     await cloud.locator('#ai-provider').selectOption('openrouter-free'); assert.equal(await cloud.locator('#ai-api-key').inputValue(), ''); assert.equal(await cloud.locator('#ai-cloud-consent').isChecked(), false);
     const storage = await cloud.evaluate(() => ({ local: Object.fromEntries(Object.entries(localStorage)), session: Object.fromEntries(Object.entries(sessionStorage)) }));
-    assert.ok(Object.keys(storage.local).every(key => key === 'termforge-classic-layout')); assert.deepEqual(storage.session, {});
+    assert.ok(Object.keys(storage.local).every(key => ['termforge-classic-layout', 'termforge-recent-sessions'].includes(key))); assert.deepEqual(storage.session, {});
+    if (storage.local['termforge-recent-sessions']) assert.ok(JSON.parse(storage.local['termforge-recent-sessions']).every(id => profiles.some(profile => profile.id === id)), 'Recent sessions contain only known saved profile IDs.');
     assert.equal(JSON.stringify(storage).includes('synthetic-second-online-key'), false); assert.equal(JSON.stringify(storage).includes('synthetic-session-only-key'), false);
     assert.equal(JSON.stringify(await state(cloud)).includes('synthetic-second-online-key'), false);
   });

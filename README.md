@@ -26,6 +26,18 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.12 — Shared desktop menus and terminal tools
+
+![TermForge File menu and Print submenu](docs/images/menus-v0.12.png)
+
+Headless Windows-layout preview with synthetic sessions; no device is connected. macOS uses the native system menu bar.
+
+TermForge now follows the reference menu order and grouping across **File, Edit, View, Options, Transfer, Script, Tools, Window and Help**. Native menus and the in-app menu share enabled states, checkmarks, recent sessions/scripts, snapshots and nested commands. Clipboard actions respect focused fields, and inactive workspace commands stay disabled while dialogs or Quick Connect are active.
+
+New actions include bulk reconnect/disconnect with target review, separate screen/scrollback clearing, terminal printing with preview and page settings, text/raw logging, independent Receive ASCII capture, Hex View and reviewed binary sends on supported connections. Tools adds encrypted SSH key creation, source-preserving OpenSSH/PEM conversion and a read-only system-agent fingerprint viewer. The connection shortcuts are **Cmd/Ctrl+E** for Connect, **K** for Quick Connect, **T** for Connect in Tab/Tile and **L** for a local shell.
+
+This is partial functional coverage. Legacy Kermit/X/Y/Zmodem, detached/cascading session windows, session locking, master-password configuration and full XML/text import are still unavailable. See the [menu guide](docs/MENUS.md), [release notes](docs/RELEASE-v0.12.0.md) and [verification record](docs/VERIFICATION-v0.12.0.md). Cross-platform release checks are pending; the public download remains v0.11.0.
+
 ## New in 0.11 — Docked desktop managers
 
 ![Docked Session Manager with vertical manager tabs](docs/images/sidebar-v0.11.png)

@@ -34,7 +34,10 @@ export function createRecorder({ api, getConnection, confirmAction, toast, chang
     finally { render(); }
   });
   async function perform(action) {
-    if (action !== 'script-record') return false;
+    if (action === 'script-record-cancel') { if ((target || events.length) && await confirmAction({ title: 'Discard recording?', message: 'Stop recording and discard the captured input?', accept: 'Discard recording' })) { target = null; events = []; bytes = 0; render(); changed(); } return true; }
+    if (action === 'script-record-stop') { if (target) { stopRecording(); if (!dialog.open) dialog.showModal(); } return true; }
+    if (action === 'script-record-start' && target) return true;
+    if (!['script-record', 'script-record-start'].includes(action)) return false;
     if (target) { stopRecording(); if (!dialog.open) dialog.showModal(); return true; }
     const connection = getConnection();
     if (!connection || connection.exited) { toast('Open a terminal before recording.', true); return true; }
@@ -42,7 +45,7 @@ export function createRecorder({ api, getConnection, confirmAction, toast, chang
     if (!accepted) return true;
     events = []; bytes = 0; previousTime = 0; target = { id: connection.id, title: connection.title }; render();
     changed();
-    toast(`Recording input for ${connection.title}. Choose Script → Record Input again to stop.`);
+    toast(`Recording input for ${connection.title}. Choose Script → Stop Recording Script to review and save.`);
     return true;
   }
   function input(connection, data) {
@@ -53,5 +56,5 @@ export function createRecorder({ api, getConnection, confirmAction, toast, chang
     events.push({ data, delayMs }); bytes += size; previousTime = now;
   }
   function exited(id) { if (target?.id === id) { stopRecording(); toast('Recording stopped because its terminal closed.'); } }
-  return { perform, input, exited, isRecording: () => Boolean(target) };
+  return { perform, input, exited, hasRecording: () => events.length > 0, isRecording: () => Boolean(target) };
 }

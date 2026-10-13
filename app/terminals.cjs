@@ -1,17 +1,16 @@
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { buildLaunch, validateSession } = require('./core.cjs');
 const { createTransport } = require('./transports.cjs');
+const { createOutputFile } = require('./terminal-output.cjs');
 
 const MAX_TERMINALS = 32;
 const MAX_INPUT_BYTES = 256 * 1024;
 const MAX_EARLY_OUTPUT = 1024 * 1024;
-const MAX_LOG_BYTES = 128 * 1024 * 1024;
+const MAX_RAW_HISTORY = 64 * 1024;
 
-function createTerminalManager({ spawn, transport = createTransport, managedTransport, emitData = () => {}, emitExit = () => {}, platform = process.platform, env = process.env, cwd = process.cwd() } = {}) {
+function createTerminalManager({ spawn, transport = createTransport, managedTransport, emitData = () => {}, emitExit = () => {}, emitOutputState = () => {}, platform = process.platform, env = process.env, cwd = process.cwd() } = {}) {
   const terminals = new Map();
   const spawnPty = spawn || ((file, args, options) => require('node-pty').spawn(file, args, options));
 
@@ -19,31 +18,42 @@ function createTerminalManager({ spawn, transport = createTransport, managedTran
     if (typeof id !== 'string' || !terminals.has(id)) throw new Error('Terminal is no longer open.');
     return terminals.get(id);
   }
-  function stopLog(entry) {
-    if (!entry.log) return;
-    const descriptor = entry.log.descriptor;
-    entry.log = null;
-    fs.closeSync(descriptor);
+  function outputState(entry) {
+    return { id: entry.id,
+      log: entry.log ? { enabled: true, mode: entry.log.mode, paused: entry.log.paused, path: entry.log.filename } : { enabled: false, mode: null, paused: false, path: null },
+      capture: entry.capture ? { enabled: true, path: entry.capture.filename } : { enabled: false, path: null },
+      capabilities: { rawLog: typeof entry.process.onRawData === 'function', hex: typeof entry.process.onRawData === 'function', binary: typeof entry.process.writeBytes === 'function' },
+    };
+  }
+  function notifyOutput(entry) { emitOutputState(outputState(entry)); }
+  function stopOutput(entry, field) {
+    const file = entry[field];
+    if (!file) return;
+    entry[field] = null;
+    try { file.close(); } finally { notifyOutput(entry); }
+  }
+  function writeOutput(entry, field, data) {
+    if (!entry[field]) return;
+    try { entry[field].write(data); }
+    catch (error) {
+      try { stopOutput(entry, field); } catch { /* Preserve the terminal after a file I/O error. */ }
+      const label = field === 'capture' ? 'ASCII receive' : 'output logging';
+      emitData({ id: entry.id, data: `\r\n[TermForge: ${label} stopped ${error.code === 'OUTPUT_LIMIT' ? 'at the 128 MiB limit' : 'because the file could not be written'}.]\r\n` });
+    }
   }
   function send(entry, data) {
-    // Log only PTY output. Echoed input and remote output can still contain
-    // sensitive information; the UI must explain this before logging starts.
-    if (entry.log && !entry.log.paused) {
-      try {
-        const bytes = Buffer.byteLength(data, 'utf8');
-        if (entry.log.bytes + bytes > MAX_LOG_BYTES) {
-          stopLog(entry);
-          emitData({ id: entry.id, data: '\r\n[TermForge: output logging stopped at the 128 MiB limit.]\r\n' });
-        } else {
-          fs.writeSync(entry.log.descriptor, data, undefined, 'utf8');
-          entry.log.bytes += bytes;
-        }
-      } catch {
-        try { stopLog(entry); } catch { /* Preserve the terminal after a log I/O error. */ }
-        emitData({ id: entry.id, data: '\r\n[TermForge: output logging stopped because the log could not be written.]\r\n' });
-      }
-    }
+    // Received output can contain echoed secrets. Neither capture mode redacts
+    // content; the caller must explain this before opening the file.
+    if (entry.log?.mode === 'text') writeOutput(entry, 'log', data);
+    writeOutput(entry, 'capture', data);
     emitData({ id: entry.id, data });
+  }
+  function receiveRaw(entry, data) {
+    if (!terminals.has(entry.id) || !(data instanceof Uint8Array)) return;
+    const bytes = Buffer.from(data);
+    entry.rawReceived += bytes.length;
+    entry.rawHistory = bytes.length >= MAX_RAW_HISTORY ? Buffer.from(bytes.subarray(-MAX_RAW_HISTORY)) : Buffer.concat([entry.rawHistory.subarray(Math.max(0, entry.rawHistory.length + bytes.length - MAX_RAW_HISTORY)), bytes]);
+    if (entry.log?.mode === 'raw') writeOutput(entry, 'log', bytes);
   }
   function flush(entry) {
     if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
@@ -57,7 +67,8 @@ function createTerminalManager({ spawn, transport = createTransport, managedTran
       try { subscription?.dispose?.(); } catch { /* Best-effort native listener cleanup. */ }
     }
     entry.subscriptions = [];
-    try { stopLog(entry); } catch { /* The process must still be removed. */ }
+    for (const field of ['log', 'capture']) { try { stopOutput(entry, field); } catch { /* The process must still be removed. */ } }
+    entry.rawHistory = Buffer.alloc(0);
   }
   function finish(entry, event = {}) {
     if (!terminals.has(entry.id)) return;
@@ -80,9 +91,10 @@ function createTerminalManager({ spawn, transport = createTransport, managedTran
         try { processHandle?.kill?.(); } catch { /* Invalid process handles still need cleanup. */ }
         throw new Error('The native terminal could not be started.');
       }
-      const entry = { id: randomUUID(), session, process: processHandle, subscriptions: [], log: null, ready: false, pending: [], pendingBytes: 0, timer: null };
+      const entry = { id: randomUUID(), session, process: processHandle, subscriptions: [], log: null, capture: null, rawHistory: Buffer.alloc(0), rawReceived: 0, ready: false, pending: [], pendingBytes: 0, timer: null };
       terminals.set(entry.id, entry);
       try {
+        if (typeof processHandle.onRawData === 'function') entry.subscriptions.push(processHandle.onRawData(data => receiveRaw(entry, data)));
         entry.subscriptions.push(processHandle.onData(data => {
           if (!terminals.has(entry.id) || typeof data !== 'string') return;
           if (entry.ready) send(entry, data);
@@ -153,23 +165,45 @@ function createTerminalManager({ spawn, transport = createTransport, managedTran
       if (firstError) throw firstError;
       return { closed: true };
     },
-    enableLog(id, filename) {
+    enableLog(id, filename, { mode = 'text' } = {}) {
       const entry = get(id);
-      if (typeof filename !== 'string' || !path.isAbsolute(filename) || /[\u0000\r\n]/u.test(filename)) throw new Error('An absolute output log path is required.');
-      // A new file only: never overwrite or follow an existing file or symlink.
-      // The save dialog can select a different filename when one already exists.
-      const descriptor = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-      try { stopLog(entry); } catch (error) { fs.closeSync(descriptor); throw error; }
-      entry.log = { descriptor, filename, bytes: 0, paused: false };
+      if (mode === 'raw' && typeof entry.process.onRawData !== 'function') throw new Error('Raw logging requires managed SSH, TCP, Telnet, or serial. Native shell output is decoded text.');
+      // Flush startup data before capture begins: the chosen file contains only
+      // output received after the user's start action.
+      flush(entry);
+      const file = createOutputFile(filename, { mode });
+      try { stopOutput(entry, 'log'); } catch (error) { file.close(); throw error; }
+      entry.log = file; notifyOutput(entry);
       return { id, path: filename, logging: true };
     },
-    disableLog(id) { const entry = get(id); stopLog(entry); return { id, logging: false }; },
+    disableLog(id) { const entry = get(id); stopOutput(entry, 'log'); return { id, logging: false }; },
     pauseLog(id, paused = true) {
       const entry = get(id);
       if (typeof paused !== 'boolean') throw new Error('Log pause state must be true or false.');
       if (!entry.log) throw new Error('Start a session log before pausing it.');
-      entry.log.paused = paused;
+      entry.log.paused = paused; notifyOutput(entry);
       return { id, path: entry.log.filename, logging: true, paused };
+    },
+    enableCapture(id, filename) {
+      const entry = get(id); flush(entry);
+      const file = createOutputFile(filename);
+      try { stopOutput(entry, 'capture'); } catch (error) { file.close(); throw error; }
+      entry.capture = file; notifyOutput(entry);
+      return { id, path: filename, receiving: true };
+    },
+    disableCapture(id) { const entry = get(id); stopOutput(entry, 'capture'); return { id, receiving: false }; },
+    writeBinary({ id, data } = {}) {
+      const entry = get(id);
+      if (typeof entry.process.writeBytes !== 'function') throw new Error('Binary sending requires managed SSH, raw TCP, or serial.');
+      if (!(data instanceof Uint8Array) || data.byteLength > MAX_INPUT_BYTES) throw new Error('Binary input must contain at most 256 KiB.');
+      const bytes = Buffer.from(data); entry.process.writeBytes(bytes);
+      return { id, bytes: bytes.length };
+    },
+    outputState(id) { return outputState(get(id)); },
+    readRaw(id) {
+      const entry = get(id);
+      if (typeof entry.process.onRawData !== 'function') throw new Error('Hex View requires managed SSH, TCP, Telnet, or serial. Native shell output is decoded text.');
+      return { id, base64: entry.rawHistory.toString('base64'), offset: entry.rawReceived - entry.rawHistory.length, totalBytes: entry.rawReceived, limit: MAX_RAW_HISTORY };
     },
     get count() { return terminals.size; },
     has(id) { return terminals.has(id); },

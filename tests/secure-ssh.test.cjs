@@ -158,6 +158,21 @@ test('terminal adapter exchanges real shell data, early input, resize and one cl
   assert.equal(exits.length, 1); assert.equal(manager.count, 0);
 });
 
+test('managed SSH sends and captures all binary octets without UTF-8 round trips', async t => {
+  let received = Buffer.alloc(0);
+  const endpoint = await server(t, { shell: channel => channel.on('data', bytes => { received = Buffer.concat([received, bytes]); channel.write(bytes); }) });
+  const { directory, service } = await fixture(t);
+  const manager = createTerminalManager({ managedTransport: service.createTerminal }); t.after(() => manager.closeAll());
+  const terminal = manager.open(profile(endpoint.port)), filename = path.join(directory, 'raw.bin');
+  manager.enableLog(terminal.id, filename, { mode: 'raw' });
+  const payload = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+  manager.writeBinary({ id: terminal.id, data: payload });
+  await until(() => manager.readRaw(terminal.id).totalBytes === payload.length);
+  assert.deepEqual(received, payload); assert.deepEqual(fs.readFileSync(filename), payload);
+  assert.deepEqual(Buffer.from(manager.readRaw(terminal.id).base64, 'base64'), payload);
+  manager.disableLog(terminal.id); manager.close(terminal.id);
+});
+
 test('terminal adapter supports remote command and remote exit code', async t => {
   const endpoint = await server(t, { exec: (stream, options) => { assert.equal(options.command, 'fixture-command'); stream.write('command-output'); stream.exit(7); stream.end(); } });
   const { service } = await fixture(t); let output = '', exit;

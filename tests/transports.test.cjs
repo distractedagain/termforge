@@ -35,6 +35,31 @@ function tcp(protocol = 'telnet', extras = {}) {
 function wire(socket) { return Buffer.concat(socket.writes); }
 function includes(buffer, sequence) { return buffer.indexOf(Buffer.from(sequence)) >= 0; }
 
+test('raw TCP binary writes and byte taps preserve all octets before UTF-8 decoding', async t => {
+  const state = tcp('raw'), received = []; t.after(() => state.handle.kill());
+  const subscription = state.handle.onRawData(bytes => received.push(bytes));
+  const payload = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+  state.handle.writeBytes(payload); payload.fill(0);
+  await tick(); state.socket.emit('connect');
+  const expected = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+  assert.deepEqual(wire(state.socket), expected);
+  state.socket.emit('data', expected.subarray(0, 129)); state.socket.emit('data', expected.subarray(129));
+  assert.deepEqual(Buffer.concat(received), expected);
+  assert.throws(() => state.handle.writeBytes('text'), /256 KiB/);
+  assert.throws(() => state.handle.writeBytes(Buffer.alloc(256 * 1024 + 1)), /256 KiB/);
+  subscription.dispose(); state.socket.emit('data', Buffer.from([42])); assert.equal(received.length, 2);
+});
+
+test('Telnet byte taps expose received application bytes after negotiation and IAC unescaping', async t => {
+  const state = tcp('telnet'), received = []; t.after(() => state.handle.kill());
+  state.handle.onRawData(bytes => received.push(bytes));
+  await tick(); state.socket.emit('connect');
+  state.socket.emit('data', Buffer.from([255, 251, 0, 0x80, 255]));
+  state.socket.emit('data', Buffer.from([255, 0, 0xc0]));
+  assert.deepEqual(Buffer.concat(received), Buffer.from([0x80, 255, 0, 0xc0]));
+  assert.equal(typeof state.handle.writeBytes, 'undefined');
+});
+
 test('raw TCP exchanges real loopback data, queues input before connect, and closes once', async t => {
   let peer;
   const server = net.createServer(socket => { peer = socket; socket.on('data', data => socket.write(Buffer.concat([Buffer.from('echo: '), data]))); });
@@ -216,6 +241,17 @@ function serial(Port, fields = {}, options = {}) {
   const handle = createTransport({ protocol: 'serial', serial: { path: '/dev/tty.fake', ...fields } }, { SerialPort: Port, ...options });
   return { handle, events: observe(handle) };
 }
+
+test('serial binary sending uses byte writes and is unavailable with nontransparent settings', async t => {
+  const fake = fakeSerial(), state = serial(fake.Port), received = [];
+  t.after(() => state.handle.kill()); state.handle.onRawData(bytes => received.push(bytes));
+  const bytes = Buffer.from([0, 0x11, 0x13, 0x80, 0xff]); state.handle.writeBytes(bytes);
+  await tick(); assert.deepEqual(wire(fake.instances[0]), bytes);
+  fake.instances[0].emit('data', bytes); assert.deepEqual(Buffer.concat(received), bytes);
+  const narrow = serial(fake.Port, { dataBits: 7 }), software = serial(fake.Port, { flowControl: 'xonxoff' });
+  t.after(() => narrow.handle.kill()); t.after(() => software.handle.kill());
+  assert.equal(narrow.handle.writeBytes, undefined); assert.equal(software.handle.writeBytes, undefined);
+});
 
 test('serial opens the actual adapter API, applies hardware/software flow control, and streams fragmented UTF-8', async t => {
   const fake = fakeSerial();

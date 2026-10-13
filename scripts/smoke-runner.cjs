@@ -176,7 +176,7 @@ module.exports = async ({ window, terminals, store }) => {
     await window.termforge.terminalClose(id);
     await wait(() => exited, 'PTY exit event');
     offData(); offExit();
-    const event = new KeyboardEvent('keydown', {key:'t',code:'KeyT',ctrlKey:${process.platform !== 'darwin'},metaKey:${process.platform === 'darwin'},bubbles:true});
+    const event = new KeyboardEvent('keydown', {key:'l',code:'KeyL',ctrlKey:${process.platform !== 'darwin'},metaKey:${process.platform === 'darwin'},bubbles:true});
     document.dispatchEvent(event);
     await wait(() => document.querySelector('.xterm-screen'), 'terminal UI shortcut');
     const visibleOutput = new Map();
@@ -230,7 +230,10 @@ module.exports = async ({ window, terminals, store }) => {
   console.log('START native standalone Quick Connect window and parent IPC checks');
   const quickConnect = await require('./quick-connect-smoke.cjs')({ window, terminals, store, directory });
   assert.equal(errors.length, 0, errors.join('\n'));
-  Object.assign(report, project, secure, quickConnect, {behavioralChecksPassed:true});
+  console.log('START native application menu, focus, byte-transfer and capture checks');
+  const menus = await require('./menu-smoke.cjs')({ window, terminals, directory });
+  assert.equal(errors.length, 0, errors.join('\n'));
+  Object.assign(report, project, secure, quickConnect, menus, {behavioralChecksPassed:true});
   await persist();
   console.log('START project editor screenshot capture');
   report.screenshots.projectEditor = await screenshot(window, directory, 'project-editor.png');
