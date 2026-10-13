@@ -107,3 +107,20 @@
 #remote-operation-permissions { max-width:110px;font-family:monospace; }
 #remote-permissions-preview { font-size:11px;line-height:1.5; }
 @media(max-width:500px) { .remote-operation-modal .modal-body { padding:14px; }.remote-operation-modal .modal-footer { padding:12px 14px;gap:7px; }.remote-operation-review dl { grid-template-columns:1fr;gap:3px; }.remote-operation-review dd+dt { margin-top:7px; }.remote-file-table .file-table-heading,.remote-file-table .file-entry { grid-template-columns:minmax(0,1fr) 65px 60px;gap:5px;padding-left:8px;padding-right:8px; } }
+.folder-transfer-modal { width:min(720px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow-y:auto; }
+.folder-transfer-modal .modal-header h2 { margin:0;font-size:17px; }
+.folder-transfer-body { display:grid;gap:14px; }
+.folder-transfer-body p { margin:0; }
+.folder-transfer-modal [hidden] { display:none; }
+#folder-transfer-fields { display:grid;grid-template-columns:125px minmax(0,1fr);gap:9px 12px;margin:0;font-size:12px;line-height:1.5; }
+#folder-transfer-fields dt { color:var(--muted); }
+#folder-transfer-fields dd { margin:0;overflow-wrap:anywhere;white-space:pre-wrap; }
+#folder-transfer-review h3 { font-size:13px;margin:17px 0 9px; }
+#folder-transfer-entries { margin:0;padding:0;list-style:none;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--field); }
+.folder-transfer-entry { display:grid;grid-template-columns:16px minmax(0,1fr) 75px;align-items:start;gap:9px;padding:8px 11px;border-bottom:1px solid var(--border-soft);font-size:11px;line-height:1.5; }
+.folder-transfer-entry:last-child { border-bottom:0; }
+.folder-transfer-entry svg { width:16px;height:16px;color:var(--muted); }
+.folder-transfer-path { overflow-wrap:anywhere;white-space:pre-wrap; }
+.folder-transfer-size { text-align:right;color:var(--muted); }
+.transfer-current-path { font-family:monospace; }
+@media(max-width:500px) { .folder-transfer-modal .modal-body { padding:14px; }.folder-transfer-modal .modal-footer { padding:12px 14px;gap:7px;flex-wrap:wrap; }#folder-transfer-fields { grid-template-columns:1fr;gap:3px; }#folder-transfer-fields dd+dt { margin-top:7px; }.folder-transfer-entry { gap:6px;padding:8px;grid-template-columns:16px minmax(0,1fr) 58px; } }

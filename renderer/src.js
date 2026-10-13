@@ -1596,7 +1596,7 @@ function setupHandlers() {
   for (const id of ['add-session-sidebar', 'new-session', 'welcome-new']) bind(id, 'click', () => runAction('new-session'));
   for (const id of ['quick-local', 'welcome-local']) bind(id, 'click', localShell);
   for (const button of document.querySelectorAll('.dialog-close')) button.addEventListener('click', () => button.closest('dialog').close());
-  for (const dialog of document.querySelectorAll('dialog:not(#color-scheme-dialog):not(#key-tools-dialog):not(#session-import-dialog):not(#remote-operation-dialog)')) dialog.addEventListener('click', (event) => {
+  for (const dialog of document.querySelectorAll('dialog:not(#color-scheme-dialog):not(#key-tools-dialog):not(#session-import-dialog):not(#remote-operation-dialog):not(#folder-transfer-dialog)')) dialog.addEventListener('click', (event) => {
     if (event.target !== dialog) return;
     const rect = dialog.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();

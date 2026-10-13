@@ -83,7 +83,7 @@ module.exports = async ({ window, terminals, directory }) => {
   assert.equal(path.dirname(profileDirectory), path.resolve(directory), 'Secure smoke requires a profile inside the isolated smoke directory');
   assert.equal(path.basename(profileDirectory), 'profile', 'Secure smoke cannot use a real application profile');
   const fixtureDirectory = await fsp.mkdtemp(path.join(directory, 'secure-fixture-'));
-  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, fixture, changed;
+  let approved = false, approvals = 0, credentialApprovals = 0, deletionApprovals = 0, remoteApprovals = 0, folderApprovals = 0, allowFolder = false, fixture, changed;
   const originalDialog = dialog.showMessageBox, originalWrite = terminals.write;
   const writes = [], report = {};
   const secret = { name: 'Native smoke credential', username: 'native-fixture-user', password: 'Native-fixture-password-123!' };
@@ -116,6 +116,13 @@ module.exports = async ({ window, terminals, directory }) => {
       if (options.title === 'Allow saved credential') {
         assert.equal(options.message, `Use “${secret.name}” with ${expectedEndpoint}?`); assert.match(options.detail, /Verified server key: SHA256:/);
         credentialApprovals++; return { response: 1 };
+      }
+      if (options.title === 'Copy reviewed folder') {
+        assert.ok(options.detail.includes(`Server: ${expectedEndpoint}`));
+        assert.match(options.detail, /Files: 2/); assert.match(options.detail, /Folders: 3/); assert.match(options.detail, /Bytes: 140000/);
+        assert.match(options.detail, /Completed files and folders remain/);
+        if (allowFolder) folderApprovals++;
+        return { response: allowFolder ? 1 : 0 };
       }
       if (options.title === 'Delete saved credential') {
         assert.equal(options.message, `Delete “${secret.name}”?`); deletionApprovals++; return { response: 1 };
@@ -226,6 +233,53 @@ module.exports = async ({ window, terminals, directory }) => {
     report.nativeRemoteFileManagement = true;
     report.nativeSftpRoundTrip = true;
     console.log('PASS native managed SSH masked prompts, trust, terminal I/O and SFTP upload/download over real preload');
+    const folderSource = path.join(fixture.local, 'folder-source'), folderDownload = path.join(fixture.local, 'folder-download');
+    await fsp.mkdir(path.join(folderSource, 'nested'), { recursive: true });
+    await fsp.mkdir(path.join(folderSource, 'empty'));
+    await fsp.writeFile(path.join(folderSource, 'nested', 'payload.bin'), payload);
+    await fsp.writeFile(path.join(folderSource, 'zero.txt'), '');
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke;
+      const connecting = window.termforge.transferOpen({profile:${JSON.stringify(profile)}});
+      ${respondToPassword}
+      const connection = await connecting; state.transferIds.push(connection.id); state.folderConnection = connection.id;
+      const review = await window.termforge.transferPrepareFolder({id:connection.id,direction:'upload',localPath:${JSON.stringify(folderSource)},remotePath:'/folder-copy'});
+      if (review.files !== 2 || review.directories !== 3 || review.totalBytes !== 140000 || review.entries.length !== 5) throw new Error('Native folder review counts are incorrect');
+      const result = await window.termforge.transferStartFolder({planId:review.planId});
+      if (!result.cancelled) throw new Error('Native decline must cancel folder copy');
+      let reused = false; try { await window.termforge.transferStartFolder({planId:review.planId}); reused = true; } catch {}
+      if (reused) throw new Error('Declined folder token was reusable');
+    `);
+    await assert.rejects(fsp.stat(path.join(fixture.remote, 'folder-copy')), { code: 'ENOENT' });
+    allowFolder = true;
+    await evaluate(`
+      const state = window.__termforgeSecureSmoke, id = state.folderConnection;
+      for (const input of [
+        {id,direction:'upload',localPath:${JSON.stringify(folderSource)},remotePath:'/folder-copy'},
+        {id,direction:'download',localPath:${JSON.stringify(folderDownload)},remotePath:'/folder-copy'}
+      ]) {
+        const plan = await window.termforge.transferPrepareFolder(input);
+        const job = await window.termforge.transferStartFolder({planId:plan.planId});
+        await wait(() => ['completed','failed','cancelled'].includes(state.jobs[job.transferId]?.status), 'native nested folder copy');
+        const done = state.jobs[job.transferId];
+        if (done.status !== 'completed' || done.filesCompleted !== 2 || done.directoriesCreated !== 3 || done.bytes !== 140000) throw new Error('Native folder copy failed: ' + JSON.stringify(done));
+        let reused = false; try { await window.termforge.transferStartFolder({planId:plan.planId}); reused = true; } catch {}
+        if (reused) throw new Error('Applied folder token was reusable');
+      }
+      const disposable = await window.termforge.transferPrepareFolder({id,direction:'upload',localPath:${JSON.stringify(folderSource)},remotePath:'/discarded-folder'});
+      if (!await window.termforge.transferDiscardFolder({planId:disposable.planId})) throw new Error('Native folder discard did not release review');
+      await window.termforge.transferClose(id);
+    `);
+    assert.equal(folderApprovals, 2);
+    for (const root of [path.join(fixture.remote, 'folder-copy'), folderDownload]) {
+      assert.deepEqual((await fsp.readdir(root)).sort(), ['empty', 'nested', 'zero.txt']);
+      assert.deepEqual(await fsp.readdir(path.join(root, 'empty')), []);
+      assert.deepEqual(await fsp.readFile(path.join(root, 'nested', 'payload.bin')), payload);
+      assert.equal((await fsp.readFile(path.join(root, 'zero.txt'))).length, 0);
+    }
+    await assert.rejects(fsp.stat(path.join(fixture.remote, 'discarded-folder')), { code: 'ENOENT' });
+    report.nativeFolderRoundTrip = true; report.nativeFolderDeclineAndDiscard = true;
+    console.log('PASS native reviewed nested folder upload/download, empty folders, approval decline and single-use tokens');
     const authBeforeCancel = fixture.authentication.length;
     await evaluate(`
       const state = window.__termforgeSecureSmoke;
@@ -251,7 +305,7 @@ module.exports = async ({ window, terminals, directory }) => {
       assert.deepEqual(await evaluate('return await window.termforge.credentialList();'), []); assert.equal(deletionApprovals, 1);
     }
     const observed = await evaluate(`const state = window.__termforgeSecureSmoke; return {prompts:state.prompts,closed:state.closed,output:Object.values(state.output).join(''),jobs:Object.values(state.jobs).map(job => ({status:job.status,bytes:job.bytes}))};`);
-    assert.equal(observed.prompts.length, 3); assert.deepEqual([...observed.closed].sort(), observed.prompts.map(prompt => prompt.id).sort());
+    assert.equal(observed.prompts.length, 4); assert.deepEqual([...observed.closed].sort(), observed.prompts.map(prompt => prompt.id).sort());
     assert.ok(observed.prompts.every(prompt => prompt.kind === 'password' && prompt.prompts.length === 1 && prompt.prompts[0].echo === false));
     assert.ok(!JSON.stringify(observed).includes(secret.password) && !observed.output.includes('cancelled-fixture-secret'));
     assert.equal(writes.length, 1, 'Only the explicit command probe may reach terminalWrite'); assert.equal(writes[0].data, 'native-managed-probe\r');

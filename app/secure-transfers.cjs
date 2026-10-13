@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { createRemoteFiles } = require('./remote-files.cjs');
+const { createFolderTransfers } = require('./folder-transfers.cjs');
 
 const BLOCK = 64 * 1024;
 const MAX_FILE = 1024 ** 4;
@@ -157,7 +158,8 @@ async function writeChannel(channel, data, signal) {
 }
 
 function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = async () => false, confirmRemoteOperation = async () => false,
-  home = os.homedir(), commitTimeoutMs = 30000, remotePlanLifetimeMs = 60000 } = {}) {
+  confirmFolderTransfer = async () => false, home = os.homedir(), commitTimeoutMs = 30000, remotePlanLifetimeMs = 60000,
+  folderPlanLifetimeMs = 300000 } = {}) {
   if (typeof connect !== 'function') throw new TypeError('A verified SSH connection factory is required.');
   if (!Number.isInteger(commitTimeoutMs) || commitTimeoutMs < 1 || commitTimeoutMs > 30000) throw new TypeError('Invalid commit operation timeout.');
   if (!Number.isInteger(remotePlanLifetimeMs) || remotePlanLifetimeMs < 1 || remotePlanLifetimeMs > 60000) throw new TypeError('Invalid remote operation plan lifetime.');
@@ -165,15 +167,35 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   let processing = false; let stopped = false;
 
   function getSession(id) { const session = sessions.get(id); if (!session || session.closed) throw new Error('The file-transfer session is closed.'); return session; }
-  const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => [...jobs.values()].some(job => !DONE.has(job.status)),
+  let folderFiles;
+  const remoteFiles = createRemoteFiles({ getSession, isTransferring: () => folderFiles?.busy || [...jobs.values()].some(job => !DONE.has(job.status)),
     call, stat: remoteStat, summary, confirm: confirmRemoteOperation, timeout: commitTimeoutMs, planLifetimeMs: remotePlanLifetimeMs });
+  folderFiles = createFolderTransfers({ getSession, assertAvailable: () => remoteFiles.available(),
+    isBusy: () => [...jobs.values()].some(job => !DONE.has(job.status)), call, remoteStat,
+    confirm: confirmFolderTransfer, timeout: commitTimeoutMs, planLifetimeMs: folderPlanLifetimeMs,
+    enqueue: plan => {
+      const job = { transferId: randomUUID(), ...plan.review, kind: 'folder', status: 'queued', bytes: 0,
+        total: plan.expected.totalBytes, filesTotal: plan.expected.files, filesCompleted: 0,
+        directoriesTotal: plan.expected.directories, directoriesCreated: 0, currentPath: '',
+        controller: plan.controller, folderPlan: plan };
+      job.publish = () => publish(job); enqueue(job); return job;
+    },
+    copy: async (folder, session, entry) => {
+      const child = { id: folder.id, direction: folder.direction, protocol: 'sftp', localPath: entry.localPath,
+        remotePath: entry.remotePath, bytes: 0, total: entry.size, controller: folder.controller, expectedAbsent: true,
+        beforeCommit: entry.validate, onProgress: count => progress(folder, count) };
+      if (folder.direction === 'upload') await upload(child, session); else await download(child, session);
+      if (child.warning) folder.warning = child.warning;
+    } });
   function view(job) {
     return { transferId: job.transferId, id: job.id, sessionId: job.id, direction: job.direction, protocol: job.protocol,
       localPath: job.localPath, remotePath: job.remotePath, status: job.status, bytes: job.bytes, transferred: job.bytes,
-      total: job.total, error: job.error || '', warning: job.warning || '', startedAt: job.startedAt || null, finishedAt: job.finishedAt || null };
+      total: job.total, error: job.error || '', warning: job.warning || '', startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
+      ...(job.kind === 'folder' ? { kind: 'folder', filesTotal: job.filesTotal, filesCompleted: job.filesCompleted,
+        directoriesTotal: job.directoriesTotal, directoriesCreated: job.directoriesCreated, currentPath: job.currentPath } : {}) };
   }
-  function publish(job) { try { emit({ type: 'transfer', ...view(job) }); } catch {} }
-  function progress(job, count) { job.bytes += count; if (Date.now() - (job.lastProgress || 0) >= 100 || job.bytes === job.total) { job.lastProgress = Date.now(); publish(job); } }
+  function publish(job) { if (!job.transferId) return; try { emit({ type: 'transfer', ...view(job) }); } catch {} }
+  function progress(job, count) { job.bytes += count; job.onProgress?.(count); if (Date.now() - (job.lastProgress || 0) >= 100 || job.bytes === job.total) { job.lastProgress = Date.now(); publish(job); } }
 
   async function open(profile, { signal } = {}) {
     if (stopped) throw new Error('The transfer manager is stopping.');
@@ -197,6 +219,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
       client.once('close', () => {
         session.closed = true; sessions.delete(id);
         remoteFiles.disconnected(id);
+        folderFiles.disconnected(id);
         for (const job of jobs.values()) if (job.id === id && !DONE.has(job.status)) job.controller.abort();
         try { emit({ type: 'connection', id, status: 'closed' }); } catch {}
       });
@@ -229,6 +252,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   async function destination(job, local) {
     const filename = local ? job.localPath : job.remotePath;
     const stat = local ? await localStat(filename) : await remoteStat(getSession(job.id).sftp, filename, job.controller.signal);
+    if (job.expectedAbsent && stat) throw new Error('A destination item appeared after folder review. Existing items are never replaced by a folder copy.');
     if (stat) readableFile(stat);
     const snapshot = stat ? (local ? localSnapshot(stat) : summary(stat)) : null;
     if (stat && !(await bounded(confirmOverwrite({ direction: job.direction, source: local ? job.remotePath : job.localPath, destination: filename, signal: job.controller.signal }), job.controller.signal, 10 * 60 * 1000))) throw new Error('Overwrite was declined.');
@@ -404,6 +428,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         await call(sftp, 'close', [handle], signal); handle = null;
       }
       if (!same(localSnapshot(initial), localSnapshot(await source.stat()))) throw new Error('The local source file changed during transfer.');
+      await job.beforeCommit?.();
       await commitRemote(sftp, stage, job.remotePath, expected, job); stage = null;
     } catch (error) {
       preserveStage = Boolean(error.preserveStage);
@@ -442,6 +467,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
       }
       if (!same(summary(initial), summary(await call(sftp, 'lstat', [job.remotePath], signal)))) throw new Error('The remote source file changed during transfer.');
       await target.sync(); await target.close(); target = null;
+      await job.beforeCommit?.();
       await commitLocal(stage, context, expected, job); committed = true;
     } finally {
       if (source) await quiet(() => call(sftp, 'close', [source], undefined, 3000));
@@ -461,10 +487,14 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
         try {
           check(job.controller.signal);
           const session = getSession(job.id);
-          if (job.direction === 'upload') await upload(job, session); else await download(job, session);
+          if (job.kind === 'folder') await folderFiles.run(job, session);
+          else if (job.direction === 'upload') await upload(job, session); else await download(job, session);
           // Completion wins once the atomic commit has succeeded.
           job.status = 'completed';
-        } catch (error) { job.status = job.controller.signal.aborted && !job.commitStarted ? 'cancelled' : 'failed'; job.error = plainError(error); }
+        } catch (error) {
+          job.status = job.controller.signal.aborted && !job.commitStarted && !error.indeterminate ? 'cancelled' : 'failed'; job.error = plainError(error);
+          if (job.kind === 'folder' && (job.filesCompleted || job.directoriesCreated)) job.warning = `Partial folder copy: ${job.filesCompleted} of ${job.filesTotal} files completed; ${job.directoriesCreated} folders created. Completed files and folders remain at ${job.direction === 'upload' ? job.remotePath : job.localPath}.`;
+        }
         job.finishedAt = Date.now(); publish(job); job.resolveDone();
       }
     } finally { processing = false; }
@@ -472,18 +502,21 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
   function start(input = {}) {
     const session = getSession(input.id);
     remoteFiles.available(input.id);
+    folderFiles.available();
     if (!['upload', 'download'].includes(input.direction)) throw new Error('Choose upload or download.');
     if (!['sftp', 'scp'].includes(input.protocol)) throw new Error('Choose SFTP or SCP.');
-    for (const [id, job] of jobs) { if (jobs.size < MAX_JOBS) break; if (DONE.has(job.status)) jobs.delete(id); }
-    if (jobs.size >= MAX_JOBS) throw new Error('The transfer queue is full (100 files).');
     const job = { transferId: randomUUID(), id: session.id, direction: input.direction, protocol: input.protocol,
       localPath: localPath(input.localPath), remotePath: remotePath(input.remotePath), status: 'queued', bytes: 0, total: 0, controller: new AbortController() };
     if (!validName(path.posix.basename(job.remotePath)) || !validLocalName(path.basename(job.localPath))) throw new Error('Select an individual regular file with a valid filename for this computer.');
     if (!path.posix.isAbsolute(job.remotePath)) job.remotePath = path.posix.join(session.remotePath, job.remotePath);
+    enqueue(job); return view(job);
+  }
+  function enqueue(job) {
+    for (const [id, previous] of jobs) { if (jobs.size < MAX_JOBS) break; if (DONE.has(previous.status)) jobs.delete(id); }
+    if (jobs.size >= MAX_JOBS) throw new Error('The transfer queue is full (100 jobs).');
     job.done = new Promise(resolve => { job.resolveDone = resolve; });
     jobs.set(job.transferId, job); queue.push(job); publish(job);
     queueMicrotask(() => { void processQueue(); });
-    return view(job);
   }
   async function cancel(transferId) {
     const job = jobs.get(transferId); if (!job) return false;
@@ -496,6 +529,7 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     const session = sessions.get(id); if (!session) return false;
     session.closed = true;
     await remoteFiles.close(id);
+    await folderFiles.close(id);
     await Promise.all([...jobs.values()].filter(job => job.id === id && !DONE.has(job.status)).map(job => cancel(job.transferId)));
     sessions.delete(id); session.sftp.end(); session.client.end(); return true;
   }
@@ -505,16 +539,20 @@ function createSecureTransfers({ connect, emit = () => {}, confirmOverwrite = as
     // A disconnected session leaves the map before its job's finally cleanup
     // has finished. Await those jobs independently of the live connections.
     const stoppingJobs = [...jobs.values()].filter(job => !DONE.has(job.status)).map(job => cancel(job.transferId));
-    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs, remoteFiles.closeAll()));
+    await Promise.all([...sessions.keys()].map(close).concat(pending.map(item => item.done), stoppingJobs, remoteFiles.closeAll(), folderFiles.closeAll()));
   }
 
   return { open, close, closeAll, listLocal, listRemote, start, cancel,
     prepareRemoteOperation: remoteFiles.prepare, applyRemoteOperation: remoteFiles.apply, discardRemoteOperation: remoteFiles.discard,
+    prepareFolderTransfer: folderFiles.prepare,
+    startFolderTransfer: async input => { const result = await folderFiles.start(input); return result.cancelled ? result : view(result); },
+    discardFolderTransfer: folderFiles.discard,
     listJobs: () => [...jobs.values()].map(view),
     get count() {
       const owned = new Set(sessions.keys());
       for (const job of jobs.values()) if (!DONE.has(job.status)) owned.add(job.id);
       for (const id of remoteFiles.activeIds) owned.add(id);
+      for (const id of folderFiles.activeIds) owned.add(id);
       return owned.size + pendingOpens.size;
     } };
 }

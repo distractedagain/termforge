@@ -84,7 +84,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart', 'transferOpen', 'transferStart', 'transferPrepareFolder', 'transferStartFolder', 'transferPrepareRemoteOperation', 'transferApplyRemoteOperation', 'sessionImportChoose', 'sessionImportPreview', 'sessionImportApply', 'credentialSave', 'keyToolsGenerate', 'keyToolsConvert', 'terminalSendBinary', 'terminalSetCapture', 'terminalSetLog', 'printTerminal'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -195,6 +195,9 @@ function registerHandlers() {
   });
   handle('transferStart', input => secureTransfers.start(input));
   handle('transferCancel', id => secureTransfers.cancel(requiredId(id)));
+  handle('transferPrepareFolder', input => secureTransfers.prepareFolderTransfer(input));
+  handle('transferStartFolder', input => secureTransfers.startFolderTransfer(input));
+  handle('transferDiscardFolder', input => secureTransfers.discardFolderTransfer(input));
   handle('transferPrepareRemoteOperation', input => secureTransfers.prepareRemoteOperation(input));
   handle('transferApplyRemoteOperation', input => secureTransfers.applyRemoteOperation(input));
   handle('transferDiscardRemoteOperation', input => secureTransfers.discardRemoteOperation(input));
@@ -441,6 +444,11 @@ async function boot() {
   secureSsh = createSecureSsh({ directory: dataDirectory, getCredential: (profile, options) => profile.credentialId ? credentials.use(profile.credentialId, profile, options) : null, requestAuthentication: input => authPrompts.request(input), confirmHost: ({ host, port, fingerprint, algorithm, signal }) => approveNative({ title: 'Verify SSH server identity', message: `Trust ${host}:${port}?`, detail: `Key type: ${algorithm}\nFingerprint: ${fingerprint}\n\nCompare this fingerprint with one provided by the server administrator. Accepting saves this key for future managed SSH and file transfer connections.`, accept: 'Trust and connect', signal }) });
   secureTransfers = createSecureTransfers({
     connect: (profile, options) => secureSsh.connect(profile, options), emit: event => send('transferEvent', event),
+    confirmFolderTransfer: (review, { signal } = {}) => approveNative({
+      title: 'Copy reviewed folder', message: `${review.direction === 'upload' ? 'Upload' : 'Download'} this folder?`,
+      detail: `Server: ${review.host}:${review.port}\nFrom: ${review.sourceRoot}\nTo: ${review.destinationRoot}\nFiles: ${review.files}\nFolders: ${review.directories}\nBytes: ${review.totalBytes}\n\nThe destination must be a new folder. Existing items will not be replaced. Completed files and folders remain if you cancel or a later item fails.`,
+      accept: 'Copy folder', signal
+    }),
     confirmOverwrite: ({ direction, source, destination, signal }) => approveNative({ title: 'Replace existing file', message: `Replace the ${direction === 'download' ? 'local' : 'remote'} destination?`, detail: `From: ${source}\nTo: ${destination}\n\nThe existing destination will be replaced after a successful transfer.`, accept: 'Replace file', signal }),
     confirmRemoteOperation: (review, { signal } = {}) => {
       const labels = { mkdir: 'Create remote folder', rename: 'Rename remote item', delete: 'Delete remote item', chmod: 'Change remote permissions' };

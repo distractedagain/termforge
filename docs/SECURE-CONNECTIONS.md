@@ -32,9 +32,9 @@ Managed host keys are stored separately from system OpenSSH's `known_hosts`. Ope
 
 ## File Transfer
 
-Use the transfer toolbar or **Transfer → SFTP / SCP File Transfer** with an SSH profile selected. The left pane browses local files; the right pane browses the server. Double-click directories, select regular files, then use Upload or Download. The queue shows progress, completion, errors and cancellation. File names are displayed as text.
+Use the transfer toolbar or **Transfer → SFTP / SCP File Transfer** with an SSH profile selected. The left pane browses local files; the right pane browses the server. Double-click directories to browse. Select regular files, or one folder in SFTP mode, then use Upload or Download. The queue shows progress, completion, errors and cancellation. File names are displayed as text.
 
-Choose **SFTP** for normal transfers or **SCP** for actual `scp -t`/`scp -f` file payloads on the same verified SSH connection. SCP mode still requires SFTP for directory browsing, destination checks, staging and commit, and a compatible `scp` executable on the remote server. SCP-only servers are not supported. Both modes currently copy regular files, with multiple selected files queued individually. Directory recursion, symbolic-link copying, resume, synchronization, remote editing, drag and drop, and permission/time preservation are not included.
+Choose **SFTP** for normal transfers or **SCP** for actual `scp -t`/`scp -f` file payloads on the same verified SSH connection. SCP mode still requires SFTP for directory browsing, destination checks, staging and commit, and a compatible `scp` executable on the remote server. SCP-only servers are not supported. Both modes copy regular files, with multiple selected files queued individually. SFTP also supports one reviewed folder tree as described below. Symbolic-link copying, resume, synchronization, remote editing, drag and drop, and permission/time preservation are not included.
 
 SCP commands use POSIX shell quoting and require a compatible remote SSH command shell. Use SFTP for Windows servers whose SSH command shell is `cmd.exe` or PowerShell. Windows-client SCP tests exercise the file protocol and quoting through an isolated server fixture; they do not establish compatibility with those Windows server shells.
 
@@ -43,6 +43,16 @@ Transfers use temporary files and ask before replacing an existing destination. 
 The local destination filesystem must permit hard links, which TermForge uses to commit a download without silently overwriting a competing file. Filesystems without hard-link support, including FAT/exFAT volumes, cannot receive downloads. Before replacing an existing local file, TermForge checks this capability and leaves that file in place if the check fails. Choose another local folder or filesystem.
 
 Cancellation stops queued jobs and active copying. Once replacement has begun, TermForge waits for its outcome: an acknowledged replacement reports Completed. If the server disconnects before acknowledging a rename, the job reports an uncertain outcome, retains available recovery files and stops that transfer connection. Inspect the named paths before retrying. Quitting with an active transfer connection requires confirmation and waits for owned cleanup.
+
+## Reviewed folder copies
+
+In SFTP mode, select one local folder and **Upload**, or one remote folder and **Download**. TermForge inspects the complete tree and opens a review showing the server, exact source and destination, file and folder counts, total bytes and included paths. The selected folder's name is appended to the opposite pane's current directory. The destination must not exist: folder copies do not merge or overwrite.
+
+Click **Upload folder** or **Download folder**, then confirm **Copy folder** in the native dialog to begin. The app reinspects the tree after approval and validates each child before copying it. The queue displays aggregate bytes, completed file/folder counts and the current path. Empty folders and zero-byte files are included. Only one folder can be reviewed at a time; preparation, review and copying reserve the transfer manager across all its connections so other transfers and remote changes cannot conflict. Review expires after five minutes or disconnection and cannot be reused.
+
+Limits are 2,000 entries including the root, 32 nested levels, and 1 TiB per file and in total. Symbolic links, special files, unsafe names, parent symlinks and names that collide after case/Unicode normalization are rejected. Windows downloads also reject Windows-reserved names. Folder copies use SFTP; SCP supports individual files only.
+
+A folder copy consists of separate new-folder and staged-file commits. It is **not atomic**. On cancellation or failure, completed files and created folders remain. TermForge stops at the first failed child and reports partial progress; it does not recursively delete the destination, automatically retry, or resume. A lost acknowledgement may mean a remote path was created even when no completion was received; inspect the reported path before retrying. Local hard-link requirements and remote metadata/path-race limitations from individual transfers also apply. File permissions and timestamps are not preserved.
 
 ## Remote file management
 

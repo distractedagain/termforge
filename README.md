@@ -26,6 +26,14 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
+## New in 0.14 source — Reviewed folder transfers
+
+![Reviewed SFTP folder upload](docs/images/folder-copy-v0.14.png)
+
+The built-in file workspace now supports **SFTP folder upload and download**. Select one folder to inspect its complete tree, review the exact destination and confirm the copy. Nested folders, empty folders and zero-byte files are supported, with aggregate progress and cancellation. Destinations must be new folders; completed output remains after cancellation or failure. See the [folder-copy guide](docs/SECURE-CONNECTIONS.md#reviewed-folder-copies) and [verification record](docs/VERIFICATION-v0.14.0.md).
+
+This is an original implementation within TermForge. SecureFX is not bundled or required. Folder merges, synchronization, resume, remote editing and FTP/FTPS remain outside this release.
+
 ## New in 0.13 — Session imports and remote file management
 
 ![Reviewed CSV session import](docs/images/session-import-v0.13.png)
@@ -36,7 +44,7 @@ Headless application preview using synthetic profiles; no device is connected.
 
 The SFTP workspace adds **New folder**, **Rename**, **Delete** and **Permissions**. Actions review the exact remote target, require native confirmation and recheck metadata before applying. Renames do not overwrite existing destinations; deletion is limited to regular files and empty directories; chmod refuses special permission bits. See the [file-transfer guide](docs/SECURE-CONNECTIONS.md).
 
-This is another step toward functional coverage. Full XML import, recursive transfers/synchronization, detached windows, session locking and legacy modem protocols remain missing. All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38440766909) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38440765762) passed at source `fe4b4359d418db7dab09fd9a1e49c62f0717272d`. Both Macs and Linux passed 383 backend tests each; Windows passed 375 with eight expected skips. Linux passed 240 interface checks and real Electron import/SFTP checks. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38441931537) verified all eight packages and four build records. Anonymous public verification confirmed the source tag, thirteen assets and twelve checksum entries; the manifest and build records were downloaded and hashed, while installer checks used GitHub asset digests. Installed-package interaction remains unverified. See [0.13 verification](docs/VERIFICATION-v0.13.0.md).
+This is another step toward functional coverage. At the 0.13 release, full XML import, recursive transfers/synchronization, detached windows, session locking and legacy modem protocols remained missing. All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38440766909) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38440765762) passed at source `fe4b4359d418db7dab09fd9a1e49c62f0717272d`. Both Macs and Linux passed 383 backend tests each; Windows passed 375 with eight expected skips. Linux passed 240 interface checks and real Electron import/SFTP checks. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38441931537) verified all eight packages and four build records. Anonymous public verification confirmed the source tag, thirteen assets and twelve checksum entries; the manifest and build records were downloaded and hashed, while installer checks used GitHub asset digests. Installed-package interaction remains unverified. See [0.13 verification](docs/VERIFICATION-v0.13.0.md).
 
 ## New in 0.12 — Shared desktop menus and terminal tools
 

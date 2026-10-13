@@ -2,7 +2,7 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original workspace includes a separate native Quick Connect window and docked manager layout informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.13.0
+## Current source scope — TermForge 0.14.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Managed ssh2 transport with verified host pins, ordered key/agent/password/interactive authentication and masked prompts; existing system OpenSSH option | Managed transport excludes jumps, forwarding, certificates, GSSAPI and X11; OpenSSH keeps its separate host database |
 | Credentials | Named OS-encrypted username/password entries, metadata-only UI, host/port/fingerprint grants, reference-based profiles | Refuses insecure/unavailable Linux backend; no separate vault lock, master password, portable backup or proprietary-secret import; see [security/storage guide](SECURE-CONNECTIONS.md) |
-| SFTP / SCP / ASCII | Two-pane local/remote file browser, queued regular-file SFTP and actual SCP payloads, progress/cancel and reviewed overwrites; existing interactive SFTP and ASCII text send retained | SCP mode also requires SFTP for browsing/staging; no recursive copy, resume, sync, drag/drop or remote editor; remote race/cleanup limits documented |
+| SFTP / SCP / ASCII | Two-pane local/remote file browser, queued regular-file SFTP and actual SCP payloads, reviewed new-only SFTP folder copies, progress/cancel and reviewed file overwrites; existing interactive SFTP and ASCII text send retained | SCP mode also requires SFTP for browsing/staging; no folder merges/replacement, folder SCP, resume, sync, drag/drop or remote editor; remote race/cleanup limits documented |
 | Remote file management | Reviewed SFTP folder creation, new-only rename, regular-file/empty-directory deletion, mode 000–777 editing and permissions display | No symbolic links, recursive deletion or special permission bits; remote path races and uncertain outcomes are documented |
 | Telnet / Raw TCP | Original adapters; Telnet option/NAWS/terminal-type/echo handling and break | UTF-8 text stream; real loopback tests, no external-device interoperability coverage |
 | Serial | Device enumeration, baud/data/stop/parity/flow options, streaming/break, asynchronous close/retry and byte-aware Hex View | Mock/injected adapter tests; no physical hardware/device interoperability verification |
@@ -55,7 +55,7 @@ The presets are Traditional, Monochrome, Solarized Dark, Solarized Light, Forge 
 
 The project workspace is a focused automation editor. A VS Code extension host/marketplace, debugger, remote controllers, container execution environments, scheduled playbooks, Git publication and device-independent rollback are outside this first integration.
 
-SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, complete key/token management, advanced named proxies, recursive/resumable transfer/synchronization, X/Y/Zmodem/Kermit, complete printing workflows, automatic logging/rotation and complete automation compatibility remain missing or incomplete. TermForge's built-in file browser is its own implementation, not SecureFX integration. The modern visual direction does not remove applicable platform capabilities from the overall goal.
+SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, complete key/token management, advanced named proxies, folder merge/resumable transfer/synchronization, X/Y/Zmodem/Kermit, complete printing workflows, automatic logging/rotation and complete automation compatibility remain missing or incomplete. TermForge's built-in file browser is its own implementation, not SecureFX integration. The modern visual direction does not remove applicable platform capabilities from the overall goal.
 
 The limited INI reader imports nonsecret SSH2 connection metadata, not passwords, authentication databases, scripts or complete settings. Review imported hosts, ports, usernames, folders and key paths before connecting; conservative validation may reject unusual values, and Windows key paths can require changes on another platform. SSH config aliases/proxy commands are not inherited.
 
