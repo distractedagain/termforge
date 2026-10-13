@@ -1,5 +1,7 @@
 TermForge 0.6.0 adds an optional AI Assistant to the free, MIT-licensed terminal client for macOS, Windows and Linux. Use local Ollama models or OpenRouter's free online router. This remains a preview; complete SecureCRT feature parity is still in development.
 
+**Distribution status:** v0.6.0 is a source tag only. Intel Mac packaging encountered a TFTP test-client failure involving legitimate retransmissions, and no v0.6.0 installer release was published. The corrected fixture is included in the [v0.6.1 preview](https://github.com/distractedagain/termforge/releases/tag/v0.6.1).
+
 ## AI investigation and command review
 
 - Open **View → AI Assistant** or the speech-bubble toolbar button. Investigate a problem, explain output or draft a command.

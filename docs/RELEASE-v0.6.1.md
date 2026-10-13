@@ -24,8 +24,12 @@ The 0.6.1 build also corrects the TFTP test client to handle legitimate retransm
 
 Packages cover macOS ARM64/Intel DMG and ZIP, Windows x64 Setup/portable EXE, and Linux x64 AppImage/DEB. macOS packages use ad-hoc signatures without Apple notarization; Windows packages are unsigned. SSH/SFTP require the installed system clients. Python automation requires Python 3. Neither Ollama nor an online API key is included.
 
-Publication requires successful native backend tests, renderer builds and packaging on all four targets at the tagged source. The publisher verifies package hashes and source records before exposing eight binary packages, four build records and a combined SHA-256 manifest.
+Publication required successful native backend tests, renderer builds and packaging on all four targets at the tagged source. The publisher verified package hashes and source records before exposing eight binary packages, four build records and a combined SHA-256 manifest.
 
 The local source passed **156 backend tests and 91 headless interface checks**, with zero failures and no browser console errors. AI backend tests use isolated local Ollama HTTP fixtures and synthetic online HTTPS/SSE responses. Headless interface checks use synthetic terminals and verify context opt-in, temporary keys, cancellation, command review, original-target checks and clipboard focus. Production dependency auditing reported no vulnerabilities at the development checkpoint.
 
 No real online inference, user API key, installed local model or packaged interactive desktop was exercised for this feature. Passing fixtures verify application behavior, not answer quality or provider account availability. A local Electron window was not launched.
+
+## Publication evidence
+
+Version 0.6.1 [native CI](https://github.com/distractedagain/termforge/actions/runs/38333067573), [packaging](https://github.com/distractedagain/termforge/actions/runs/38333067639), and [publication](https://github.com/distractedagain/termforge/actions/runs/38333586764) succeeded at tagged source `db72436817c6b11981371757136771e01414bdef`. Both Mac architectures and Linux passed 156 backend tests each; Windows passed 153 with three expected POSIX-only skips. Linux passed 91 headless interface checks. All four package jobs passed on their first attempt. The twelve package/build-record files matched the checksum manifest; all thirteen public assets, including the manifest, matched GitHub's asset digests. Anonymous build-record downloads confirmed the tagged source. These results establish test and package provenance, not live AI answer quality or packaged interactive behavior.
