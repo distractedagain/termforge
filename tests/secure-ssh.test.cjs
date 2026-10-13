@@ -206,7 +206,9 @@ test('arbitrary library error strings never reach the terminal or invoke rejecti
 test('SSH agent signs through a local agent socket without loading a private key file', async t => {
   const key = utils.parseKey(utils.generateKeyPairSync('ed25519').private);
   const directory = await temporary(t), sockets = new Set(); let signed = 0;
-  const socketPath = process.platform === 'win32' ? `\\.\pipe\termforge-agent-${randomUUID()}` : path.join(directory, 'agent.sock');
+  const windowsPipe = String.raw`\\.\pipe\termforge-agent-${randomUUID()}`;
+  assert.deepEqual([...Buffer.from(windowsPipe).subarray(0, 9)], [92, 92, 46, 92, 112, 105, 112, 101, 92], 'Windows pipe prefix must retain every literal backslash on every platform');
+  const socketPath = process.platform === 'win32' ? windowsPipe : path.join(directory, 'agent.sock');
   const agent = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket));
     const protocol = new AgentProtocol(false); protocol.on('error', () => socket.destroy()); socket.on('error', () => {}); socket.pipe(protocol).pipe(socket);
