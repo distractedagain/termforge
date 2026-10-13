@@ -2,7 +2,7 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original modern workspace includes a separate native Quick Connect window informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.10.0 in development
+## Current source scope — TermForge 0.10.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ TermForge is an independently written, MIT-licensed terminal client. It uses pub
 | Telnet / Raw TCP | Original adapters; Telnet option/NAWS/terminal-type/echo handling and break | UTF-8 text stream; real loopback tests, no external-device interoperability coverage |
 | Serial | Device enumeration, baud/data/stop/parity/flow options, streaming/break, asynchronous close/retry | Mock/injected adapter tests; no physical hardware/device interoperability verification or Hex View |
 | Saved sessions | Nested inferred folders/filter, expanded Quick Connect with credential/auth-order/SFTP/startup options, Connect Bar, selected/folder connect and selected-field bulk edits | Up to 1,000 profiles; no explicit empty folders, complete bulk option catalog or default/auto session system; startup form never connects automatically |
-| Native Quick Connect | Separate modeless window with standard OS title bar, single-instance focus/restore, ordered authentication, native key-file picker, credential-manager return and saved/temporary connections routed to the main workspace | Current source verification is pending CI; macOS traffic-light appearance remains unverified; other dialogs and terminal sessions do not gain independent windows; see [0.10 verification](VERIFICATION-v0.10.0.md) |
+| Native Quick Connect | Separate modeless window with standard OS title bar, single-instance focus/restore, ordered authentication, native key-file picker, credential-manager return and saved/temporary connections routed to the main workspace | Verified in Linux Electron source smoke; macOS traffic-light appearance remains unverified; other dialogs and terminal sessions do not gain independent windows; see [0.10 verification](VERIFICATION-v0.10.0.md) |
 | Workspace | Reorder/clone tabs, independent tab groups, resizable splits, horizontal/vertical/grid tiles, Active Sessions list | Up to 32 open terminals; no floating managers, live-tab multi-window movement or locking |
 | Snapshots | Saved connection instances including repeats, group/tab order, per-group selection, focused group, split arrangement and ratios; restore beside existing tabs | Up to 32 saved connections; unsaved quick connections, terminal output and running process state excluded; current profile settings apply |
 | Commands | Nested filtered Command Manager, named Button Bars, folder/color and bounded history | Command strings only; no full button action catalog, session-specific bars or immediate-character mode |
@@ -59,9 +59,9 @@ JSON import adds sessions and assigns fresh IDs on collisions, remapping snapsho
 
 ## Verification and distribution
 
-The local 0.10 source passed 273 backend tests, including 22 focused window-manager/configuration tests, plus 97 existing interface checks, 21 secure-connection interface checks and 23 standalone Quick Connect interface checks. The renderer build passed and the production dependency audit reported zero vulnerabilities. Cross-platform CI, native Linux Quick Connect smoke and installer builds are pending. The new native smoke is implemented but has not yet produced a passing run for this source. No Electron window was launched on the development laptop. See the [0.10 verification record](VERIFICATION-v0.10.0.md) for the scope and remaining checks; v0.9.0 remains the published release.
+Version 0.10.0 passed all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38412494525) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38412503136) at source `145b99187dab3d771217af3109372d2b0aa6ca0d`. Both Macs and Linux each passed 273 backend tests and seven real localhost Ansible checks; Windows passed 266 backend tests with seven expected platform-specific skips. Linux passed 154 interface checks (97 main, 13 project, 21 secure and 23 Quick Connect) and the native Electron window/IPC/credential/SSH/SFTP/editor/PTY smoke. Production audits reported zero vulnerabilities, and both Mac packages passed strict recursive ad-hoc signature checks. No Electron window was launched on the development laptop. See the [0.10 verification record](VERIFICATION-v0.10.0.md) for the scope and remaining checks. Publication is pending; v0.9.0 remains the public download until that completes.
 
-The following evidence applies to the named published versions, not the unfinished 0.10 source.
+The following evidence applies to the named earlier versions.
 
 Version 0.9.0 passed all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38407745105) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38407744570) at source `90f81ac7e2620f837b344b287cc68816df6bca2f`. Both Macs and Linux each passed 251 backend tests; Windows passed 244 with seven expected platform-specific skips. Linux passed 97 existing UI, 13 project-editor and 20 secure-connection UI checks. Both Macs and Linux each passed seven real localhost Ansible checks. The Mac packages passed strict recursive ad-hoc signature verification.
 

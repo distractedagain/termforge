@@ -1,7 +1,5 @@
 TermForge 0.10.0 moves Quick Connect into a separate desktop window with a standard operating-system title bar. The main terminal workspace remains available while the connection form is open. TermForge remains free, open source and MIT-licensed for macOS, Windows and Linux.
 
-This release is in preparation. Cross-platform CI, native Linux verification, installer builds and publication are pending. The published preview remains v0.9.0.
-
 ## Native Quick Connect
 
 - Open **File → Quick Connect** or the toolbar button to show a movable, resizable window. Opening it again focuses the existing form and restores it if minimized.
@@ -30,6 +28,10 @@ The signing setup remains macOS ad-hoc signatures without Apple notarization and
 
 The local source passed 273/273 backend tests with no skips, including 22 focused window-manager/configuration tests, plus 97 existing interface checks, 21 secure-connection interface checks and 23 standalone Quick Connect interface checks. The renderer build passed and the production dependency audit reported zero vulnerabilities. Headless UI tests use synthetic connections; window-manager tests use a fake Electron implementation and real temporary configuration files.
 
-The added Linux Electron smoke is pending execution. It is designed to verify an actual second BrowserWindow, the restricted preload and parent IPC guards, singleton behavior, cancellation, credential-manager return, a child-owned identity picker, saved settings and a real local-shell connection in the parent workspace. It does not establish macOS traffic-light pixels, interactive OS file selection or a complete application restart. No Electron window was launched on the development laptop.
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38412494525) and all four [installer builds](https://github.com/distractedagain/termforge/actions/runs/38412503136) passed at source `145b99187dab3d771217af3109372d2b0aa6ca0d`. Both Macs and Linux each passed 273 backend tests with no skips; Windows passed 266 with seven expected platform-specific skips. Both Macs and Linux each passed seven real localhost Ansible checks. Production audits reported zero vulnerabilities, and both Mac packages passed their ad-hoc signature integrity checks.
 
-All four platform CI jobs, installer builds, source-tag verification and public asset checks are pending for 0.10.0. No 0.10.0 installer or publication success is claimed here. See the [0.10 verification record](https://github.com/distractedagain/termforge/blob/main/docs/VERIFICATION-v0.10.0.md) for the current evidence and remaining checks. Existing 0.9 results remain separately documented and do not verify this new source.
+Linux passed 154 interface checks: 97 existing, 13 project-editor, 21 secure-connection and 23 standalone Quick Connect checks. Its real Electron source-app smoke verified a second native window, the restricted preload and parent IPC guards, singleton/focus behavior, close/Escape cancellation, credential-manager return, a child-owned identity picker, saved settings and exactly one real local-shell connection in the parent workspace. Existing managed SSH/SFTP, masked authentication, insecure-storage refusal, native clipboard/editor/worker and PTY checks also passed. Both screenshot captures succeeded; the JSON worker produced ten messages with no worker errors or CSP violations.
+
+The native run used an isolated Linux Xvfb fixture. Identity/folder picker and host-approval responses were stubbed. The run does not establish macOS traffic-light pixels, interactive OS file selection, a complete application restart or installed-package behavior. No Electron window was launched on the development laptop.
+
+See the [0.10 verification record](https://github.com/distractedagain/termforge/blob/main/docs/VERIFICATION-v0.10.0.md) for the build evidence, publication checks and remaining verification limits.

@@ -26,7 +26,7 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## In development for 0.10 — Native Quick Connect window
+## New in 0.10 — Native Quick Connect window
 
 Quick Connect now opens in its own movable, resizable desktop window with a standard operating-system title bar. On macOS, the window uses native close, minimize and zoom controls; Windows and Linux use their own window controls. The terminal workspace stays open behind it, and opening Quick Connect again brings back the same form.
 
@@ -34,7 +34,7 @@ The layout follows the familiar connection workflow: protocol, hostname/port, us
 
 The auxiliary window has a restricted bridge, and its connection requests are validated before the main workspace accepts them. Duplicate requests cannot create multiple connections; a failed save or unavailable workspace leaves an error on the form for retry.
 
-Local focused tests pass. Cross-platform CI, the native Linux window smoke and installer builds are still pending for this source; **v0.9.0 remains the published download above**. Native macOS title-bar appearance and installed-package interaction have not been checked. See [0.10 release notes](docs/RELEASE-v0.10.0.md) and the [0.10 verification record](docs/VERIFICATION-v0.10.0.md).
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38412494525) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38412503136) passed at source `145b99187dab3d771217af3109372d2b0aa6ca0d`. Both Macs and Linux passed 273 backend tests each; Windows passed 266 with seven expected platform-specific skips. Linux passed 154 interface checks and a real Electron smoke that verified the separate window, restricted IPC, credential-manager return, cancellation and exactly one parent-workspace terminal. Both Macs and Linux also passed seven localhost Ansible checks each. Publication is pending; the download above remains v0.9.0 until it completes. Native macOS title-bar appearance and installed-package interaction have not been checked. See [0.10 release notes](docs/RELEASE-v0.10.0.md) and the [0.10 verification record](docs/VERIFICATION-v0.10.0.md).
 
 ## New in 0.9 — Credentials and file transfer
 
