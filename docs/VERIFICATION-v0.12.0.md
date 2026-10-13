@@ -1,6 +1,6 @@
 # TermForge 0.12.0 verification
 
-Status: all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38431889410) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38431893367) passed on October 13, 2026, at source `5dad1ad30e16436d3317f73433ceb754bd1c2f25`. Publication and anonymous public-asset verification are pending. Historical evidence is preserved in the [0.11 verification record](VERIFICATION-v0.11.0.md).
+Status: all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38431889410) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38431893367) passed on October 13, 2026, at source `5dad1ad30e16436d3317f73433ceb754bd1c2f25`. [Version 0.12.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.12.0), and its source tag and public assets passed independent anonymous verification. Historical evidence is preserved in the [0.11 verification record](VERIFICATION-v0.11.0.md).
 
 ## Scope
 
@@ -23,7 +23,7 @@ The native and in-app menus share a bounded command model, dynamic availability,
 | Windows key utility diagnostic | [Passed](https://github.com/distractedagain/termforge/actions/runs/38431888959): encrypted generation and conversion, followed by clean process exit |
 | Four platform installer builds | Passed; package backend checks also passed |
 | Both macOS ad-hoc signature integrity checks | Passed strict recursive verification; no Apple notarization |
-| Tested source tag / publisher / public asset checks | Pending |
+| Tested source tag / publisher / public asset checks | Passed: exact source tag, thirteen assets, twelve checksum entries and four matching build records |
 
 Backend checks exercise actual temporary OpenSSH key generation/conversion and loopback SSH/TCP alongside injected transport and desktop fixtures. Key tests verify encryption, identity preservation, passphrase failure, no overwrite, bounded subprocesses and cleanup. A loopback SSH byte round trip covers all 256 byte values. Pure menu tests verify stale-command rejection, modal/child focus rules, bounded metadata, field editability and native menu rebuilds.
 
@@ -36,6 +36,12 @@ Earlier candidates were not published. The first native menu run exposed a fixtu
 Windows key-generation/conversion checks initially failed, then exposed a lingering console worker. The final implementation supplies OpenSSH's required ProgramData environment variable, uses a private ConPTY console with ordered prompts, supports termination before first output and disposes owned console resources after exit. The adapter is pinned to node-pty 1.1.0 and checks the minimum supported Windows build before spawning. All five real generation/conversion tests pass in the final Windows CI and package jobs; the separate encrypted-key diagnostic also exits cleanly.
 
 A reproduced upstream Ed25519 generator defect was isolated to test fixtures. Fixtures now validate generated keys and narrowly retry the malformed-generation case; production generation uses OpenSSH. Real SSH authentication also passes with a valid key whose public bytes begin with two zero bytes.
+
+## Public release verification
+
+The [publisher](https://github.com/distractedagain/termforge/actions/runs/38433492178) rehashed and validated the four platform build artifacts before publishing eight installers/archives, four build records and a checksum manifest. Independent anonymous verification confirmed public preview release `411902927`, the exact source tag and all thirteen uploaded assets on October 13, 2026. All twelve manifest entries match GitHub's SHA-256 asset digests.
+
+The manifest and four small build records were downloaded anonymously and independently hashed. Every record identifies version 0.12.0, the tested commit and the expected platform, architecture and signing status. Installer bytes were not downloaded or independently rehashed during the public check; their manifest entries were compared with GitHub's asset digests.
 
 ## Verification limits
 
