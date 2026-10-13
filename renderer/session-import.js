@@ -56,7 +56,9 @@ export function createSessionImportUi({ api, toast = () => {}, onImported = asyn
   async function discard() { const chosen = file; file = null; plan = null; rows = []; selectedRows = undefined; revision++; tbody.replaceChildren(); source.textContent = ''; for (const input of inputs.values()) input.replaceChildren(); if (chosen) { try { await api.sessionImportDiscard({fileId:chosen.fileId}); } catch { /* Main-process expiry also releases abandoned previews. */ } } }
   async function dismiss() { if (busy) return; dialog.close(); await discard(); }
   close.addEventListener('click',dismiss); cancel.addEventListener('click',dismiss); dialog.addEventListener('cancel',event => { event.preventDefault(); dismiss(); });
-  dialog.addEventListener('close',() => { if (!busy) void discard(); });
+  // A queued close event from a previous opening may arrive after reopening.
+  // Only clean up the currently closed dialog, never a newly selected import.
+  dialog.addEventListener('close',() => { if (!busy && !dialog.open) void discard(); });
   dialog.addEventListener('click',event => { if (event.target !== dialog) return; const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) void dismiss(); });
   apply.addEventListener('click',async () => {
     if (busy || !plan) return; const planId = plan; plan = null; setBusy(true); error.hidden = true;

@@ -14,7 +14,7 @@ Reviewed CSV/TSV session import, atomic saved-session updates and SFTP mkdir/ren
 | Main interface | 108 passed |
 | Credential/transfer interface | 21 passed |
 | Shared menus | 24 passed |
-| Import wizard | 24 passed, including eight full-application light/dark desktop/compact checks |
+| Import wizard | 25 passed, including eight full-application light/dark desktop/compact checks |
 | Remote file actions | 17 passed, including narrow light/dark review screens |
 | Renderer build | Passed |
 | Four-platform source CI, packaging and native Linux IPC | Pending |
@@ -23,6 +23,8 @@ Reviewed CSV/TSV session import, atomic saved-session updates and SFTP mkdir/ren
 The store checks preserve snapshot identifiers and unrelated settings and reject stale or invalid plans without writing. Import checks cover quoted rows, field validation, secret-field filtering, collision policies, explicit exclusions, file/row limits, expired/single-use plans, shutdown and async races. Remote-operation checks exercise all four operations, symlink/root rejection, target and parent metadata changes, active-transfer exclusion, cancellation, special permission bits and unknown outcomes after lost acknowledgements. They include actual SSH/SFTP wire fixtures alongside injected failure cases.
 
 The initial combined local backend run passed 377 of 378 cases. One existing local-AI 100 ms metadata timeout check expired before its fixture server received a request during parallel load; all 19 local-AI checks passed on an isolated rerun. Its production implementation and assertions were unchanged. The final combined suite uses bounded concurrency locally; platform workflows retain their normal test command.
+
+The first Linux CI candidate exposed a queued dialog-close event that could discard a newly selected import after rapid reopening. A deterministic regression reproduced the bug with the old handler and passed after cleanup was limited to a still-closed dialog. Import UI waits also track completion of the corresponding bridge request. The corrected source requires a fresh complete platform run before publication.
 
 Headless Chromium uses synthetic application bridges and temporary import files. It checks renderer interactions and geometry, not installed applications. The native Linux smoke adds real preload import-to-store checks and SFTP mutations with fixture picker/approval responses. These native checks have not yet run at the final source.
 
