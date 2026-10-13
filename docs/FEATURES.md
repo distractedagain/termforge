@@ -51,7 +51,9 @@ JSON import adds sessions and assigns fresh IDs on collisions, remapping snapsho
 
 ## Verification and distribution
 
-The 0.7.0 source passed **156 backend tests and 97 headless interface checks**, with zero failures or browser errors. Checks include compact layouts, keyboard access, reduced motion and layout persistence after restart. Native packaging is pending; packaged interactive behavior remains unverified.
+The 0.7.0 source passed **156 backend tests and 97 headless interface checks**, with zero failures or browser errors. Checks include compact layouts, keyboard access, reduced motion and layout persistence after restart. Packaged interactive behavior remains unverified.
+
+Version 0.7.0 [native CI](https://github.com/distractedagain/termforge/actions/runs/38335309021), [packaging](https://github.com/distractedagain/termforge/actions/runs/38335319969), and [publication](https://github.com/distractedagain/termforge/actions/runs/38335846155) succeeded at tagged source `b2515479c65288e173fe6033b468d8233bbee258`. Both Mac architectures and Linux passed 156 backend tests each; Windows passed 153 with three expected POSIX-only skips. Linux passed 97 headless interface checks. All four package jobs passed on their first attempt. The twelve package/build-record files matched the checksum manifest; all thirteen public assets, including the manifest, matched GitHub's asset digests. Anonymous build-record downloads confirmed the tagged source. These results establish test and package provenance; live AI inference and packaged interactive behavior remain unverified.
 
 Earlier evidence below applies to its named version.
 
@@ -73,7 +75,7 @@ The 0.4 source passed **92 backend tests and 63 headless renderer checks**, with
 
 For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/38324020057) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38324019614) succeeded at tagged commit `0e9ae540293fac90d0c31649705fed6fdb2f2df3`: both Macs and Linux passed 92 backend tests each; Windows passed 89 with three POSIX-only skips. Linux passed 63 headless checks, and both Mac packages passed strict recursive ad-hoc signature verification. Windows packaging passed on its second attempt at unchanged source after Python-initialization and UDP-fixture timeouts. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38325248387) validated all thirteen assets; anonymously downloaded checksums and build records matched the asset digests and tagged source.
 
-[TermForge v0.6.1 preview downloads](https://github.com/distractedagain/termforge/releases/tag/v0.6.1) are public; earlier previews remain separately available. macOS packages have ad-hoc signatures without Developer ID/notarization; Windows packages are unsigned. Automatic updates and a maintenance service are not included. Source/test and distribution provenance must be verified for each new release.
+[TermForge v0.7.0 preview downloads](https://github.com/distractedagain/termforge/releases/tag/v0.7.0) are public; earlier previews remain separately available. macOS packages have ad-hoc signatures without Developer ID/notarization; Windows packages are unsigned. Automatic updates and a maintenance service are not included. Source/test and distribution provenance must be verified for each new release.
 
 ## Ownership and attribution
 

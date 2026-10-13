@@ -8,9 +8,9 @@ This 0.7 preview uses synthetic saved sessions; no device is connected. It was c
 
 ## Download
 
-[Download the TermForge v0.6.1 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.6.1) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+[Download the TermForge v0.7.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.7.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
 
-Earlier previews remain available: [TermForge v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). They predate the AI Assistant; v0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
+Earlier previews remain available: [TermForge v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. Core terminal features require no subscription, activation, account, or cloud service. Optional free online AI requires your own OpenRouter account and API key; local AI uses a separately installed Ollama model.
 
@@ -26,11 +26,13 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.7 source — Modern workspace
+## New in 0.7 — Modern workspace
 
-The 0.7 source introduces TermForge's own slate and teal interface: a horizontal Sessions/Commands/Active switcher, consistent vector icons and app mark, a welcome screen, clearer dialogs and a refined AI Assistant. Light/dark modes and optional Solarized interface matching remain available. Session management, tab groups, commands and explicit AI review retain their existing workflows. See [the modern interface guide](docs/MODERN-INTERFACE.md).
+The 0.7 preview introduces TermForge's own slate and teal interface: a horizontal Sessions/Commands/Active switcher, consistent vector icons and app mark, a welcome screen, clearer dialogs and a refined AI Assistant. Light/dark modes and optional Solarized interface matching remain available. Session management, tab groups, commands and explicit AI review retain their existing workflows. See [the modern interface guide](docs/MODERN-INTERFACE.md).
 
-The current source passed **156 backend tests and 97 headless interface checks**, with no failures or browser errors. Coverage includes compact layouts, keyboard focus, reduced motion, palette inheritance and layout persistence across restart. Native 0.7 packaging is pending; the published download above remains v0.6.1.
+The 0.7.0 source passed **156 backend tests and 97 headless interface checks**, with no failures or browser errors. Coverage includes compact layouts, keyboard focus, reduced motion, palette inheritance and layout persistence across restart. Packaged interactive behavior remains unverified.
+
+Version 0.7.0 [native CI](https://github.com/distractedagain/termforge/actions/runs/38335309021), [packaging](https://github.com/distractedagain/termforge/actions/runs/38335319969), and [publication](https://github.com/distractedagain/termforge/actions/runs/38335846155) succeeded at tagged source `b2515479c65288e173fe6033b468d8233bbee258`. Both Mac architectures and Linux passed 156 backend tests each; Windows passed 153 with three expected POSIX-only skips. Linux passed 97 headless interface checks. All four package jobs passed on their first attempt. The twelve package/build-record files matched the checksum manifest; all thirteen public assets, including the manifest, matched GitHub's asset digests. Anonymous build-record downloads confirmed the tagged source. These results establish test and package provenance; live AI inference and packaged interactive behavior remain unverified.
 
 ## AI Assistant added in 0.6.1
 
@@ -91,7 +93,7 @@ See [the feature map](docs/FEATURES.md) and [the sourced parity ledger](docs/SEC
 
 ## Historical interface — v0.3
 
-Version 0.3 used SecureCRT 9.7 macOS as a visual reference: the native macOS menu, one compact toolbar with Connect/Keyword fields, vertical Session/Command/Active manager selectors, terminal tabs, Command Window, named Button Bar and segmented status bar. Windows and Linux exposed in-window menus. Light/dark controls and independent terminal schemes were available. The 0.7 source replaces that visual direction with an original modern interface; earlier screenshots remain historical evidence.
+Version 0.3 used SecureCRT 9.7 macOS as a visual reference: the native macOS menu, one compact toolbar with Connect/Keyword fields, vertical Session/Command/Active manager selectors, terminal tabs, Command Window, named Button Bar and segmented status bar. Windows and Linux exposed in-window menus. Light/dark controls and independent terminal schemes were available. The 0.7 preview replaces that visual direction with an original modern interface; earlier screenshots remain historical evidence.
 
 The established interaction workflow continues in 0.7: click a saved session to select it, then double-click it, press Enter, or choose Connect. Use View to select managers and show/hide panels. Resize the manager and Command Window with their dividers. Button Bar commands populate the Command Window for review; Command Manager Enter/double-click sends through the command workflow.
 
