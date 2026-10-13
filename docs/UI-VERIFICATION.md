@@ -1,4 +1,22 @@
-# Harbor Terminal 0.2.0 classic interface QA
+# TermForge interface verification
+
+## TermForge 0.8 project workspace — local verification
+
+The existing **97/97 headless interface checks** and **13/13 project interface checks** passed with no browser console/page errors. The local backend suite passed **200/200 tests**, with no failures or skips. Native CI results are pending; no packaged desktop or real WSL result is claimed by this report.
+
+`scripts/project-ui-check.cjs` exercises the bundled Monaco editor through headless Chromium. Its project bridge uses real temporary files and a temporary Git repository; AI responses and Ansible run events are synthetic. Passed coverage includes edit/save conflicts, same-folder reopening, backup preview/restoration, Git diffs, native-menu event handling for editor actions, reviewed AI file proposals, Ansible trust/confirmation/cancellation controls, local JSON worker validation, and compact/light layouts. The existing terminal/AI harness uses synthetic sessions and model responses.
+
+Separately, `scripts/ansible-check.cjs` passed **7/7 real localhost integration checks** using Python 3.14.8, Ansible Core 2.21.5 and Runner 2.4.3. That integration creates and removes a temporary localhost fixture; it verifies runtime availability, syntax, supported check/diff behavior, an explicit fixture write, changed-input rejection, task failure and cancellation. It does not contact network devices or prove every collection's behavior.
+
+No local Electron window was launched for these checks. Real WSL, packaged interaction and live model inference remain outside this evidence.
+
+The expanded `npm run smoke` check is configured for Linux CI only and has not yet run at this source revision. It will exercise the actual Electron preload bridge, JSON worker messages/diagnostics over `termforge://`, native clipboard copy/paste, real fixture-file saves, CSP behavior and absence of terminal writes from editor actions. The native folder-selection result is stubbed, so it does not establish interactive OS-picker behavior. Existing PTY and isolated loopback SSH checks remain part of that smoke. Source configuration alone is not a passing native result.
+
+## TermForge 0.7 modern interface — historical verification
+
+The 0.7.0 source passed **97/97 headless interface checks**, with no browser console/page errors. Coverage included compact layouts, light/dark and matching palettes, keyboard access, reduced motion, explicit AI review and layout persistence across restart. Terminals and AI responses were synthetic. These results apply to that release and do not establish packaged interactive behavior. See [the 0.7 release record](RELEASE-v0.7.0.md) for source and distribution evidence.
+
+## Harbor Terminal 0.2.0 classic interface — historical QA
 
 20 headless renderer checks passed. No browser console errors were recorded.
 

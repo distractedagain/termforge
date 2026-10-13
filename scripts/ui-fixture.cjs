@@ -2,7 +2,7 @@
 // An isolated in-memory bridge. Nothing here connects to a device or launches a shell.
 module.exports = function installFixture({ platform = 'darwin', settings = {}, sessions = [], snippets = [] } = {}) {
   const clone = value => JSON.parse(JSON.stringify(value));
-  let state = { version: '0.7.0', platform, settings, sessions, snippets, snapshots: [], commandHistory: [] };
+  let state = { version: '0.8.0', platform, settings, sessions, snippets, snapshots: [], commandHistory: [] };
   let counter = 0;
   const listeners = new Map();
   const calls = { opens: [], writes: [], closes: [], resizes: [], saves: [], bulk: [], history: [], snapshots: [], breaks: [], logs: [], scriptRuns: [], scriptCancels: [], recordedScripts: [], screens: [], clipboard: [], active: [], focus: [], orders: [], tftpRoots: [], tftpStarts: [], tftpStops: [], aiModels: [], aiStarts: [], aiCancels: [] };

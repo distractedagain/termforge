@@ -2,9 +2,131 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+
+// Runs only when the explicit desktop smoke command is launched. CI exercises
+// the real custom protocol, preload bridge and operating-system clipboard.
+async function projectSmoke(window, terminals, directory) {
+  const { clipboard, dialog } = require('electron');
+  const project = await fs.mkdtemp(path.join(directory, 'project-fixture-'));
+  const playbook = '---\n- name: TermForge desktop fixture\n  hosts: localhost\n  gather_facts: false\n  tasks:\n    - name: Show fixture text\n      ansible.builtin.debug:\n        msg: Original fixture\n';
+  const editedPlaybook = playbook.replace('Original fixture', 'Edited through native clipboard');
+  const validJson = '{"smoke":true,"savedFrom":"native editor"}\n';
+  await fs.writeFile(path.join(project, 'playbook.yml'), playbook);
+  await fs.writeFile(path.join(project, 'fixture.json'), '{"smoke": }\n');
+  const profile = path.resolve(process.env.TERMFORGE_DATA_DIR || path.join(directory, 'profile'));
+  assert.equal(path.dirname(project), path.dirname(profile), 'Project fixture must be a sibling of the isolated application profile');
+  assert.notEqual(path.resolve(project), profile);
+  const originalDialog = dialog.showOpenDialog;
+  const originalWrite = terminals.write;
+  const oldClipboard = clipboard.readText();
+  const editorWrites = [];
+  let dialogCalls = 0;
+  const evaluate = code => window.webContents.executeJavaScript(`(async () => {
+    const wait = async (predicate, description) => {
+      const end = Date.now() + 15000;
+      while (Date.now() < end) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 40)); }
+      throw new Error('Timed out: ' + description);
+    };
+    ${code}
+  })()`);
+  const menu = action => window.webContents.send('termforge:menuAction', action);
+  const waitClipboard = async expected => {
+    const end = Date.now() + 12000;
+    while (Date.now() < end) {
+      if (clipboard.readText() === expected) return;
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    throw new Error('Native Copy did not return the complete project document');
+  };
+  try {
+    terminals.write = (...args) => { editorWrites.push(args[0]); return originalWrite.apply(terminals, args); };
+    await evaluate(`
+      if (location.href !== 'termforge://app/index.html') throw new Error('Editor smoke must use the real termforge protocol');
+      if (!globalThis.MonacoEnvironment?.getWorker) throw new Error('Missing local Monaco worker factory');
+      const state = window.__termforgeEditorSmoke = { workers: [], violations: [], originalWorker: globalThis.MonacoEnvironment.getWorker };
+      state.onViolation = event => state.violations.push({directive:event.effectiveDirective, blocked:event.blockedURI});
+      document.addEventListener('securitypolicyviolation', state.onViolation);
+      globalThis.MonacoEnvironment.getWorker = function(id, label) {
+        const record = {label, messages:0, errors:[]}; state.workers.push(record);
+        const worker = state.originalWorker.call(this, id, label);
+        worker.addEventListener('message', () => { record.messages += 1; });
+        worker.addEventListener('error', event => record.errors.push(event.message || 'Worker error'));
+        return worker;
+      };
+      document.getElementById('broadcast-mode').checked = false;
+      document.getElementById('project-toggle').click();
+      await wait(() => !document.getElementById('project-workspace').hidden, 'project workspace');
+    `);
+    dialog.showOpenDialog = async (_window, options) => {
+      assert.ok(options.properties.includes('openDirectory'), 'Project should use a native folder picker');
+      dialogCalls += 1;
+      return { canceled: false, filePaths: [project] };
+    };
+    try {
+      await evaluate(`
+        document.getElementById('project-open-folder').click();
+        await wait(() => document.querySelector('#project-files [data-path="playbook.yml"]'), 'real project filesystem tree');
+      `);
+    } finally { dialog.showOpenDialog = originalDialog; }
+    assert.equal(dialogCalls, 1, 'The real projectOpen IPC must invoke the native dialog once');
+    await evaluate(`
+      document.querySelector('#project-files [data-path="playbook.yml"]').click();
+      await wait(() => document.querySelector('#project-editor .monaco-editor') && document.activeElement?.closest('#project-editor'), 'focused Monaco editor');
+      await wait(() => document.getElementById('project-diagnostics').textContent.includes('YAML syntax checked'), 'YAML diagnostics');
+    `);
+    clipboard.writeText('TERMFORGE_SMOKE_CLIPBOARD_SENTINEL');
+    menu('select-all'); menu('copy');
+    await waitClipboard(playbook);
+    clipboard.writeText(editedPlaybook); menu('paste');
+    await evaluate(`
+      await wait(() => !document.getElementById('project-save').disabled, 'editor paste through native IPC');
+      document.getElementById('project-save').click();
+      await wait(() => document.getElementById('project-language').textContent === 'YAML · Saved', 'real project save completed');
+    `);
+    assert.equal(await fs.readFile(path.join(project, 'playbook.yml'), 'utf8'), editedPlaybook, 'Editor save must reach the actual fixture file');
+    await evaluate(`
+      document.querySelector('#project-files [data-path="fixture.json"]').click();
+      await wait(() => document.getElementById('project-document-path').textContent === 'fixture.json' && document.activeElement?.closest('#project-editor'), 'focused JSON model');
+      await wait(() => /[1-9][0-9]* JSON syntax issue/.test(document.getElementById('project-diagnostics').textContent), 'JSON worker diagnostics over the custom protocol');
+      await wait(() => window.__termforgeEditorSmoke.workers.some(worker => worker.label === 'json' && worker.messages > 0), 'actual JSON worker response');
+    `);
+    clipboard.writeText(validJson); menu('select-all'); menu('paste');
+    await evaluate(`
+      await wait(() => !document.getElementById('project-save').disabled, 'corrected JSON editor buffer');
+      await wait(() => document.getElementById('project-diagnostics').textContent === 'JSON syntax checked locally', 'JSON worker clears corrected diagnostics');
+      document.getElementById('project-save').click();
+      await wait(() => document.getElementById('project-language').textContent === 'JSON · Saved', 'JSON fixture save completed');
+    `);
+    assert.equal(await fs.readFile(path.join(project, 'fixture.json'), 'utf8'), validJson);
+    assert.deepEqual(editorWrites, [], 'Editor clipboard actions must not write to any live terminal');
+    const state = await evaluate('return { workers:window.__termforgeEditorSmoke.workers, violations:window.__termforgeEditorSmoke.violations };');
+    assert.deepEqual(state.violations, [], 'Editor must not violate the packaged CSP');
+    assert.ok(state.workers.some(worker => worker.label === 'json' && worker.messages > 0), 'A real JSON worker must respond');
+    assert.ok(state.workers.every(worker => worker.errors.length === 0), JSON.stringify(state.workers));
+    await fs.writeFile(path.join(directory, 'project-editor.png'), (await window.webContents.capturePage()).toPNG());
+    await fs.writeFile(path.join(directory, 'project-workers.json'), JSON.stringify(state, null, 2));
+    return { projectNativeDialog:true, projectNativeClipboard:true, projectSaveToDisk:true, projectNoTerminalWrites:true, jsonCustomProtocolWorker:true, jsonDiagnostics:true, editorCsp:true };
+  } catch (error) {
+    await window.webContents.capturePage().then(image => fs.writeFile(path.join(directory, 'project-failure.png'), image.toPNG())).catch(() => {});
+    const state = await evaluate(`return {workers:window.__termforgeEditorSmoke?.workers, violations:window.__termforgeEditorSmoke?.violations, diagnostics:document.getElementById('project-diagnostics')?.textContent, error:document.getElementById('project-error-text')?.textContent};`).catch(() => null);
+    await fs.writeFile(path.join(directory, 'project-failure.json'), JSON.stringify({error:error.stack || String(error), state}, null, 2)).catch(() => {});
+    throw error;
+  } finally {
+    dialog.showOpenDialog = originalDialog; terminals.write = originalWrite; clipboard.writeText(oldClipboard);
+    await evaluate(`
+      const state = window.__termforgeEditorSmoke;
+      if (state) {
+        globalThis.MonacoEnvironment.getWorker = state.originalWorker;
+        document.removeEventListener('securitypolicyviolation', state.onViolation);
+        delete window.__termforgeEditorSmoke;
+      }
+    `).catch(() => {});
+  }
+}
+
 module.exports = async ({ window, terminals, store }) => {
   const errors = [];
-  window.webContents.on('console-message', (details) => { if (details.level === 'error') errors.push(details.message); });
+  window.webContents.on('console-message', (details) => { if (details.level === 'error' || /Could not create web worker|Falling back to loading web worker/i.test(details.message)) errors.push(details.message); });
   const result = await window.webContents.executeJavaScript(`(async () => {
     const wait = async (predicate, description) => {
       const end = Date.now() + 12000;
@@ -69,6 +191,8 @@ module.exports = async ({ window, terminals, store }) => {
   const directory = process.env.TERMFORGE_SMOKE_DIR;
   const ssh = await require('./ssh-smoke.cjs')(directory);
   await fs.writeFile(path.join(directory, 'desktop.png'), (await window.webContents.capturePage()).toPNG());
-  await fs.writeFile(path.join(directory, 'result.json'), JSON.stringify({ ...result, ...ssh, activeTerminals: terminals.count, savedProfiles: store.load().sessions.length }, null, 2));
-  console.log('TermForge desktop smoke test passed: ' + JSON.stringify({ ...result, ...ssh }));
+  const project = await projectSmoke(window, terminals, directory);
+  assert.equal(errors.length, 0, errors.join('\n'));
+  await fs.writeFile(path.join(directory, 'result.json'), JSON.stringify({ ...result, ...ssh, ...project, activeTerminals: terminals.count, savedProfiles: store.load().sessions.length }, null, 2));
+  console.log('TermForge desktop smoke test passed: ' + JSON.stringify({ ...result, ...ssh, ...project }));
 };

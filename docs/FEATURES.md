@@ -2,13 +2,17 @@
 
 TermForge is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original modern interface replaces the earlier SecureCRT 9.7 macOS visual reference; the overall feature goal still covers every applicable capability on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current source scope — TermForge 0.7.0
+## Current source scope — TermForge 0.8.0
 
 | Workflow | TermForge implementation | Limits |
 | --- | --- | --- |
 | Desktop | Electron with native PTYs and socket/device adapters; versioned CI/package evidence below | Limited user-reported macOS launch/local-shell/SSH feedback; full packaged-app runtime coverage pending |
 | Modern interface | Original slate/teal design, horizontal manager switcher, vector icons/app mark, welcome actions and refined dialogs/AI panel; light/dark and optional matching palettes | Headless verification uses synthetic data; packaged interactive behavior remains unverified; see [interface guide](MODERN-INTERFACE.md) |
-| AI Assistant | Local Ollama or OpenRouter free router, explicit editable context, streamed answers, reviewed commands pinned to the original terminal | Free online quotas apply; temporary user API key required online; no bundled ChatGPT/Claude API, autonomous execution, saved chat history or live model verification; see [AI guide](AI-ASSISTANT.md) |
+| AI Assistant | Local Ollama or OpenRouter free router, explicit context, streamed answers, reviewed commands pinned to the original terminal, and whole-file proposals with diff/apply/separate-save review | Free online quotas apply; temporary user API key required online; no bundled ChatGPT/Claude API, autonomous execution, saved chat history or live model verification; see [AI guide](AI-ASSISTANT.md) |
+| Project editor | Bundled Monaco with file tabs/search, YAML diagnostics and Ansible snippets, JSON language services, Python/Jinja editing, and a retained terminal pane | Bounded UTF-8 files up to 2 MiB; no symlink paths or `.git` access; no VS Code extensions, debugger or remote file editing; see [project guide](PROJECT-WORKSPACE.md) |
+| File saves / history | Revision-checked saves, external-change reconciliation and up to 20 private backup versions per file; preview before restore/save | History is outside the project in application data; this is edited-file history, not automatic remote-device configuration collection |
+| Git review | Explicit read-only branch/status plus staged/unstaged diffs for the selected repository root | Installed Git required; no stage/commit/push/fetch, hooks, external diff/text conversion, linked worktrees, submodules or executable repository configuration |
+| Ansible | Trusted project review, saved playbook/inventory revision checks, target limits, syntax/check + diff/run modes, task/host output and controller cancellation | External Python/Core/Runner and vendor collections required; local controller on macOS/Linux, WSL on Windows; real WSL/device coverage pending; cancellation is not rollback |
 | Terminal | xterm.js scrollback, selection, resize, search, per-session fonts/schemes/cursor | TERM hints do not create distinct VT/ANSI engines; specialized emulations remain missing |
 | Local shell | Operating-system shell in node-pty | Uses the user's environment and permissions |
 | SSH | Installed system OpenSSH | Installed client/server determine authentication and algorithm support; no authentication-state detector |
@@ -43,6 +47,8 @@ The presets are Traditional, Monochrome, Solarized Dark, Solarized Light, Forge 
 
 ## Remaining gaps
 
+The project workspace is a focused automation editor. A VS Code extension host/marketplace, debugger, remote controllers, container execution environments, scheduled playbooks, Git publication and device-independent rollback are outside this first integration.
+
 SSH1, RLogin, Telnet/TLS, Windows RDP/ActiveX/COM behavior, distinct TN3270/Wyse/TVI/SCO and other emulations, full credential/key/host-key management, advanced named proxies, X/Y/Zmodem/Kermit, printing, automatic logging/rotation, complete automation compatibility, and SecureFX integration remain missing or incomplete. The modern visual direction does not remove applicable platform capabilities from the overall goal.
 
 The limited INI reader imports nonsecret SSH2 connection metadata, not passwords, authentication databases, scripts or complete settings. Review imported hosts, ports, usernames, folders and key paths before connecting; conservative validation may reject unusual values, and Windows key paths can require changes on another platform. SSH config aliases/proxy commands are not inherited.
@@ -50,6 +56,12 @@ The limited INI reader imports nonsecret SSH2 connection metadata, not passwords
 JSON import adds sessions and assigns fresh IDs on collisions, remapping snapshot references. Included preferences, commands and history update their corresponding configuration. Both import paths validate before writing and do not connect automatically. Version-1 migration concerns file schema; it does not promise migration of every historical application data directory.
 
 ## Verification and distribution
+
+The local 0.8 source passed **200/200 backend tests** with no skips, **97/97 existing interface checks**, **13/13 project interface checks**, and **7/7 real localhost Ansible integration checks**. The interface runs recorded no browser errors. The localhost checks used Python 3.14.8, Ansible Core 2.21.5 and Runner 2.4.3 and covered availability, syntax, check/diff without the fixture write, an explicit temporary-file write, stale-review rejection, task failure and cancellation. Project interface checks use real temporary files/Git and synthetic AI/Ansible events. No local Electron window was launched; real WSL, network devices and packaged interactive behavior remain unverified.
+
+Native CI, packaging and publication results are pending. The expanded Linux-only CI Electron smoke is configured to exercise actual custom-protocol JSON workers, preload/native clipboard actions, real fixture-file saves and CSP behavior alongside existing PTY/loopback SSH coverage. It has not yet run at this source revision, and its OS folder-selection result is stubbed. See [interface verification](UI-VERIFICATION.md) for the evidence boundaries.
+
+The following evidence applies to earlier releases.
 
 The 0.7.0 source passed **156 backend tests and 97 headless interface checks**, with zero failures or browser errors. Checks include compact layouts, keyboard access, reduced motion and layout persistence after restart. Packaged interactive behavior remains unverified.
 
@@ -79,4 +91,4 @@ For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/
 
 ## Ownership and attribution
 
-TermForge's original source is MIT licensed. Dependencies retain their respective licenses and authorship, including Electron, node-pty, serialport, xterm.js and OpenSSH. Preserve required notices in redistributed builds. SecureCRT and VanDyke Software are VanDyke's trademarks; references identify the requested comparison or import format. There is no affiliation or endorsement.
+TermForge's original source is MIT licensed. Dependencies retain their respective licenses and authorship, including Electron, Monaco Editor, YAML, node-pty, serialport, xterm.js and OpenSSH. Ansible Core and Runner are separately installed tools with their own licenses. Preserve required notices in redistributed builds. SecureCRT and VanDyke Software are VanDyke's trademarks; references identify the requested comparison or import format. There is no affiliation or endorsement.

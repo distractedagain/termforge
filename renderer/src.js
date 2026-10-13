@@ -21,6 +21,7 @@ import './ai-draft.css';
 import { createIcon } from './icons.js';
 import './modern.css';
 import './modern-ai.css';
+import { createProjectUi } from './projects.js';
 
 const api = window.termforge;
 const $ = (id) => document.getElementById(id);
@@ -61,6 +62,7 @@ let selectedFolderPath = null;
 let focusedTreeKey = 'folder:';
 let openMenuName = null;
 let menuEditTarget = null;
+let lastWorkspaceFocus = 'terminal';
 const panes = { sessionManager: true, commandWindow: true, buttonBar: true };
 const workflows = createWorkflows({ api, getState: () => state, setState: (patch) => { state = { ...state, ...patch }; }, getConnections: () => connections, getActiveId: () => activeId, activate, openConnection, closeConnection, reconnect, sendCommand, showSnippets: openSnippets, setPane, confirmAction, toast,
   getSelection: () => selectedSessionIds,
@@ -72,7 +74,8 @@ const workflows = createWorkflows({ api, getState: () => state, setState: (patch
 const scripts = createScriptUi({ api, getActiveId: () => activeId, toast });
 const recorder = createRecorder({ api, getConnection: () => connections.get(activeId), confirmAction, toast, changed: updateWorkspaceStatus });
 const transfers = createTransferUi({ api });
-const localAi = createLocalAiUi({ api, getConnection: () => connections.get(activeId) || null, stageCommand: stageAiCommand, toast, onLayout: () => requestAnimationFrame(fitVisible) });
+const localAi = createLocalAiUi({ api, getConnection: () => connections.get(activeId) || null, stageCommand: stageAiCommand, reviewFileEdit: proposal => projectUi.reviewAiEdit(proposal), toast, onLayout: () => requestAnimationFrame(fitVisible) });
+const projectUi = createProjectUi({ api, toast, confirmAction, getSettings: () => state.settings, onLayout: () => requestAnimationFrame(fitVisible), requestAiEdit: snapshot => localAi.attachFile(snapshot) });
 const colorPicker = createColorPicker({
   getSettings: () => state.settings,
   async saveSettings(patch) {
@@ -161,9 +164,14 @@ function setupSplitters() {
 
 
 function toast(message, error = false, path = '') {
+  const stack = $('toast-stack');
+  const key = JSON.stringify([message, error, path]);
+  for (const previous of stack.children) if (previous.dataset.toastKey === key) previous.remove();
   const node = make('div', `toast${error ? ' error' : ''}`, message);
+  node.dataset.toastKey = key;
   if (path) node.append(make('span', 'toast-path', path));
-  $('toast-stack').append(node);
+  stack.append(node);
+  while (stack.children.length > 3) stack.firstElementChild.remove();
   const timer = window.setTimeout(() => node.remove(), error ? 10000 : path ? 9000 : 5000);
   node.addEventListener('click', () => { window.clearTimeout(timer); node.remove(); });
 }
@@ -551,6 +559,7 @@ function keywordSettings() {
 
 function applySettings() {
   applyInterfaceColors(state.settings);
+  projectUi.applyTheme?.();
   for (const connection of connections.values()) {
     Object.assign(connection.term.options, terminalOptions(connection.profile));
     applyTerminalColors(connection, state.settings.colorScheme);
@@ -700,6 +709,7 @@ async function openConnection(profile, oldId = null) {
     const connection = createConnection(result, profile, oldId);
     if (oldId) disposeConnection(oldId);
     activate(connection.id);
+    if (projectUi.isOpen()) projectUi.showTerminal?.();
     renderSessions(); workflows.refresh();
     return connection;
   } catch (error) { toast(`Could not open ${profile.name}: ${errorMessage(error)}`, true); return null; }
@@ -1071,18 +1081,21 @@ async function copySelection(connection) {
 
 function focusedEditTarget() {
   const target = document.activeElement;
+  if (projectUi.handlesEditTarget?.(target)) return target;
   return target && target.matches('input, textarea') && !target.classList.contains('xterm-helper-textarea') ? target : null;
 }
 
 async function editField(action, target) {
   if (!target.isConnected || target.disabled) return;
   target.focus();
+  if (action === 'undo' || action === 'redo') { document.execCommand(action); return; }
   if (action === 'select-all') { target.select(); return; }
   const value = target.value;
   const start = Number.isInteger(target.selectionStart) ? target.selectionStart : 0;
   const end = Number.isInteger(target.selectionEnd) ? target.selectionEnd : value.length;
-  if (action === 'copy') {
+  if (action === 'copy' || action === 'cut') {
     if (end > start) await api.clipboardWrite(value.slice(start, end));
+    if (action === 'cut' && !target.readOnly && target.isConnected && document.activeElement === target && target.value === value && target.selectionStart === start && target.selectionEnd === end) { target.setRangeText('', start, end, 'end'); target.dispatchEvent(new Event('input', { bubbles: true })); }
     return;
   }
   if (target.readOnly) return;
@@ -1248,7 +1261,11 @@ function showSessionOptions() {
 }
 
 async function performAction(action, editTarget = null) {
-  if (editTarget && ['copy', 'paste', 'select-all'].includes(action)) { await editField(action, editTarget); return; }
+  if (editTarget && ['copy', 'cut', 'paste', 'select-all', 'undo', 'redo'].includes(action)) {
+    if (projectUi.handlesEditTarget?.(editTarget)) await projectUi.editAction(action, editTarget);
+    else await editField(action, editTarget);
+    return;
+  }
   if (action.startsWith('activate:')) { activate(action.slice(9)); return; }
   if (await scripts.perform(action)) return;
   if (await recorder.perform(action)) return;
@@ -1257,6 +1274,9 @@ async function performAction(action, editTarget = null) {
   const current = connections.get(activeId);
   switch (action) {
     case 'local-ai': localAi.toggle(); break;
+    case 'open-project': await projectUi.chooseProject(); break;
+    case 'project-workspace': await projectUi.toggle(); break;
+    case 'save-project-file': await projectUi.saveActive(); break;
     case 'new-session': openProfileDialog(); if (selectedFolderPath) $('profile-folder').value = selectedFolderPath; break;
     case 'connect': {
       const profiles = selectedSessionIds.size ? state.sessions.filter((profile) => selectedSessionIds.has(profile.id)) : selectedFolderPath !== null ? state.sessions.filter((profile) => !selectedFolderPath || normalizeFolder(profile.folder).join('/') === selectedFolderPath || normalizeFolder(profile.folder).join('/').startsWith(`${selectedFolderPath}/`)) : [];
@@ -1267,10 +1287,10 @@ async function performAction(action, editTarget = null) {
     }
     case 'disconnect': await disconnectActive(); break;
     case 'reconnect': if (current) await reconnect(current.id); break;
-    case 'close-tab': if (current) await closeConnection(current.id); break;
+    case 'close-tab': if (projectUi.isOpen() && lastWorkspaceFocus === 'editor') await projectUi.closeActive?.(); else if (current) await closeConnection(current.id); break;
     case 'local-shell': localShell(); break;
     case 'session-options': showSessionOptions(); break;
-    case 'find': showSearch(); break;
+    case 'find': if (projectUi.isOpen() && lastWorkspaceFocus === 'editor') projectUi.find?.(editTarget); else showSearch(); break;
     case 'log': if (current) await toggleLog(current.id); break;
     case 'pause-log': if (current?.logging && !current.exited) { const result = await api.terminalPauseLog({ id: current.id, paused: !current.logPaused }); current.logPaused = Boolean(result.paused); current.logButton.textContent = current.logPaused ? 'Ⅱ Log paused' : '● Logging'; renderTabs(); updateToolbar(); toast(current.logPaused ? 'Session logging paused.' : 'Session logging resumed.'); } break;
     case 'send-break': if (current && !current.exited && ['serial', 'telnet'].includes(current.protocol)) await api.terminalBreak(current.id); break;
@@ -1337,9 +1357,9 @@ function menuDefinitions(name) {
   const mod = isMac ? '⌘' : 'Ctrl+';
   const item = (label, action, enabled = true, shortcut = '', checked = null) => ({ label, action, enabled, shortcut, checked });
   switch (name) {
-    case 'file': return [item('Connect…', 'connect', Boolean(selected || selectedFolderPath !== null), 'Enter'), item('Quick Connect…', 'quick-connect'), item('New Session…', 'new-session'), item('Connect Bar', 'connect-bar'), item('Disconnect', 'disconnect', Boolean(current && !current.exited)), item('Reconnect', 'reconnect', Boolean(current && !current.reconnecting)), null, item('Local Shell', 'local-shell', true, `${mod}T`), item('Clone Session', 'clone-session', Boolean(current)), item('Close Tab', 'close-tab', Boolean(current), `${mod}W`), null, item('Snapshots…', 'snapshots'), item('Import / Export Sessions…', 'import-export')];
-    case 'edit': return [item('Copy', 'copy', Boolean(editTarget || current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', editTarget ? !editTarget.disabled && !editTarget.readOnly : Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(editTarget || current)), null, item('Find…', 'find', Boolean(current), `${mod}F`), item('Configure Button Bar…', 'snippets')];
-    case 'view': return [item('AI Assistant', 'local-ai', true, '', localAi.isVisible()), null, item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
+    case 'file': return [item('Open Project…', 'open-project', true, `${mod}⇧O`), item('Save Project File', 'save-project-file', Boolean(projectUi.getActiveDocument()), `${mod}S`), null, item('Connect…', 'connect', Boolean(selected || selectedFolderPath !== null), 'Enter'), item('Quick Connect…', 'quick-connect'), item('New Session…', 'new-session'), item('Connect Bar', 'connect-bar'), item('Disconnect', 'disconnect', Boolean(current && !current.exited)), item('Reconnect', 'reconnect', Boolean(current && !current.reconnecting)), null, item('Local Shell', 'local-shell', true, `${mod}T`), item('Clone Session', 'clone-session', Boolean(current)), item('Close Tab', 'close-tab', Boolean(current || projectUi.getActiveDocument()), `${mod}W`), null, item('Snapshots…', 'snapshots'), item('Import / Export Sessions…', 'import-export')];
+    case 'edit': return [item('Copy', 'copy', Boolean(editTarget || current), isMac ? '⌘C' : 'Ctrl+Shift+C'), item('Paste', 'paste', editTarget ? !editTarget.disabled && !editTarget.readOnly : Boolean(current && !current.exited), isMac ? '⌘V' : 'Ctrl+Shift+V'), item('Select All', 'select-all', Boolean(editTarget || current)), null, item('Find…', 'find', Boolean(current || projectUi.getActiveDocument()), `${mod}F`), item('Configure Button Bar…', 'snippets')];
+    case 'view': return [item('Project Workspace', 'project-workspace', true, '', projectUi.isOpen()), item('AI Assistant', 'local-ai', true, '', localAi.isVisible()), null, item('Session Manager', 'show-session-manager', true, '', panes.sessionManager && !$('sessions-manager-content').hidden), item('Command Manager', 'show-command-manager'), item('Active Sessions', 'show-active-sessions'), item('Command Window', 'show-command-window', true, '', panes.commandWindow), item('Button Bar', 'show-button-bar', true, '', panes.buttonBar), null, item('Tile Sessions', 'tile', connections.size > 0, '', tileView), item('Tile Vertically', 'tile-vertical', connections.size > 0), item('Tile Horizontally', 'tile-horizontal', connections.size > 0), item('Tile as Grid', 'tile-grid', connections.size > 0)];
     case 'options': return [item('Session Options…', 'session-options', Boolean(actionProfile())), item('Global Options…', 'settings'), item('Color Schemes…', 'color-schemes')];
     case 'transfer': return [item('Open SFTP Session', 'sftp'), item('Send ASCII…', 'send-ascii', Boolean(current && !current.exited)), item('Send Break', 'send-break', Boolean(current && !current.exited && ['telnet', 'serial'].includes(current.protocol))), item('TFTP Server…', 'tftp-server'), null, item('SFTP Command Help…', 'help')];
     case 'script': return [item('Run Python Script…', 'script-run'), item('Cancel Script', 'script-cancel', scripts.hasRunning()), null, item(recorder.isRecording() ? 'Stop Recording…' : 'Record Input…', 'script-record', Boolean(current && !current.exited)), item('Script Output…', 'script-output')];
@@ -1424,7 +1444,7 @@ function setupMenus() {
 }
 
 function setupHandlers() {
-  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install(); localAi.install();
+  installOptionDialogs({ getSettings: () => state.settings }); installWorkspaceDialogs(); workflows.install(); scripts.install(); transfers.install(); localAi.install(); projectUi.install();
   $('profile-form').noValidate = true; $('settings-form').noValidate = true;
   addToolbarIcons(); setupMenus(); setupSplitters(); loadLayout();
   $('settings-font').min = '8'; $('settings-font').max = '72'; $('settings-scrollback').max = '128000';
@@ -1484,6 +1504,8 @@ function setupHandlers() {
   bind('command-input', 'keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); } });
   bind('command-input', 'input', () => { if (!$('command-input').value.trim()) clearAiDraft(); });
   bind('ai-draft-discard', 'click', () => { $('command-input').value = ''; clearAiDraft(); });
+  bind('project-toggle', 'click', () => projectUi.toggle());
+  bind('welcome-project', 'click', () => projectUi.chooseProject());
   bind('local-ai-toggle', 'click', () => localAi.toggle());
   bind('broadcast-mode', 'change', () => { $('command-input').placeholder = $('broadcast-mode').checked ? 'Command for all active sessions. Review targets before sending.' : 'Enter a command here. Press Enter to send; Shift+Enter adds a line.'; updateWorkspaceStatus(); });
   bind('settings-button', 'click', openSettings);
@@ -1507,6 +1529,10 @@ function setupHandlers() {
     if (event.key === 'Escape') { event.preventDefault(); $('close-search').click(); }
   });
   bind('close-search', 'click', () => { $('terminal-search-bar').hidden = true; connections.get(activeId)?.search.clearDecorations(); requestAnimationFrame(fitVisible); connections.get(activeId)?.term.focus(); });
+  document.addEventListener('focusin', event => {
+    if (event.target.closest?.('#project-workspace')) lastWorkspaceFocus = 'editor';
+    else if (event.target.closest?.('#terminal-workspace')) lastWorkspaceFocus = 'terminal';
+  });
   document.addEventListener('keydown', (event) => {
     if (!document.querySelector('dialog[open]') && document.activeElement?.classList.contains('xterm-helper-textarea')) {
       const connection = connections.get(activeId); const mapping = matchingMapping(event, connection?.profile.terminal?.mappedKeys);
@@ -1514,6 +1540,10 @@ function setupHandlers() {
     }
     if (!(isMac ? event.metaKey : event.ctrlKey) || event.altKey || document.querySelector('dialog[open]')) return;
     const key = event.key.toLowerCase();
+    if (projectUi.isOpen() && lastWorkspaceFocus === 'editor' && ['s', 'f', 'w', 'k'].includes(key)) {
+      if (key === 's' || key === 'w') { event.preventDefault(); event.stopPropagation(); Promise.resolve(key === 's' ? projectUi.saveActive() : projectUi.closeActive?.()).catch(error => toast(errorMessage(error), true)); }
+      return;
+    }
     if (!['t', 'k', 'f', 'w'].includes(key)) return;
     event.preventDefault(); event.stopPropagation();
     if (key === 't') localShell();
@@ -1534,7 +1564,7 @@ async function init() {
   }
   if (typeof api.onMenuAction === 'function') api.onMenuAction((action) => {
     const name = String(action);
-    if (!document.querySelector('dialog[open]') || focusedEditTarget() && ['copy', 'paste', 'select-all'].includes(name)) runAction(name);
+    if (!document.querySelector('dialog[open]') || focusedEditTarget() && ['copy', 'cut', 'paste', 'select-all', 'undo', 'redo'].includes(name)) runAction(name);
   });
   api.onTerminalData(handleTerminalData);
   api.onTerminalExit(handleTerminalExit);

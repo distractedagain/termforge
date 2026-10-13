@@ -1,0 +1,137 @@
+.desktop-content.project-mode > #session-manager,
+.desktop-content.project-mode > #sidebar-resizer { display: none !important; }
+.workspace.project-mode > #welcome,
+.workspace.project-mode > #tab-strip,
+.workspace.project-mode > #terminal-search-bar,
+.workspace.project-mode > #terminal-workspace,
+.workspace.project-mode > #command-resizer,
+.workspace.project-mode > #command-bar { display: none !important; }
+.workspace.project-mode.project-terminal-visible > #tab-strip:not(:empty) { display: flex !important; height: 35px; min-height: 35px; padding-top: 2px; padding-bottom: 2px; border-top: 1px solid var(--border); }
+.workspace.project-mode.project-terminal-visible > #terminal-workspace:not([hidden]) { display: flex !important; flex: 0 0 28%; min-height: 135px; max-height: 42%; }
+
+.project-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; color: var(--text); background: var(--field); container-type: inline-size; }
+.project-header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border-soft); background: var(--panel); }
+.project-heading { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.project-eyebrow { color: var(--accent); font-size: 9px; font-weight: 650; letter-spacing: 1.4px; }
+.project-heading strong { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-shrink: 0; }
+.project-workspace .secondary-button, .project-workspace .quiet-button, .project-workspace .primary-button { min-height: 30px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+.project-toolbar { display: flex; flex-shrink: 0; align-items: center; gap: 3px; min-height: 43px; padding: 5px 10px; border-bottom: 1px solid var(--border-soft); background: var(--chrome); overflow-x: auto; overflow-y: hidden; scroll-padding-inline: 8px; scrollbar-width: thin; }
+.project-toolbar > button { flex-shrink: 0; }
+.project-toolbar-divider { width: 1px; height: 19px; background: var(--border-soft); margin: 0 5px; flex-shrink: 0; }
+.project-close-folder { margin-left: auto; }
+#project-toggle-files { display: none; }
+.project-error { display: flex; align-items: flex-start; gap: 10px; padding: 9px 13px; background: color-mix(in srgb, #df8e3b 12%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, #df8e3b 45%, var(--border)); font-size: 11px; line-height: 1.5; max-height: 88px; overflow: auto; }
+.project-error > span { flex: 1; overflow-wrap: anywhere; }
+.project-error > button { flex-shrink: 0; background: transparent; border: 0; padding: 0 3px; font-size: 17px; line-height: 1.1; }
+.project-main { display: grid; grid-template-columns: 205px minmax(0, 1fr); flex: 1; min-height: 120px; min-width: 0; position: relative; overflow: hidden; }
+.project-explorer { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--panel); border-right: 1px solid var(--border-soft); }
+.project-explorer-heading { display: flex; align-items: center; justify-content: space-between; height: 39px; min-height: 39px; padding: 4px 10px 4px 14px; font-size: 10px; font-weight: 600; letter-spacing: .9px; color: var(--muted); }
+.project-explorer-heading #project-refresh { font-size: 19px; width: 26px; padding: 0; min-height: 26px; }
+.project-root-label { margin: 0 13px 10px; font-size: 10px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; max-height: 45px; overflow: hidden; }
+#project-files { flex: 1; overflow: auto; padding: 0 6px 12px; min-height: 0; }
+.project-tree-row { display: flex; align-items: center; gap: 6px; min-height: 31px; width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; font-size: 11px; }
+.project-tree-row.selected { background: var(--select); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.project-file-glyph { flex-shrink: 0; width: 12px; color: var(--muted); text-align: center; }
+.project-tree-row[aria-expanded] .project-file-glyph { color: var(--accent); }
+.project-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-explorer-empty { margin: 9px 8px; font-size: 11px; line-height: 1.7; color: var(--muted); }
+.project-editor-stack { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--field); }
+.project-tabs { display: flex; flex-shrink: 0; gap: 4px; padding: 5px 7px; min-height: 38px; max-height: 38px; overflow-x: auto; background: var(--panel); border-bottom: 1px solid var(--border-soft); }
+.project-tabs:empty { display: none; }
+.project-file-tab { display: flex; align-items: center; flex-shrink: 0; min-width: 100px; max-width: 220px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); }
+.project-file-tab.selected { border-color: var(--border-soft); color: var(--text); background: var(--field); }
+.project-tab-select { flex: 1; padding: 4px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; background: transparent; border: 0; font-size: 11px; text-align: left; white-space: nowrap; }
+.project-tab-close { width: 24px; height: 23px; padding: 0; margin-right: 2px; border: 0; background: transparent; color: var(--muted); font-size: 16px; }
+.project-document-bar { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; padding: 5px 13px; font-size: 10px; color: var(--muted); border-bottom: 1px solid var(--border-soft); }
+#project-document-path { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+#project-language { flex-shrink: 0; font-size: 9px; letter-spacing: .2px; }
+.project-editor { flex: 1; min-height: 80px; min-width: 0; overflow: hidden; }
+.project-empty { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 22px; text-align: center; background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 5%, transparent), transparent 68%); }
+.project-empty-mark { color: var(--accent); font: 600 32px/1.2 'SFMono-Regular', Consolas, monospace; letter-spacing: -4px; margin-bottom: 10px; }
+.project-empty h2 { font-size: 23px; line-height: 1.2; margin: 8px 0 11px; letter-spacing: -.6px; font-weight: 600; }
+.project-empty p { max-width: 370px; margin: 0 0 20px; line-height: 1.7; font-size: 12px; color: var(--muted); }
+.project-editor-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0; height: 25px; padding: 4px 11px; border-top: 1px solid var(--border-soft); background: var(--panel); font-size: 9px; color: var(--muted); }
+#project-diagnostics { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#project-cursor { flex-shrink: 0; }
+.project-review { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.project-review > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 13px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); border-bottom: 1px solid var(--border-soft); }
+.project-review > header > div:first-child { min-width: 0; }
+.project-review strong { display: block; font-size: 11px; overflow-wrap: anywhere; }
+.project-review p { margin: 5px 0 0; max-width: 580px; font-size: 10px; color: var(--muted); line-height: 1.55; }
+.project-review-actions { display: flex; flex-shrink: 0; gap: 5px; }
+.project-diff-editor { flex: 1; min-height: 90px; overflow: hidden; }
+.project-ansible { min-height: 36px; max-height: 52%; overflow: auto; flex-shrink: 1; border-top: 1px solid var(--border); background: var(--panel); }
+.project-ansible > summary { display: flex; align-items: center; gap: 14px; min-height: 37px; padding: 8px 14px; cursor: pointer; font-size: 11px; background: var(--chrome); }
+.project-ansible > summary:before { content: '▸'; color: var(--accent); font-size: 11px; }
+.project-ansible[open] > summary:before { content: '▾'; }
+.project-ansible > summary strong { font-weight: 600; white-space: nowrap; }
+.project-ansible > summary > span { min-width: 0; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-ansible-body { padding: 12px 14px; }
+.project-run-form { display: grid; grid-template-columns: minmax(95px, .7fr) minmax(110px, 1fr) auto; align-items: end; gap: 10px; }
+.project-run-form > label { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--muted); font-size: 10px; }
+.project-run-form input, .project-run-form select { width: 100%; height: 30px; padding: 5px 8px; border-radius: 6px; font-size: 11px; color: var(--text); }
+.project-run-form > label:nth-of-type(3), .project-run-form > label:nth-of-type(4) { grid-column: span 1; }
+.project-run-consent { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; margin-top: 13px; }
+.project-run-consent > label { display: flex; align-items: flex-start; gap: 7px; width: 100%; font-size: 11px; line-height: 1.5; }
+.project-run-consent input { flex-shrink: 0; margin-top: 2px; }
+.project-run-consent p { flex: 1; min-width: 190px; margin: 0; font-size: 10px; line-height: 1.6; color: var(--muted); }
+.project-run-consent > div { display: flex; gap: 6px; }
+.project-run-events { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 7px; font-size: 10px; max-height: 200px; overflow: auto; }
+.project-run-events:empty { display: none; }
+.project-run-event { display: flex; flex-wrap: wrap; gap: 5px 9px; padding: 6px 4px; border-bottom: 1px solid var(--border-soft); }
+.project-run-kind { color: var(--muted); }
+.project-run-event strong { font-weight: 600; color: var(--accent); }
+.project-run-event.failed { border-left: 2px solid #d97777; }
+.project-run-event.changed { border-left: 2px solid #bf984a; }
+.project-run-event pre { width: 100%; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.55 'SFMono-Regular', Consolas, monospace; }
+.project-run-note { color: var(--muted); font-size: 10px; }
+.project-new-dialog { width: 520px; }
+.project-new-dialog form { display: flex; flex-direction: column; min-height: 0; }
+.project-new-dialog label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.project-form-error { color: #c56a5d; font-size: 11px; }
+.project-inspector-dialog { width: 940px; height: min(600px, calc(100vh - 70px)); }
+.project-inspector-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; flex: 1; }
+#project-inspector-list { overflow: auto; border-right: 1px solid var(--border-soft); padding: 8px; }
+.project-inspector-item { width: 100%; padding: 9px; border: 1px solid transparent; border-radius: 6px; text-align: left; font-size: 11px; background: transparent; overflow-wrap: anywhere; }
+#project-inspector-detail { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 'SFMono-Regular', Consolas, monospace; background: var(--field); }
+
+@container (max-width: 720px) {
+  .project-header { padding: 9px 12px; gap: 8px; }
+  .project-header-actions { gap: 2px; }
+  .project-header-actions .quiet-button { font-size: 10px; padding: 5px 6px; }
+  .project-main { grid-template-columns: 166px minmax(0, 1fr); }
+  .project-toolbar { padding: 4px 7px; }
+  .project-workspace .project-toolbar button { font-size: 10px; padding: 5px 7px; }
+  .project-review > header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .project-review-actions { align-self: flex-end; }
+  .project-empty h2 { font-size: 20px; }
+  .project-root-label { max-height: 32px; font-size: 9px; }
+}
+@container (max-width: 560px) {
+  .project-header { flex-wrap: wrap; min-height: 73px; }
+  .project-heading { flex-direction: row; align-items: center; width: 100%; gap: 8px; }
+  .project-heading strong { font-size: 12px; }
+  .project-header-actions { width: 100%; justify-content: flex-start; }
+  .project-main { grid-template-columns: minmax(0, 1fr); }
+  .project-explorer { display: none; }
+  #project-toggle-files { display: block; }
+  .project-files-visible .project-explorer { display: flex; position: absolute; z-index: 10; inset: 0 auto 0 0; width: 205px; box-shadow: 10px 0 25px #0002; }
+  #project-language { display: none; }
+  .project-empty { padding: 15px; }
+  .project-run-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #ansible-probe { grid-column: 2; }
+  .project-ansible-body { padding: 9px 11px; }
+  .project-ansible > summary { gap: 8px; padding: 8px 11px; }
+}
+@media (max-width: 900px) {
+  .project-inspector-body { grid-template-columns: 175px minmax(0, 1fr); }
+}
+@media (max-width: 1000px) {
+  /* The terminal mode keeps its overlay. Editors reserve the same width so file
+     actions and diff approval cannot sit underneath the assistant. */
+  .desktop-content.project-mode.local-ai-open > .workspace { margin-right: calc(var(--local-ai-width, 360px) + 4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-workspace *, .project-inspector-dialog * { scroll-behavior: auto !important; }
+}

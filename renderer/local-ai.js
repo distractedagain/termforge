@@ -52,7 +52,7 @@ function parseReply(text) {
   return parts;
 }
 
-export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLayout = () => {} }) {
+export function createLocalAiUi({ api, getConnection, stageCommand, reviewFileEdit, toast, onLayout = () => {} }) {
   let installed = false;
   let panel;
   let resizer;
@@ -234,6 +234,30 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     contextCount.textContent = `${context.value.length.toLocaleString()} / ${CONTEXT_LIMIT.toLocaleString()} characters${truncated ? ' · truncated' : ''}. Review text; other secrets may remain.`;
   }
 
+  function attachFile(snapshot) {
+    show('edit');
+    if (busy) { setError('Finish or cancel the current request before attaching a project file.'); return false; }
+    if (!snapshot || typeof snapshot.text !== 'string' || snapshot.text.length > CONTEXT_LIMIT) {
+      setError(`AI file editing supports complete files up to ${CONTEXT_LIMIT.toLocaleString()} characters. Shorten this file before requesting an edit.`);
+      return false;
+    }
+    const cleaned = redactContext(snapshot.text);
+    freshRequest();
+    mode.value = 'edit';
+    source = { kind: 'file', label: snapshot.path, file: { ...snapshot, baseText: snapshot.text }, editable: cleaned === snapshot.text };
+    context.value = cleaned;
+    contextSource.textContent = `Project file: ${snapshot.path}`;
+    contextBox.hidden = false;
+    context.setAttribute('aria-label', 'Attached project file to send');
+    prompt.value = 'Improve this file. Explain your changes and return the complete updated file in one fenced code block.';
+    prompt.placeholder = 'Describe the change you want in this file.';
+    updateContextCount();
+    if (!source.editable) setError('Possible secrets were masked. You can ask for advice, but applying a whole-file replacement is disabled to preserve those values.');
+    updateControls();
+    prompt.focus(); prompt.select();
+    return true;
+  }
+
   function clearContext() {
     source = null;
     context.value = '';
@@ -281,11 +305,11 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     const connection = getConnection();
     const targetId = source ? source.targetId : connection?.id || null;
     const targetLabel = source ? source.label : connection ? connectionLabel(connection) : null;
-    const current = { id: crypto.randomUUID(), text: '', targetId, targetLabel, online, complete: false, cancelled: false };
+    const current = { id: crypto.randomUUID(), text: '', targetId, targetLabel, file: source?.kind === 'file' ? { ...source.file } : null, fileEditable: source?.editable === true, online, complete: false, cancelled: false };
     request = current;
     busy = true;
     response.replaceChildren(make('p', 'local-ai-empty', online ? 'Waiting for the free online model…' : 'Waiting for the local model…'));
-    requestTarget.textContent = targetLabel ? `Command target: ${targetLabel}. Return to this tab to use a command.` : 'No terminal target. Open a terminal and send a new request to stage a command.';
+    requestTarget.textContent = current.file ? `File proposal: ${current.file.path}. Review the diff before applying to the editor; saving is a separate step.` : targetLabel ? `Command target: ${targetLabel}. Return to this tab to use a command.` : 'No terminal target. Open a terminal and send a new request to stage a command.';
     requestTarget.hidden = false;
     status.textContent = online ? 'Generating with a free online model…' : 'Generating locally…';
     setError();
@@ -319,7 +343,7 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     } else if (event.type === 'done') {
       busy = false;
       request.complete = true;
-      status.textContent = request.text.trim() ? 'Complete. Review any suggested command before sending it.' : 'The model returned an empty response. Try another prompt or model.';
+      status.textContent = request.text.trim() ? request.file ? 'Complete. Review the proposed file diff before applying edits.' : 'Complete. Review any suggested command before sending it.' : 'The model returned an empty response. Try another prompt or model.';
       updateControls();
       renderReply();
     } else if (event.type === 'error') {
@@ -353,7 +377,20 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
       const code = make('pre', 'local-ai-code', part.text);
       code.tabIndex = 0;
       const isCommand = COMMAND_LANGUAGES.has(part.language) && part.text.trim() && part.text.length <= COMMAND_LIMIT;
-      if (isCommand) {
+      if (current.file && reviewFileEdit) {
+        const review = make('button', 'local-ai-review-file', 'Review file edit');
+        review.type = 'button';
+        review.disabled = !current.complete || !part.complete || !current.fileEditable;
+        review.title = current.fileEditable ? 'Compare the complete proposed file with the original editor buffer' : 'Whole-file replacement is disabled because attached secrets were masked';
+        review.addEventListener('click', async () => {
+          if (request !== current || !current.complete || !current.fileEditable) return;
+          review.disabled = true;
+          try { await reviewFileEdit({ ...current.file, text: part.text }); }
+          catch (failure) { setError(messageOf(failure)); }
+          finally { if (request === current) review.disabled = false; }
+        });
+        heading.append(review);
+      } else if (isCommand) {
         const use = make('button', 'local-ai-use-command', 'Use command');
         use.type = 'button';
         use.disabled = !current.complete || !part.complete || !current.targetId;
@@ -465,7 +502,7 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     modelStatus = make('p', 'local-ai-note local-ai-model-status', 'Choose Refresh models to find installed models.'); modelStatus.id = 'local-ai-model-status'; modelStatus.setAttribute('aria-live', 'polite');
     const modeLabel = make('label', 'local-ai-field local-ai-mode-field', 'Task');
     mode = make('select'); mode.id = 'local-ai-mode';
-    for (const [value, label] of [['ask', 'Investigate'], ['explain', 'Explain output'], ['command', 'Draft a command']]) { const option = make('option', '', label); option.value = value; mode.append(option); }
+    for (const [value, label] of [['ask', 'Investigate'], ['explain', 'Explain output'], ['command', 'Draft a command'], ['edit', 'Propose a file edit']]) { const option = make('option', '', label); option.value = value; mode.append(option); }
     modeLabel.append(mode);
     const promptLabel = make('label', 'local-ai-field', 'Your request');
     prompt = make('textarea'); prompt.id = 'local-ai-prompt'; prompt.rows = 4; prompt.maxLength = PROMPT_LIMIT; prompt.placeholder = 'For example: Why is this BGP neighbor down? What should I check next?'; prompt.spellcheck = false; promptLabel.append(prompt);
@@ -514,7 +551,7 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     panel.hidden = false;
     resizer.hidden = false;
     panel.parentElement.classList.add('local-ai-open');
-    if (['ask', 'explain', 'command'].includes(task)) { mode.value = task; mode.dispatchEvent(new Event('change')); }
+    if (['ask', 'explain', 'command', 'edit'].includes(task)) { mode.value = task; mode.dispatchEvent(new Event('change')); }
     onLayout();
     prompt.focus();
     if (modelsPort === null && !loading) refreshModels();
@@ -533,5 +570,5 @@ export function createLocalAiUi({ api, getConnection, stageCommand, toast, onLay
     if (opener?.isConnected && typeof opener.focus === 'function') opener.focus();
   }
 
-  return { install, show, close, toggle: () => installed && !panel.hidden ? close() : show(), isVisible: () => installed && !panel.hidden };
+  return { install, show, close, attachFile, toggle: () => installed && !panel.hidden ? close() : show(), isVisible: () => installed && !panel.hidden };
 }

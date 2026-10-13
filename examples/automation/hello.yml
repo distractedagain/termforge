@@ -1,0 +1,14 @@
+---
+- name: Verify the TermForge automation workspace
+  hosts: lab
+  gather_facts: false
+  tasks:
+    - name: Show the selected target
+      ansible.builtin.debug:
+        msg: "TermForge is running this playbook on {{ inventory_hostname }}."
+
+    - name: Keep this example on the local computer
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'localhost'
+        success_msg: "Local demonstration complete. No configuration was changed."

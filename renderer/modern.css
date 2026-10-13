@@ -116,13 +116,15 @@ kbd {
 .main-toolbar #quick-connect,
 .main-toolbar #reconnect-session,
 .main-toolbar #disconnect-session,
+.main-toolbar #project-toggle,
 .main-toolbar #local-ai-toggle,
 .main-toolbar #color-schemes-button,
 .main-toolbar #settings-button,
 :root[data-platform] .main-toolbar #quick-connect,
 :root[data-platform] .main-toolbar #reconnect-session,
 :root[data-platform] .main-toolbar #disconnect-session,
-:root[data-platform] .main-toolbar #local-ai-toggle,
+:root[data-platform] .main-toolbar #project-toggle,
+.main-toolbar #local-ai-toggle,
 :root[data-platform] .main-toolbar #color-schemes-button,
 :root[data-platform] .main-toolbar #settings-button { display: inline-flex; }
 :root[data-platform] .main-toolbar #quick-connect { order: -8; }
@@ -136,6 +138,7 @@ kbd {
 :root[data-platform] .connect-bar input,
 :root[data-platform] .keyword-bar input { height: 36px; padding: 8px 11px; border: 1px solid var(--border-soft); border-radius: 8px; box-shadow: none; font-size: 12px; background: var(--field); }
 .connect-bar input:focus, .keyword-bar input:focus { border-color: var(--accent); }
+.main-toolbar #project-toggle,
 .main-toolbar #local-ai-toggle,
 :root[data-platform] .main-toolbar #local-ai-toggle { order: 2; width: auto; min-width: 36px; padding: 7px 10px; gap: 7px; border: 1px solid var(--border); background: var(--field); color: var(--text); }
 .main-toolbar #local-ai-toggle .tool-label { font-size: 12px; font-weight: 600; }
@@ -353,7 +356,8 @@ kbd {
   .app-brand { padding-right: 6px; }
   .app-brand span { display: none; }
   .main-toolbar #local-ai-toggle .tool-label { display: none; }
-  .main-toolbar #local-ai-toggle, :root[data-platform] .main-toolbar #local-ai-toggle { width: 34px; padding: 7px; }
+  .main-toolbar #project-toggle,
+.main-toolbar #local-ai-toggle, :root[data-platform] .main-toolbar #local-ai-toggle { width: 34px; padding: 7px; }
 }
 
 @media (max-width: 900px) {
@@ -394,3 +398,8 @@ kbd {
   .session-row.connected:after, .tab-dot.active:before { background: Highlight; }
   .welcome { background-image: none; }
 }
+
+:root[data-platform] .main-toolbar #project-toggle { display: inline-flex; order: 2; width: auto; padding: 7px 10px; gap: 7px; border: 1px solid var(--border); background: var(--field); }
+#project-toggle .tool-label { font-size: 12px; font-weight: 600; }
+:root[data-platform] .main-toolbar #project-toggle[aria-pressed="true"] { background: var(--select); border-color: var(--accent); }
+@media (max-width: 1100px) { #project-toggle .tool-label { display: none; } :root[data-platform] .main-toolbar #project-toggle { width: 34px; padding: 7px; } }

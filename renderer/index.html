@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>TermForge</title>
     <link rel="stylesheet" href="./dist/app.css">
     <script defer src="./dist/app.js"></script>
@@ -43,6 +43,7 @@
         <button id="session-log" class="tool-button" data-icon="log" title="Log session output" aria-label="Log session output" aria-pressed="false" disabled></button>
         <span class="toolbar-separator"></span>
         <button id="toggle-tile" class="tool-button" data-icon="tile" title="Tile sessions" aria-label="Tile sessions" aria-pressed="false" disabled></button>
+        <button id="project-toggle" class="tool-button" data-icon="folder" data-icon-label="Projects" title="Project workspace" aria-label="Project workspace" aria-pressed="false"></button>
         <button id="local-ai-toggle" class="tool-button" data-icon="ai" data-icon-label="Assistant" title="AI Assistant" aria-label="AI Assistant" aria-pressed="false"></button>
         <button id="color-schemes-button" class="tool-button" data-icon="palette" title="Color schemes" aria-label="Color schemes"></button>
         <button id="settings-button" class="tool-button" data-icon="settings" title="Global options" aria-label="Global options"></button>
@@ -74,7 +75,7 @@
             <p class="welcome-eyebrow">TERMINAL WORKSPACE</p>
             <h1>Your next session starts here.</h1>
             <p class="welcome-description">Connect to a server, open a local shell, or choose a saved session from the sidebar.</p>
-            <div class="empty-terminal-actions"><button id="welcome-new" class="primary-button" data-icon="new" data-icon-label="New connection">New connection</button><button id="welcome-local" class="secondary-button" data-icon="terminal" data-icon-label="Local shell">Local shell</button><button id="welcome-import" class="quiet-button" data-icon="import" data-icon-label="Import sessions">Import sessions</button></div>
+            <div class="empty-terminal-actions"><button id="welcome-new" class="primary-button" data-icon="new" data-icon-label="New connection">New connection</button><button id="welcome-local" class="secondary-button" data-icon="terminal" data-icon-label="Local shell">Local shell</button><button id="welcome-project" class="secondary-button" data-icon="folder" data-icon-label="Open project">Open project</button><button id="welcome-import" class="quiet-button" data-icon="import" data-icon-label="Import sessions">Import sessions</button></div>
             <div class="welcome-shortcuts" aria-label="Supported connection types"><span>SSH &amp; SFTP</span><span>Serial</span><span>Local shell</span></div>
           </section>
           <div id="command-resizer" class="command-resizer" role="separator" aria-label="Resize Command Window" aria-orientation="horizontal" tabindex="0"></div>

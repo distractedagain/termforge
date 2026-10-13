@@ -11,6 +11,8 @@ const { createTftpServer } = require('./tftp.cjs');
 const { stopOwnedResources } = require('./lifecycle.cjs');
 const { writePrivateFile, resolveDataDirectory } = require('./files.cjs');
 const { createAiAssistant } = require('./ai-assistant.cjs');
+const { createProjectManager } = require('./projects.cjs');
+const { createAnsibleManager } = require('./ansible.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'termforge', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.setName('TermForge');
@@ -19,6 +21,10 @@ let store;
 let terminals;
 let automation;
 let localAi;
+let projects;
+let ansible;
+const dirtyProjects = new Set();
+const savingProjects = new Map();
 let activeTerminalId = null;
 let focusedTerminalId = null;
 let tftp = null;
@@ -28,7 +34,7 @@ let quitting = false;
 let shuttingDown = false;
 const rendererRoot = path.join(__dirname, '../renderer');
 const trustedURL = 'termforge://app/index.html';
-const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'";
+const csp = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'";
 
 function send(channel, value) {
   if (window && !window.isDestroyed()) window.webContents.send(`termforge:${channel}`, value);
@@ -38,7 +44,7 @@ async function cleanupTerminals() {
   for (const pending of screenRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Terminal display is closing.')); }
   screenRequests.clear();
   const server = tftp;
-  await stopOwnedResources({ scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
+  await stopOwnedResources({ ansible: () => ansible?.closeAll(), scripts: () => automation?.closeAll(), terminals: () => terminals?.closeAll(), tftp: async () => { await server?.stop(); if (tftp === server) tftp = null; } });
 }
 function readScreen(request) {
   if (!request || !terminals.has(requiredId(request.id))) return Promise.reject(new Error('The script terminal is no longer open.'));
@@ -54,7 +60,7 @@ function handle(name, callback) {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedURL) {
       throw new Error('Untrusted request');
     }
-    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels'].includes(name)) throw new Error('TermForge is stopping its active work.');
+    if (shuttingDown && ['terminalOpen', 'scriptRun', 'tftpStart', 'aiStart', 'aiModels', 'projectOpen', 'projectSave', 'ansibleProbe', 'ansiblePrepare', 'ansibleStart'].includes(name)) throw new Error('TermForge is stopping its active work.');
     return callback(...args);
   });
 }
@@ -72,6 +78,8 @@ function applicationMenu() {
   return Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [{ role: 'about' }, separator, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, separator, { role: 'quit' }] }] : []),
     { label: 'File', submenu: [
+      action('Open Project…', 'open-project', 'CommandOrControl+Shift+O'),
+      action('Save Project File', 'save-project-file', 'CommandOrControl+S'), separator,
       action('New Session…', 'new-session', 'CommandOrControl+N'),
       action('Connect', 'connect', 'CommandOrControl+O'),
       action('Quick Connect…', 'quick-connect'),
@@ -81,13 +89,14 @@ function applicationMenu() {
       action('Close Tab', 'close-tab', 'CommandOrControl+W'),
       ...(process.platform === 'darwin' ? [] : [{ role: 'quit' }])
     ] },
-    { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, separator, { role: 'cut' },
+    { label: 'Edit', submenu: [action('Undo', 'undo', 'CommandOrControl+Z'), action('Redo', 'redo', 'CommandOrControl+Shift+Z'), separator, action('Cut', 'cut', 'CommandOrControl+X'),
       action('Copy', 'copy', process.platform === 'darwin' ? 'Command+C' : 'Control+Shift+C'),
       action('Paste', 'paste', process.platform === 'darwin' ? 'Command+V' : 'Control+Shift+V'),
       action('Select All', 'select-all'), separator,
       action('Find…', 'find', 'CommandOrControl+F')
     ] },
     { label: 'View', submenu: [
+      action('Project Workspace', 'project-workspace'),
       action('Session Manager', 'show-session-manager'), action('Command Window', 'show-command-window'),
       action('Button Bar', 'show-button-bar'), separator,
       action('AI Assistant', 'local-ai'), separator,
@@ -141,6 +150,37 @@ async function importSecureCRT() {
 
 function registerHandlers() {
   handle('getState', getState);
+  handle('projectOpen', async () => {
+    const result = await dialog.showOpenDialog(window, { title: 'Open automation project', properties: ['openDirectory'] });
+    return result.canceled ? null : projects.open(result.filePaths[0]);
+  });
+  handle('projectClose', async ({ projectId } = {}) => {
+    if (ansible.hasProject(projectId)) throw new Error('Wait for this project’s Ansible job to stop before closing its folder.');
+    if (savingProjects.has(projectId)) throw new Error('Wait for file saves to finish before closing this project.');
+    await projects.close(projectId); dirtyProjects.delete(projectId); return true;
+  });
+  handle('projectSetDirty', ({ projectId, dirty } = {}) => {
+    projects.getRoot(projectId);
+    if (typeof dirty !== 'boolean') throw new Error('Invalid project edit state.');
+    if (dirty) dirtyProjects.add(projectId); else dirtyProjects.delete(projectId);
+    return true;
+  });
+  for (const [channel, method] of Object.entries({ projectList: 'list', projectRead: 'read', projectListBackups: 'listBackups', projectReadBackup: 'readBackup', projectGitStatus: 'gitStatus', projectGitDiff: 'gitDiff' })) handle(channel, input => projects[method](input));
+  handle('projectSave', async input => {
+    const projectId = input?.projectId;
+    projects.getRoot(projectId);
+    if (ansible.hasProject(projectId)) throw new Error('Wait for the Ansible job to stop before saving project files. Your editor buffer is unchanged.');
+    savingProjects.set(projectId, (savingProjects.get(projectId) || 0) + 1);
+    try { return await projects.save(input); }
+    finally { const count = savingProjects.get(projectId) - 1; if (count) savingProjects.set(projectId, count); else savingProjects.delete(projectId); }
+  });
+  handle('ansibleProbe', input => ansible.probe(input));
+  handle('ansiblePrepare', input => ansible.prepare(input));
+  handle('ansibleStart', input => {
+    if (savingProjects.size) throw new Error('Wait for project file saves to finish, then review the run again.');
+    return ansible.start(input);
+  });
+  handle('ansibleCancel', id => ansible.cancel(id));
   handle('aiModels', (options) => localAi.listModels(options));
   handle('aiStart', (request) => localAi.start(request));
   handle('aiCancel', (requestId) => localAi.cancel(requestId));
@@ -284,6 +324,8 @@ async function boot() {
   const dataDirectory = resolveDataDirectory(app.getPath('appData'), app.getPath('userData'));
   store = createStore(dataDirectory);
   store.load();
+  projects = createProjectManager({ dataDirectory });
+  ansible = createAnsibleManager({ projects, dataDirectory, send });
   protocol.handle('termforge', async (request) => {
     try {
       const url = new URL(request.url);
@@ -325,12 +367,18 @@ async function boot() {
   window.webContents.session.setPermissionCheckHandler(() => false);
   window.webContents.on('render-process-gone', () => { cleanupTerminals().catch(error => console.error('Cleanup failed:', error.message)); });
   window.on('close', (event) => {
+    if (quitting) return;
+    if (savingProjects.size) {
+      event.preventDefault();
+      dialog.showMessageBoxSync(window, { type: 'info', buttons: ['Keep open'], defaultId: 0, cancelId: 0, message: 'A project file is still saving.', detail: 'Let the save finish, then close TermForge again. Closing now could interrupt the file write.' });
+      return;
+    }
     const serverState = tftp?.status();
     const serverOwned = serverState && (serverState.state !== 'stopped' || serverState.activeTransfers > 0);
-    if (quitting || (terminals.count === 0 && automation.count === 0 && !serverOwned)) return;
+    if (terminals.count === 0 && automation.count === 0 && !serverOwned && !ansible.count && !dirtyProjects.size) return;
     event.preventDefault();
     if (shuttingDown) return;
-    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', 'Disconnect and quit'], defaultId: 0, cancelId: 0, message: `Close ${terminals.count} active terminal${terminals.count === 1 ? '' : 's'}${automation.count ? ', the running Python script' : ''}${serverOwned ? ', and the TFTP server' : ''}?`, detail: 'Running commands or transfers may be interrupted.' });
+    const choice = dialog.showMessageBoxSync(window, { type: 'question', buttons: ['Keep open', dirtyProjects.size ? 'Discard edits and quit' : 'Stop work and quit'], defaultId: 0, cancelId: 0, message: dirtyProjects.size ? 'Quit with unsaved project edits?' : 'Stop active work and quit?', detail: `${dirtyProjects.size ? 'Unsaved project edits will be lost. ' : ''}${terminals.count} terminal(s), ${automation.count} Python script(s), ${ansible.count || 0} Ansible job(s)${serverOwned ? ', and the TFTP server' : ''}. Running operations may be interrupted. Stopping Ansible does not undo completed changes.` });
     if (choice === 1) {
       shuttingDown = true;
       cleanupTerminals().then(() => { quitting = true; app.quit(); }).catch(error => { shuttingDown = false; dialog.showErrorBox('Active work could not stop', error.message); });

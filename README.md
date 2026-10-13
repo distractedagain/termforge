@@ -1,6 +1,6 @@
 # TermForge
 
-A free, open-source desktop terminal client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, and Python automation. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
+A free, open-source desktop terminal and automation client for macOS, Windows, and Linux. TermForge combines saved sessions, terminal connections, reusable commands, Python automation, and a local project editor with reviewed Ansible runs. The project is being developed toward SecureCRT 9.7 feature parity across all three platforms, with an original modern interface.
 
 ![TermForge modern dark workspace with illustrative saved sessions](docs/images/modern-welcome-dark.png)
 
@@ -26,7 +26,15 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in 0.7 — Modern workspace
+## New in 0.8 source — Project workspace
+
+Edit automation files alongside your terminal sessions with the locally bundled Monaco editor. File tabs, YAML diagnostics and Ansible snippets, JSON language services, and Python/Jinja editing support a complete edit/review/save workflow. Git status and diffs are read-only. Saves detect external changes and retain up to twenty private backup versions per file outside the project.
+
+Ansible runs require an explicitly trusted project, saved playbook and inventory, and review of the selected mode and targets. Use Syntax, Check + diff or Run, then follow task/host results and cancel an active controller when needed. Ansible Core and Runner must be installed separately: macOS/Linux use a local Python environment; Windows uses WSL. AI file proposals open a diff, apply to the editor, and require a separate save; they never start commands or playbooks automatically. See [Project workspace](docs/PROJECT-WORKSPACE.md).
+
+The 0.8 source passed **200/200 backend tests** with no skips, **97/97 existing interface checks**, **13/13 project interface checks**, and **7/7 real localhost Ansible checks**. The interface runs recorded no browser errors. The localhost checks used Python 3.14.8, Ansible Core 2.21.5 and Runner 2.4.3. No local Electron window was launched. Native CI and publication are pending; real WSL, device collections and packaged interactive behavior remain unverified. The download above remains v0.7 until a new preview is published.
+
+## Modern workspace added in 0.7
 
 The 0.7 preview introduces TermForge's own slate and teal interface: a horizontal Sessions/Commands/Active switcher, consistent vector icons and app mark, a welcome screen, clearer dialogs and a refined AI Assistant. Light/dark modes and optional Solarized interface matching remain available. Session management, tab groups, commands and explicit AI review retain their existing workflows. See [the modern interface guide](docs/MODERN-INTERFACE.md).
 
@@ -78,6 +86,9 @@ This 0.4 image uses synthetic sessions and output in a headless browser; it does
 
 ## Included
 
+- Local project editor with file tabs, YAML/JSON assistance, Python/Jinja editing, reviewed Git status/diffs, conflict-checked saves and private backup history.
+- Explicitly trusted Ansible syntax, check/diff and run workflows with target review, task/host results and cancellation; external Ansible Core/Runner required.
+- AI whole-file proposals with a diff review and separate apply/save steps.
 - Optional AI Assistant with local Ollama or the OpenRouter free router, explicit context sharing, streaming/cancellation and reviewed commands pinned to their original terminal.
 - SSH, interactive SFTP, and local shells through installed system tools; native Telnet and Raw TCP connections; serial device selection and connection settings.
 - Saved session folders, filtering, Quick Connect, Connect Bar, multi-selection and selected-field bulk editing.
@@ -103,6 +114,8 @@ Install Node.js 24 and npm (the source requires Node.js 22 or newer). Native mod
 
 The `ssh` and `sftp` programs must be available on PATH for those protocols. On Windows, enable OpenSSH Client if they are missing. Local/Telnet/Raw/serial sessions do not require those executables. Python automation requires an installed Python 3 interpreter (`python3` on macOS/Linux, `python` on Windows); Python is not bundled.
 
+Project editing does not require Ansible. To execute playbooks, install Ansible Core and Runner in a compatible Python environment and select that interpreter in the project workspace. Windows requires a controller inside WSL. Git review requires an installed Git executable and the selected folder to be a repository root; linked worktrees, submodules and repository configuration that enables external execution are excluded. See [runtime setup and limits](docs/PROJECT-WORKSPACE.md).
+
 Get the source and start the application:
 
 ```sh
@@ -125,9 +138,11 @@ npm run test:ui
 npm run dist
 ```
 
-`npm run smoke` opens the desktop app and exercises a real local PTY and a temporary loopback SSH server, including new-host confirmation, password authentication, remote output, and changed-key refusal. It requires a graphical desktop and OpenSSH's `ssh`/`ssh-keygen` commands. The test uses an isolated application profile and known-hosts file and writes its result and screenshot to a temporary directory. It still uses your ordinary local shell environment.
+`npm run smoke` opens the desktop app and exercises a real local PTY and a temporary loopback SSH server, including new-host confirmation, password authentication, remote output, and changed-key refusal. It also checks the project editor through the actual Electron preload bridge: custom-protocol JSON worker messages/diagnostics, native clipboard copy/paste, a real fixture-file save, CSP behavior and absence of terminal writes from editor actions. Folder-selection results are stubbed; the smoke does not operate an interactive OS folder picker. It requires a graphical desktop and OpenSSH's `ssh`/`ssh-keygen` commands. The test uses an isolated application profile and known-hosts file and writes results/screenshots to a temporary directory. It still uses your ordinary local shell environment.
 
-The local 0.7.0 suite passed **156 backend tests and 97 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. Renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
+The expanded Electron smoke is configured for Linux CI only and has not yet run at this source revision. No local Electron window was launched. Current local 0.8 results are recorded above and in [the interface report](docs/UI-VERIFICATION.md). The historical local 0.7.0 suite passed **156 backend tests and 97 headless renderer checks**, with zero failures and no browser console errors. TCP/Telnet and TFTP tests use real loopback sockets; automation tests launch real Python interpreters with fixture terminal/screen callbacks. Serial tests use injected adapters and the installed SerialPortMock, not physical hardware. The established renderer checks use a synthetic bridge, actual validators and recorder generation; they do not open Electron or perform real connections, scripts or transfers. Install the headless browser first with `npx playwright install --with-deps chromium --only-shell` where needed.
+
+`npm run test:projects` exercises the project interface with real temporary files/Git and synthetic AI/Ansible events. `TERMFORGE_TEST_PYTHON=/absolute/path/to/venv/bin/python npm run test:ansible` exercises real Ansible against a temporary localhost fixture, including a temporary file write; it requires a separately installed compatible runtime. Neither harness launches Electron or contacts a network device.
 
 For v0.4, [native CI](https://github.com/distractedagain/termforge/actions/runs/38324020057) and [packaging](https://github.com/distractedagain/termforge/actions/runs/38324019614) passed at tagged source `0e9ae540293fac90d0c31649705fed6fdb2f2df3`. Both Mac architectures and Linux passed 92 backend tests each; Windows passed 89 with three POSIX-specific skips. Linux passed 63 headless interface checks. Both Mac packages passed strict recursive ad-hoc signature verification. The Windows package job required one retry after interpreter-start and UDP-fixture timeouts; it passed at the same commit without changing code or assertions. The [publisher](https://github.com/distractedagain/termforge/actions/runs/38325248387) validated all thirteen release assets. Anonymous downloads of the checksum manifest and four build records matched the public GitHub asset digests and tagged source.
 
@@ -144,6 +159,8 @@ The test and build workflows retain build artifacts. A separate, manually dispat
 TermForge launches system OpenSSH without a shell wrapper, passing arguments separately and preserving host-key checks. Saved sessions do not store password/private-key contents; the system agent may supply keys. SSH configuration aliases/proxy commands are ignored. Telnet, Raw TCP and TFTP do not encrypt network traffic. Python scripts run with your local user permissions, and enabled input recording can capture sensitive input. Review recordings before saving or replaying them.
 
 Configuration exports/history/snippets may reveal infrastructure or commands; output logs may contain secrets. The TFTP server starts only explicitly, defaults to loopback port 6969, permits one chosen client IP and shares one selected folder; uploads create new files without replacing existing files. See [Python automation](docs/PYTHON-AUTOMATION.md), [TFTP limits](docs/TFTP.md), and [SECURITY.md](SECURITY.md).
+
+Opening a project does not execute its code. Ansible actions require trust because inventory plugins, roles, lookups and project configuration can execute code even during syntax or check mode. Cancellation does not undo completed changes or guarantee that remote operations stopped. Private file history may contain secrets from earlier revisions; it is stored outside the repository, with restricted permissions where supported. AI attachment and online-sharing controls also apply to file proposals.
 
 ## Contributing and license
 
