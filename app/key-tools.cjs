@@ -5,11 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { spawn: spawnChild } = require('node:child_process');
+const { stripVTControlCharacters } = require('node:util');
 const { utils } = require('ssh2');
 
 const MAX_KEY_BYTES = 1024 * 1024;
 function validatePassphrase(value, { optional = false, allowUnencrypted = false } = {}) {
-  if (typeof value !== 'string' || Buffer.byteLength(value) > 1000 || /[\u0000\r\n]/u.test(value)) throw new Error('A passphrase must be one line and at most 1000 UTF-8 bytes.');
+  if (typeof value !== 'string' || Buffer.byteLength(value) > 1000 || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error('A passphrase must be one line without control characters and at most 1000 UTF-8 bytes.');
   if (!optional && !value && !allowUnencrypted) throw new Error('Enter a passphrase or explicitly choose an unencrypted private key.');
   if (!optional && value && value.length < 8) throw new Error('Use a passphrase of at least 8 characters.');
   return value;
@@ -87,7 +88,59 @@ function resolveTool(name, env, platform) {
   throw new Error(`${name} is unavailable. Install the OpenSSH client tools for this computer.`);
 }
 
-function createKeyTools({ dialog, getWindow = () => undefined, register, approve, spawn = spawnChild, env = process.env, platform = process.platform, tempRoot = os.tmpdir(), timeoutMs = 60000, removeTemporary = directory => fsp.rm(directory, { recursive: true, force: true }) } = {}) {
+// Native Windows OpenSSH uses _getwch() rather than redirected stdin:
+// https://github.com/PowerShell/openssh-portable/blob/latestw_all/contrib/win32/win32compat/misc.c
+// This private ConPTY is never attached to a terminal tab, logs or renderer.
+// Supply exactly one answer after its complete expected prompt; typing early
+// loses input because Windows readpassphrase() clears pending console input.
+function runPrivateKeyPty({ spawnPty, executable, args, cwd, env, responses, timeoutMs, signal }) {
+  const pending = responses.map(response => ({ ...response }));
+  return new Promise((resolve, reject) => {
+    let child, timer, subscription, exitSubscription, failure, buffer = '', outputBytes = 0, answered = 0, done = false;
+    const fail = error => { if (failure) return; failure = error; try { child?.kill(); } catch { /* Wait for owned process exit. */ } };
+    const aborted = () => fail(new Error('SSH key tools are closing.'));
+    const finish = code => {
+      if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener('abort', aborted);
+      subscription?.dispose(); exitSubscription?.dispose(); buffer = ''; for (const response of pending) response.value = '';
+      if (failure) reject(failure);
+      else if (code !== 0 || answered !== pending.length) reject(new Error('ssh-keygen could not complete this operation. Check the key format, passphrase, and installed OpenSSH version.'));
+      else resolve({ code, output: '' });
+    };
+    if (signal?.aborted) { reject(new Error('SSH key tools are closing.')); return; }
+    try {
+      child = spawnPty(executable, args, { cwd, env, name: 'xterm', cols: 240, rows: 30, useConpty: true });
+      try { exitSubscription = child.onExit(({ exitCode }) => finish(exitCode)); }
+      catch {
+        // node-pty also exposes EventEmitter's exit event. Keep an exit witness
+        // even if its typed subscription cannot initialize, before killing it.
+        const exited = code => finish(code);
+        child.on('exit', exited); exitSubscription = { dispose: () => child.removeListener('exit', exited) };
+        throw new Error('Could not initialize private OpenSSH exit monitoring.');
+      }
+      subscription = child.onData(chunk => {
+        outputBytes += Buffer.byteLength(chunk);
+        if (outputBytes > 128 * 1024) { fail(new Error('ssh-keygen returned too much output.')); return; }
+        if (failure || answered >= pending.length) return;
+        buffer = (buffer + chunk).slice(-8192);
+        const visible = stripVTControlCharacters(buffer).replace(/[\r\n]/gu, '');
+        const expected = pending[answered];
+        const pattern = expected.prompt === 'old' ? /Enter old passphrase: $/u : expected.prompt === 'same' ? /Enter same passphrase again: $/u : /Enter (?:new )?passphrase(?: for "[^"]*")? \(empty for no passphrase\): $/u;
+        if (pattern.test(visible)) {
+          const answer = expected.value; expected.value = ''; answered++; buffer = '';
+          try { child.write(`${answer}\r`); } catch { fail(new Error('Could not answer the private ssh-keygen prompt.')); }
+        }
+      });
+      signal?.addEventListener('abort', aborted, { once: true });
+      timer = setTimeout(() => fail(new Error(`ssh-keygen did not finish within ${Math.round(timeoutMs / 1000)} seconds.`)), timeoutMs);
+      if (signal?.aborted) aborted();
+    } catch {
+      if (child) fail(new Error('Could not initialize private OpenSSH key prompts.'));
+      else finish(-1);
+    }
+  });
+}
+
+function createKeyTools({ dialog, getWindow = () => undefined, register, approve, spawn = spawnChild, spawnPty = (file, args, options) => require('node-pty').spawn(file, args, options), env = process.env, platform = process.platform, tempRoot = os.tmpdir(), timeoutMs = 60000, removeTemporary = directory => fsp.rm(directory, { recursive: true, force: true }) } = {}) {
   const children = new Set(), stopping = new AbortController(); let busy = false, closed = false, activeOperation = null, cleanupFailure = null;
   const live = () => { if (closed) throw new Error('SSH key tools are closing.'); };
   function exclusive(callback) {
@@ -140,6 +193,10 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
       child.stdin.end(input);
     });
   }
+  function runKeygen(args, responses) {
+    if (platform === 'win32' && spawnPty) return runPrivateKeyPty({ spawnPty, executable: resolveTool('ssh-keygen', env, platform), args, cwd: tempRoot, env: childEnv, responses, timeoutMs, signal: stopping.signal });
+    return runTool('ssh-keygen', args, responses.map(response => `${response.value}\n`).join(''));
+  }
   async function approvedUnencrypted(request) {
     if (request.passphrase) return true;
     const input = { title: 'Save an unencrypted private key?', message: 'Anyone who can read this file can use this private key.', detail: 'The private key will have no passphrase. Its protection depends on your computer account and storage permissions.', accept: 'Save unencrypted key' };
@@ -181,7 +238,7 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
       return withTemporary(async directory => {
         const temporary = path.join(directory, 'private-key');
         const args = ['-q', '-t', request.type, ...(request.type === 'rsa' ? ['-b', '3072'] : []), '-a', '64', '-C', request.comment, '-f', temporary];
-        await runTool('ssh-keygen', args, `${request.passphrase}\n${request.passphrase}\n`);
+        await runKeygen(args, [{ prompt: 'new', value: request.passphrase }, { prompt: 'same', value: request.passphrase }]);
         return saveChecked(destination, temporary, request.passphrase, null, request.comment);
       });
     });
@@ -204,7 +261,7 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
           const temporary = path.join(directory, 'private-key');
           await fsp.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
           // ssh-keygen -p rewrites its input, so it only ever receives our copy.
-          await runTool('ssh-keygen', ['-q', '-p', '-o', '-a', '64', '-f', temporary], `${encrypted ? `${request.oldPassphrase}\n` : ''}${request.passphrase}\n${request.passphrase}\n`);
+          await runKeygen(['-q', '-p', '-o', '-a', '64', '-f', temporary], [...(encrypted ? [{ prompt: 'old', value: request.oldPassphrase }] : []), { prompt: 'new', value: request.passphrase }, { prompt: 'same', value: request.passphrase }]);
           return saveChecked(destination, temporary, request.passphrase, identity, key.comment);
         });
       } finally { bytes.fill(0); }
@@ -231,4 +288,4 @@ function createKeyTools({ dialog, getWindow = () => undefined, register, approve
   if (register) { register('keyToolsGenerate', generate); register('keyToolsConvert', convert); register('keyToolsAgentList', agentList); }
   return result;
 }
-module.exports = { createKeyTools, validateRequest, writeKeyPair };
+module.exports = { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty };

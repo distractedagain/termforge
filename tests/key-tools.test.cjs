@@ -9,7 +9,7 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { utils } = require('ssh2');
-const { createKeyTools, validateRequest, writeKeyPair } = require('../app/key-tools.cjs');
+const { createKeyTools, validateRequest, writeKeyPair, runPrivateKeyPty } = require('../app/key-tools.cjs');
 
 const passphrase = 'fixture passphrase ! $()';
 async function fixture(t, options = {}) {
@@ -20,6 +20,7 @@ async function fixture(t, options = {}) {
     tempRoot: directory,
     env: { ...process.env, SSH_AUTH_SOCK: '', SSH_ASKPASS: '/must/not/run', SSH_ASKPASS_REQUIRE: 'force', DISPLAY: ':99', WAYLAND_DISPLAY: 'fixture' },
     dialog: { showSaveDialog: async (_window, settings) => { calls.push(['save', settings]); return { canceled: false, filePath: destination }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [source] }), showMessageBox: async () => ({ response: 0 }) },
+    ...(options.spawn && !options.spawnPty ? { spawnPty: null } : {}),
     ...options,
   });
   t.after(async () => { await service.close(); await fsp.rm(directory, { recursive: true, force: true }); });
@@ -36,16 +37,21 @@ function fakeChild({ output = '', code = 0, stderr = '', delay = 0, hanging = fa
 }
 async function noTemporary(directory) { assert.equal((await fsp.readdir(directory)).filter(name => name.startsWith('termforge-key-')).length, 0); }
 
-test('creates an encrypted Ed25519 key through a private stdin pipe without argument/environment secrets', async t => {
+test('creates an encrypted Ed25519 key through private native prompts without argument/environment secrets', async t => {
   const observed = [];
-  const { service, destination, directory } = await fixture(t, { spawn(executable, args, options) { observed.push({ executable, args, options }); return spawn(executable, args, options); } });
+  const { service, destination, directory } = await fixture(t, {
+    spawn(executable, args, options) { observed.push({ executable, args, options }); return spawn(executable, args, options); },
+    spawnPty(executable, args, options) { observed.push({ executable, args, options }); return require('node-pty').spawn(executable, args, options); },
+  });
   const result = await service.generate({ type: 'ed25519', comment: 'fixture; $(touch never)', passphrase });
   assert.equal(result.encrypted, true); assert.equal(result.privatePath, destination); assert.equal(result.publicPath, `${destination}.pub`); assert.match(result.fingerprint, /^SHA256:/u);
   const bytes = await fsp.readFile(destination);
   assert.ok(utils.parseKey(bytes) instanceof Error); const key = utils.parseKey(bytes, passphrase); assert.ok(!(key instanceof Error)); assert.equal(key.type, 'ssh-ed25519');
   const publicKey = utils.parseKey(await fsp.readFile(`${destination}.pub`)); assert.ok(publicKey.getPublicSSH().equals(key.getPublicSSH()));
   assert.equal(observed.length, 1); const [call] = observed;
-  assert.equal(call.options.shell, false); assert.equal(call.options.detached, true); assert.equal(call.options.env.SSH_ASKPASS_REQUIRE, 'never');
+  if (process.platform === 'win32') assert.equal(call.options.useConpty, true);
+  else { assert.equal(call.options.shell, false); assert.equal(call.options.detached, true); }
+  assert.equal(call.options.env.SSH_ASKPASS_REQUIRE, 'never');
   assert.equal(call.options.env.DISPLAY, undefined); assert.equal(call.options.env.WAYLAND_DISPLAY, undefined); assert.equal(call.options.env.SSH_ASKPASS, undefined);
   assert.ok(!JSON.stringify(call).includes(passphrase)); assert.ok(!call.args.includes('-N') && !call.args.includes('-P'));
   if (process.platform !== 'win32') assert.equal((await fsp.stat(destination)).mode & 0o777, 0o600);
@@ -132,7 +138,7 @@ test('canceling a native path picker creates nothing and does not launch OpenSSH
 });
 
 test('invalid options and newline passphrases are rejected before subprocess or dialogs', () => {
-  for (const input of [{ type: 'rsa', comment: '', passphrase: 'short' }, { type: 'ed25519', comment: '', passphrase: 'fixture\nsecret' }, { type: 'ed25519', comment: '', passphrase: '😀'.repeat(260) }, { type: 'dsa', comment: '', passphrase }, { type: 'rsa', comment: 'injected\ncomment', passphrase }, { type: 'rsa', comment: '', passphrase, destination: '/unreviewed' }, { type: 'rsa', comment: '', passphrase, allowUnencrypted: 'yes' }]) assert.throws(() => validateRequest(input, false));
+  for (const input of [{ type: 'rsa', comment: '', passphrase: 'short' }, { type: 'ed25519', comment: '', passphrase: 'fixture\nsecret' }, { type: 'ed25519', comment: '', passphrase: 'fixture\x03secret' }, { type: 'ed25519', comment: '', passphrase: '😀'.repeat(260) }, { type: 'dsa', comment: '', passphrase }, { type: 'rsa', comment: 'injected\ncomment', passphrase }, { type: 'rsa', comment: '', passphrase, destination: '/unreviewed' }, { type: 'rsa', comment: '', passphrase, allowUnencrypted: 'yes' }]) assert.throws(() => validateRequest(input, false));
 });
 
 test('keygen failures discard diagnostic details and clean temporary source copies', async t => {
@@ -207,9 +213,71 @@ test('close reports failed temporary-file cleanup instead of silently declaring 
   t.after(() => fsp.rm(directory, { recursive: true, force: true }));
   const service = createKeyTools({ tempRoot: directory,
     dialog: { showSaveDialog: async () => ({ canceled: false, filePath: path.join(directory, 'chosen-key') }) },
-    spawn: fakeChild({ code: 1 }), removeTemporary: async () => { throw new Error('Synthetic cleanup failure'); },
+    spawn: fakeChild({ code: 1 }), spawnPty: null, removeTemporary: async () => { throw new Error('Synthetic cleanup failure'); },
   });
   await assert.rejects(service.generate({ type: 'ed25519', comment: '', passphrase }), /temporary files could not be removed/u);
   assert.equal(service.count, 0);
   await assert.rejects(service.close(), /temporary files could not be removed/u);
+});
+
+function privatePtyFixture({ timeoutMs = 1000, autoExitOnKill = true } = {}) {
+  const events = new EventEmitter(), writes = [], calls = [], controller = new AbortController(); let kills = 0;
+  const child = { onData: callback => { events.on('data', callback); return { dispose: () => events.off('data', callback) }; }, onExit: callback => { events.on('exit', callback); return { dispose: () => events.off('exit', callback) }; }, write: value => writes.push(value), kill: () => { kills++; if (autoExitOnKill) queueMicrotask(() => events.emit('exit', { exitCode: 1 })); } };
+  const start = responses => runPrivateKeyPty({ spawnPty: (...args) => { calls.push(args); return child; }, executable: '/synthetic/ssh-keygen', args: ['-q', '-p'], cwd: '/synthetic', env: { SSH_ASKPASS_REQUIRE: 'never' }, responses, timeoutMs, signal: controller.signal });
+  return { start, child, events, writes, calls, controller, get kills() { return kills; } };
+}
+
+test('private Windows prompts handle fragmented control sequences and send one answer only after each complete prompt', async () => {
+  const fixture = privatePtyFixture();
+  const result = fixture.start([{ prompt: 'old', value: 'old fixture secret' }, { prompt: 'new', value: passphrase }, { prompt: 'same', value: passphrase }]);
+  assert.deepEqual(fixture.writes, []);
+  fixture.events.emit('data', '\x1b[?25lEnter old pass'); assert.deepEqual(fixture.writes, []);
+  fixture.events.emit('data', 'phrase: \x1b[?25h'); assert.deepEqual(fixture.writes, ['old fixture secret\r']);
+  fixture.events.emit('data', '\r\nEnter new passphrase (empty for no passphrase): '); assert.equal(fixture.writes.length, 2);
+  fixture.events.emit('data', '\r\nEnter same passphrase again: '); assert.equal(fixture.writes.length, 3);
+  fixture.events.emit('exit', { exitCode: 0 }); assert.deepEqual(await result, { code: 0, output: '' });
+  assert.ok(!JSON.stringify(fixture.calls).includes(passphrase)); assert.equal(fixture.calls[0][2].useConpty, true);
+  assert.equal(fixture.events.listenerCount('data'), 0); assert.equal(fixture.events.listenerCount('exit'), 0);
+});
+
+test('private Windows generation accepts old and current OpenSSH prompt spelling', async () => {
+  for (const prompt of ['Enter passphrase (empty for no passphrase): ', 'Enter passphrase for "C:\\fixture\\private-key" (empty for no passphrase): ']) {
+    const fixture = privatePtyFixture(); const result = fixture.start([{ prompt: 'new', value: '' }, { prompt: 'same', value: '' }]);
+    fixture.events.emit('data', prompt); fixture.events.emit('data', '\r\nEnter same passphrase again: '); fixture.events.emit('exit', { exitCode: 0 });
+    await result; assert.deepEqual(fixture.writes, ['\r', '\r']);
+  }
+});
+
+test('a wrong private prompt never receives a secret and times out with no diagnostic disclosure', async () => {
+  const fixture = privatePtyFixture({ timeoutMs: 15 }); const result = fixture.start([{ prompt: 'old', value: passphrase }]);
+  fixture.events.emit('data', 'synthetic private diagnostic\r\nEnter same passphrase again: ');
+  await assert.rejects(result, error => /did not finish/u.test(error.message) && !error.message.includes('synthetic'));
+  assert.deepEqual(fixture.writes, []); assert.equal(fixture.kills, 1);
+});
+
+test('private prompt shutdown waits for the actual ConPTY exit and ignores later prompt output', async () => {
+  const fixture = privatePtyFixture({ autoExitOnKill: false }); let finished = false;
+  const result = fixture.start([{ prompt: 'new', value: passphrase }]).catch(error => { finished = true; return error; });
+  fixture.controller.abort(); fixture.events.emit('data', 'Enter passphrase (empty for no passphrase): ');
+  await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(finished, false); assert.equal(fixture.kills, 1); assert.deepEqual(fixture.writes, []);
+  fixture.events.emit('exit', { exitCode: 1 }); assert.match((await result).message, /closing/u);
+});
+
+test('private prompt output is bounded and a successful exit with unanswered prompts cannot succeed', async () => {
+  const fixture = privatePtyFixture(); const result = fixture.start([{ prompt: 'new', value: passphrase }]);
+  fixture.events.emit('data', 'x'.repeat(128 * 1024 + 1)); await assert.rejects(result, /too much output/u); assert.equal(fixture.kills, 1); assert.deepEqual(fixture.writes, []);
+  const early = privatePtyFixture(); const earlyResult = early.start([{ prompt: 'new', value: passphrase }]); early.events.emit('exit', { exitCode: 0 }); await assert.rejects(earlyResult, /could not complete/u);
+});
+
+test('private prompt subscription failures kill the child and await its exit before releasing the operation', async () => {
+  for (const broken of ['onData', 'onExit']) {
+    const fixture = privatePtyFixture({ autoExitOnKill: false }); let finished = false;
+    fixture.child[broken] = () => { throw new Error('Synthetic subscription failure'); };
+    fixture.child.on = (_event, callback) => fixture.events.on('legacy-exit', callback);
+    fixture.child.removeListener = (_event, callback) => fixture.events.off('legacy-exit', callback);
+    const result = fixture.start([{ prompt: 'new', value: passphrase }]).catch(error => { finished = true; return error; });
+    await new Promise(resolve => setTimeout(resolve, 5)); assert.equal(finished, false); assert.equal(fixture.kills, 1); assert.deepEqual(fixture.writes, []);
+    if (broken === 'onData') fixture.events.emit('exit', { exitCode: 1 }); else fixture.events.emit('legacy-exit', 1);
+    assert.match((await result).message, /Could not initialize/u); assert.equal(fixture.events.listenerCount('legacy-exit'), 0);
+  }
 });

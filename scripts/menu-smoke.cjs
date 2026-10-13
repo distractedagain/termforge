@@ -18,6 +18,11 @@ module.exports = async ({ window, terminals, directory }) => {
   const fixture = await fs.mkdtemp(path.join(directory, 'menu-fixture-'));
   const rawFile = path.join(fixture, 'received.bin'), asciiFile = path.join(fixture, 'received.txt'), binaryFile = path.join(fixture, 'send.bin');
   const payload = Buffer.from(Array.from({ length: 256 }, (_, index) => index));
+  // All 256 outgoing octets must reach the peer unchanged. Its reply is a
+  // separate payload: valid terminal text followed by malformed UTF-8 bytes.
+  // Echoing every control octet would intentionally feed invalid ESC syntax to
+  // xterm and obscure the strict zero-unexpected-console-errors assertion.
+  const binaryReply = Buffer.concat([Buffer.from('BINARY_RECEIVED\r\n'), Buffer.from([0xff, 0xc0, 0x80])]);
   await fs.writeFile(binaryFile, payload);
   const originalOpenDialog = dialog.showOpenDialog, originalSaveDialog = dialog.showSaveDialog, originalMessageBox = dialog.showMessageBox;
   const originalWrite = terminals.write, originalBinary = terminals.writeBinary;
@@ -95,7 +100,14 @@ module.exports = async ({ window, terminals, directory }) => {
     await wait(() => find('File', 'Connect Local Shell').enabled, 'commands reenable after modal closes');
     report.nativeMenuModalGuard = true;
 
-    server = net.createServer(socket => { peer = socket; socket.on('error', () => {}); socket.on('data', bytes => { received = Buffer.concat([received, bytes]); socket.write(bytes); }); });
+    server = net.createServer(socket => {
+      peer = socket; socket.on('error', () => {});
+      let replied = false;
+      socket.on('data', bytes => {
+        received = Buffer.concat([received, bytes]);
+        if (!replied && received.length >= payload.length) { replied = true; socket.write(binaryReply); }
+      });
+    });
     server.listen(0, '127.0.0.1'); await once(server, 'listening');
     await evaluate(`const address = document.getElementById('connect-address'); address.value = ${JSON.stringify('raw://127.0.0.1:') } + ${server.address().port}; address.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));`);
     await wait(() => peer && terminals.list().some(entry => !originalIds.has(entry.id) && entry.session.protocol === 'raw'), 'isolated raw TCP terminal');
@@ -153,17 +165,18 @@ module.exports = async ({ window, terminals, directory }) => {
     assert.equal(binaryWrites.length, 0); assert.equal(received.length, 0);
     allowBinary = true; click('Transfer', 'Send Binary…');
     await wait(() => received.length === payload.length, 'binary bytes at real loopback peer');
-    await wait(async () => (await fs.readFile(rawFile)).length === textBytes.length + payload.length, 'binary echo in raw output log');
+    await wait(async () => (await fs.readFile(rawFile)).length === textBytes.length + binaryReply.length, 'peer binary reply in raw output log');
     assert.deepEqual(received, payload); assert.deepEqual(binaryWrites, [{ id:rawId, bytes:payload }]);
-    assert.deepEqual(await fs.readFile(rawFile), Buffer.concat([textBytes, payload]));
+    assert.deepEqual(await fs.readFile(rawFile), Buffer.concat([textBytes, binaryReply]));
     assert.equal(await fs.readFile(asciiFile, 'utf8'), 'Native red\r\nwhile paused\r\n');
     const raw = await evaluate(`return await window.termforge.terminalReadRaw(${JSON.stringify(rawId)});`);
-    assert.deepEqual(Buffer.from(raw.base64, 'base64'), Buffer.concat([textBytes, Buffer.from('while paused\r\n'), payload]));
+    assert.deepEqual(Buffer.from(raw.base64, 'base64'), Buffer.concat([textBytes, Buffer.from('while paused\r\n'), binaryReply]));
     click('View', 'Hex View');
-    await evaluate(`await wait(() => document.getElementById('hex-dialog').open, 'Hex View dialog'); if (!document.getElementById('hex-data').textContent.includes('00 01 02')) throw new Error('Hex View did not render byte data'); document.querySelector('#hex-dialog .dialog-close').click();`);
+    await evaluate(`await wait(() => document.getElementById('hex-dialog').open, 'Hex View dialog'); if (!document.getElementById('hex-data').textContent.includes('ff c0 80')) throw new Error('Hex View did not preserve malformed UTF-8 byte data'); document.querySelector('#hex-dialog .dialog-close').click();`);
     await wait(() => find('File', /^Raw Log Session/).enabled, 'menus resume after Hex View');
     click('File', /^Raw Log Session/); await wait(() => !terminals.outputState(rawId).log.enabled, 'stop raw log from native menu');
     report.nativeMenuBinaryReviewAndBytes = true; report.nativeMenuHexView = true;
+    report.nativeMenuByteFixtureScope = { sentOctets:'Every byte value 0–255, verified at the TCP peer', receivedBytes:'Terminal text/ANSI plus ff c0 80 malformed UTF-8, verified independently in raw log and Hex View' };
 
     const staleBinary = find('Transfer', 'Send Binary…'), staleDisconnect = find('File', 'Disconnect');
     const beforeChild = { writes:writes.length, binary:binaryWrites.length, pickers:pickerCalls, terminals:terminals.count };

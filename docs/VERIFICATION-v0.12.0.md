@@ -11,7 +11,7 @@ The native and in-app menus share a bounded command model, dynamic availability,
 | Check | Current result |
 | --- | --- |
 | Renderer build | Passed locally |
-| Full backend suite | 323 passed, zero skips or failures (final local source) |
+| Full backend suite | 328 passed, zero skips or failures; final key-tool subset 26 passed including added initialization regression |
 | Main interface suite | 108 passed locally; no console/page errors |
 | Project / credential-transfer / Quick Connect interfaces | 13 / 21 / 23 passed locally |
 | Shared menu UI | 24 passed locally; contrast, canceled log-mode changes and delayed bulk reconnect checked |
@@ -23,7 +23,9 @@ The native and in-app menus share a bounded command model, dynamic availability,
 
 Backend checks exercise actual temporary OpenSSH key generation/conversion and loopback SSH/TCP alongside injected transport and desktop fixtures. The key tests verify encryption, identity preservation, passphrase failure, no overwrite, bounded subprocesses and cleanup. A loopback SSH byte round trip covers all 256 byte values. Pure menu tests verify stale-command rejection, modal/child focus rules, bounded metadata, field editability and native menu rebuilds.
 
-Headless interface checks use synthetic application bridges. They exercise actual renderer behavior without opening Electron, reading personal keys, contacting external servers or printing. Native Linux smoke separately uses the real application protocol, IPC, native Menu objects and local TCP/SSH fixtures; that evidence is pending at this point.
+Headless interface checks use synthetic application bridges. They exercise actual renderer behavior without opening Electron, reading personal keys, contacting external servers or printing. Native Linux smoke separately uses the real application protocol, IPC, native Menu objects and local TCP/SSH fixtures. Its initial run passed the new menu assertions but failed the strict console-error check because the test peer echoed malformed terminal escape sequences. The fixture now checks all 256 outgoing byte values at the peer and separately checks incoming ANSI/text plus malformed UTF-8 bytes in the raw log and Hex View. Console-error assertions remain unchanged; the full corrected run is pending.
+
+The first platform run also exposed Windows OpenSSH console-only passphrase input: five real key-generation/conversion checks failed while 310 other checks passed and eight were skipped. That release candidate is not published. The Windows fix uses a private ConPTY console with ordered prompt checks, bounded output/time and shutdown draining. A complete platform rerun is required before release.
 
 ## Limits
 
