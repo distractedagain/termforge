@@ -36,7 +36,9 @@ The sidebar follows the SecureCRT macOS reference more closely: full vertical **
 
 The caption's close control collapses the content while leaving the manager rail visible. Select a rail tab to reopen the panel at its previous width. Arrow keys, Home and End move focus among the rail tabs; Enter or Space opens the focused manager. The **More session actions** button exposes existing session/folder actions, and keyboard folder selection keeps the highlighted item and connection target in agreement. Project mode retains its existing separate explorer.
 
-The renderer build and 108 headless interface checks passed, including 11 new sidebar checks; cross-platform release verification is in progress. The download above remains v0.10.0 until publication. See the [0.11 release notes](docs/RELEASE-v0.11.0.md) and [verification record](docs/VERIFICATION-v0.11.0.md). Floating managers, pin/auto-hide behavior and complete SecureCRT parity are not included.
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38419528717) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38419535573) passed at source `2d8ba8f7316234ab421e7627738e8b7ed59262f0`. Both Macs and Linux each passed 273 backend tests and seven localhost Ansible checks; Windows passed 266 backend tests with seven expected platform-specific skips. Linux passed 165 interface checks, including 108 main-workspace checks with 11 new sidebar checks, plus the real Electron window/SSH/SFTP/editor/PTY smoke. Both Mac packages passed ad-hoc signature integrity checks.
+
+Tag and publication checks remain pending; the download above remains v0.10.0. See the [0.11 release notes](docs/RELEASE-v0.11.0.md) and [verification record](docs/VERIFICATION-v0.11.0.md). Installed-package interaction and native macOS appearance remain unverified. Floating managers, pin/auto-hide behavior and complete SecureCRT parity are not included.
 
 ## New in 0.10 — Native Quick Connect window
 

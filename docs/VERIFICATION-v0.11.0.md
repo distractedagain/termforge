@@ -1,33 +1,33 @@
 # TermForge 0.11.0 verification
 
-Status: the local renderer build and 108 headless interface checks passed on October 13, 2026, with no console/page errors. Full backend checks, platform CI, installer builds, tag verification and publication remain pending. The public download remains v0.10.0 until the new release is verified and published. Earlier evidence is preserved in the [0.10 verification record](VERIFICATION-v0.10.0.md).
+Status: all four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38419528717) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38419535573) passed on October 13, 2026, at source `2d8ba8f7316234ab421e7627738e8b7ed59262f0`. Tag verification and publication remain pending; the public download remains v0.10.0. Earlier evidence is preserved in the [0.10 verification record](VERIFICATION-v0.10.0.md).
 
 ## Scope
 
-This update changes the docked manager markup, scoped styling and workspace behavior: a vertical text rail, compact captions/toolbars, consistent inset trees, collapse/reopen with retained width, keyboard rail navigation and existing context actions exposed through a More button. It also keeps the selection highlight and connection target in agreement when navigating from an individual session to a folder. Project mode continues to hide the terminal managers in favor of its own explorer.
-
-Light-mode managers use blue selection and cyan folders. Dark mode and optional matching interface palettes use their existing colors. The sidebar styling is scoped so terminal colors and the rest of the workspace retain their appearance.
+The docked managers gain a vertical text rail, compact captions/toolbars, inset trees, collapse/reopen with retained width, keyboard navigation and a More actions button. Selection highlighting and folder connection targets remain consistent. Light-mode blue selection/cyan folders and dark/matching palettes are scoped to the managers. Project mode retains its own explorer.
 
 ## Evidence checklist
 
 | Check | Current result | Meaning |
 | --- | --- | --- |
 | Renderer build | Passed | Application, Quick Connect and editor-worker bundles build locally |
-| Main interface suite and sidebar screenshots | 108 passed, including 11 sidebar checks; no console/page errors | Synthetic bridge checks for manager navigation, selection, collapse, persistence, actions, themes and compact layouts |
-| Project, secure-connection and Quick Connect interface suites | Pending | Regression coverage for existing interfaces |
-| Full backend suite | Pending | Existing backend behavior at the new revision |
-| Production dependency audit | Pending | Dependency audit result at verification time |
-| macOS ARM64/Intel, Windows x64 and Linux x64 CI | Pending | Platform source/test results |
-| Linux native Electron smoke | Pending | Existing real Electron window, IPC, terminal, credential/transfer and editor fixtures |
-| Four platform installer builds | Pending | Package construction and build-record provenance |
-| Both macOS ad-hoc signature integrity checks | Pending | Signature integrity; does not provide Apple notarization |
-| Tested source SHA and release tag | Pending | Exact source identity |
+| Main interface suite and sidebar screenshots | 108 passed locally and in Linux CI, including 11 sidebar checks; no console/page errors | Synthetic navigation, selection, collapse, persistence, actions, themes and compact layouts |
+| Other Linux interface suites | 13 project, 21 secure-connection and 23 Quick Connect checks passed | 165 total interface checks including the main suite |
+| Backend tests in platform CI | 273 passed on each Mac and Linux; Windows 266 passed with seven expected platform-specific skips | No failures; exact source above |
+| Real localhost Ansible checks | Seven passed on each Mac and Linux | Isolated syntax/check/run/failure/cancellation fixtures |
+| Production dependency audits | Zero vulnerabilities on all four platforms | Dependency audit at verification time |
+| Linux native Electron smoke | Passed | Real window, IPC, PTY, SSH/SFTP and editor fixtures |
+| Four platform installer builds | Passed | Package construction, build records and retained artifacts |
+| Both macOS ad-hoc signature integrity checks | Passed | Signature integrity; no Apple notarization |
+| Release tag verification | Pending | Tag must resolve to tested source |
 | Publisher and anonymous public-asset verification | Pending | Installer/build-record/checksum consistency and public release identity |
+
+The native Linux run verified Quick Connect isolation/singleton/cancellation and one parent PTY, loopback SSH/SFTP and host-key handling, masked authentication, clipboard/editor saves and no editor-to-terminal writes. Both screenshots succeeded; the JSON worker returned ten messages with no worker errors or CSP violations. Linux refused insecure `basic_text` storage; secure storage was unavailable. Identity/folder selection and host approval used fixture responses.
 
 ## Verification limits
 
-Headless Chromium checks use synthetic connection data and application bridges. They verify renderer behavior and geometry, not installed applications, native macOS window decorations or external-server interoperability. No Electron window is launched on the development laptop for this update. Screenshots must identify their synthetic/headless origin when published.
+Headless Chromium uses synthetic connections and bridges. It verifies renderer behavior and geometry, not installed applications or native macOS appearance/accessibility. Native Electron ran only in Linux CI under Xvfb; no Electron window was launched on the development laptop.
 
-The macOS distribution remains ad-hoc signed without Developer ID or notarization; Windows packages remain unsigned. Installer construction and checksum verification do not establish successful installation or interactive packaged behavior. Successful native macOS Keychain, Windows DPAPI and secure Linux keyring save/unlock remain outside this sidebar change's verification scope. Physical serial devices, external hosts, real WSL and live AI inference are likewise not established by these checks.
+macOS packages remain ad-hoc signed without Developer ID/notarization; Windows packages are unsigned. Package construction does not establish installed interaction. Successful native Keychain/DPAPI/secure-keyring save/unlock, physical serial devices, external hosts, real WSL and live AI inference remain unverified.
 
-Floating managers, pin/auto-hide behavior and full SecureCRT/SecureFX equivalence are not claimed. Prior-version results remain historical until corresponding checks pass at the new source revision.
+Floating managers, pin/auto-hide and full SecureCRT/SecureFX equivalence are not claimed.
