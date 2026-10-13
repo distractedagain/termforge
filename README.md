@@ -36,7 +36,7 @@ Headless application preview using synthetic profiles; no device is connected.
 
 The SFTP workspace adds **New folder**, **Rename**, **Delete** and **Permissions**. Actions review the exact remote target, require native confirmation and recheck metadata before applying. Renames do not overwrite existing destinations; deletion is limited to regular files and empty directories; chmod refuses special permission bits. See the [file-transfer guide](docs/SECURE-CONNECTIONS.md).
 
-This is another step toward functional coverage. Full XML import, recursive transfers/synchronization, detached windows, session locking and legacy modem protocols remain missing. Platform release checks are pending; the public download remains v0.12.0. See [0.13 verification](docs/VERIFICATION-v0.13.0.md).
+This is another step toward functional coverage. Full XML import, recursive transfers/synchronization, detached windows, session locking and legacy modem protocols remain missing. All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38440766909) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38440765762) passed at source `fe4b4359d418db7dab09fd9a1e49c62f0717272d`. Both Macs and Linux passed 383 backend tests each; Windows passed 375 with eight expected skips. Linux passed 240 interface checks and real Electron import/SFTP checks. Publication is pending; the public download remains v0.12.0. See [0.13 verification](docs/VERIFICATION-v0.13.0.md).
 
 ## New in 0.12 — Shared desktop menus and terminal tools
 
