@@ -8,9 +8,9 @@ This 0.8 preview uses a temporary localhost project; no device is connected. It 
 
 ## Download
 
-[Download the TermForge v0.8.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.8.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
+[Download the TermForge v0.9.0 public preview](https://github.com/distractedagain/termforge/releases/tag/v0.9.0) for macOS Apple Silicon/Intel, Windows x64, or Linux x64. The release includes checksums and a build record for each platform. macOS packages use ad-hoc signatures and are not notarized; Windows packages are unsigned. See the release notes for requirements and verification limits.
 
-Earlier previews remain available: [TermForge v0.7.0](https://github.com/distractedagain/termforge/releases/tag/v0.7.0), [v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
+Earlier previews remain available: [TermForge v0.8.0](https://github.com/distractedagain/termforge/releases/tag/v0.8.0), [v0.7.0](https://github.com/distractedagain/termforge/releases/tag/v0.7.0), [v0.6.1](https://github.com/distractedagain/termforge/releases/tag/v0.6.1), [v0.5.0](https://github.com/distractedagain/termforge/releases/tag/v0.5.0), [v0.4.0](https://github.com/distractedagain/termforge/releases/tag/v0.4.0), [v0.3.0](https://github.com/distractedagain/termforge/releases/tag/v0.3.0) and [Harbor Terminal v0.2.0](https://github.com/distractedagain/termforge/releases/tag/v0.2.0). Version 0.6.1 introduced the AI Assistant; v0.5 and earlier predate it. Version 0.4 and earlier also lack the 0.5 tab groups and detailed snapshots. Version 0.2 retains the Harbor name. Existing Harbor configuration folders and the `HARBOR_DATA_DIR` override are still recognized.
 
 The source is available under the MIT license. Core terminal features require no subscription, activation, account, or cloud service. Optional free online AI requires your own OpenRouter account and API key; local AI uses a separately installed Ollama model.
 
@@ -26,7 +26,7 @@ This creates an exception for this app. Follow [Apple's opening instructions](ht
 
 This is an original implementation informed by [SecureCRT's public product description](https://www.vandyke.com/products/securecrt/) and public documentation. No VanDyke source code, executable disassembly, or copied artwork is included. The Python bridge independently implements a limited set of familiar public method names; full SecureCRT script compatibility is not established. TermForge is independent of VanDyke Software; SecureCRT is its trademark.
 
-## New in the 0.9 source — Credentials and file transfer
+## New in 0.9 — Credentials and file transfer
 
 ![Quick Connect with named credentials and ordered authentication](docs/images/quick-connect-v0.9.png)
 
@@ -34,7 +34,11 @@ Headless preview with synthetic connection data; native OS security prompts are 
 
 Quick Connect now supports named credentials, ordered authentication methods, a graphical SFTP workspace and an optional startup form. Save encrypted usernames/passwords in **Transfer → Credentials** and select them from Quick Connect or Session Options. Managed SSH verifies and pins the server key before accessing credentials; first use of a credential with a host/key requires separate approval. Insecure or unavailable OS storage cannot save passwords.
 
-**Transfer → File Transfer** opens a local/remote browser with SFTP or SCP copies, queued progress, cancellation and explicit overwrite review. Both modes currently handle regular files; SCP also requires SFTP for browsing and staging. Existing OpenSSH terminal connections retain advanced SSH options. See the [credential and transfer guide](docs/SECURE-CONNECTIONS.md) for platform guarantees, usage and remaining limits. The download link above remains the last published release until 0.9 verification and publication finish.
+**Transfer → File Transfer** opens a local/remote browser with SFTP or SCP copies, queued progress, cancellation and explicit overwrite review. Both modes currently handle regular files; SCP also requires SFTP for browsing and staging. Existing OpenSSH terminal connections retain advanced SSH options. See the [credential and transfer guide](docs/SECURE-CONNECTIONS.md) for platform guarantees, usage and remaining limits.
+
+All four [CI jobs](https://github.com/distractedagain/termforge/actions/runs/38407745105) and [installer builds](https://github.com/distractedagain/termforge/actions/runs/38407744570) passed at tagged source `90f81ac7e2620f837b344b287cc68816df6bca2f`. Both Macs and Linux passed 251 backend tests each; Windows passed 244 with seven expected platform-specific skips. Linux passed 130 interface checks and a native Electron SSH/SFTP/authentication smoke. Both Macs and Linux each passed seven real localhost Ansible checks. Native Linux verifies refusal of insecure storage; successful native Keychain/DPAPI/secure-keyring save/unlock and installed-package interaction remain unverified. See the [0.9 verification record](docs/UI-VERIFICATION.md).
+
+The [v0.9.0 publisher](https://github.com/distractedagain/termforge/actions/runs/38408984181) checked all eight packages and four build records before publication. Public verification confirmed thirteen assets, twelve checksum entries and the source tag. The manifest and four build records were anonymously downloaded and independently hashed; installer checks compared the manifest with GitHub's SHA-256 metadata, without downloading or running the installers again.
 
 ## New in 0.8 — Project workspace
 
