@@ -8,7 +8,7 @@ fs.mkdirSync(directory, { recursive: true });
 const env = { ...process.env, TERMFORGE_DATA_DIR: path.join(directory, 'profile'), TERMFORGE_SMOKE_DIR: directory };
 delete env.ELECTRON_RUN_AS_NODE;
 const ciNoSandbox = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.TERMFORGE_CI_NO_SANDBOX === '1';
-const child = spawn(require('electron'), [...(ciNoSandbox ? ['--no-sandbox'] : []), '.', '--termforge-smoke'], { cwd: path.join(__dirname, '..'), env, stdio: 'inherit' });
+const child = spawn(require('electron'), [...(ciNoSandbox ? ['--no-sandbox', '--disable-gpu'] : []), '.', '--termforge-smoke'], { cwd: path.join(__dirname, '..'), env, stdio: 'inherit' });
 const timeout = setTimeout(() => { child.kill('SIGKILL'); console.error('Smoke test timed out'); }, 90000);
 child.on('error', (error) => { clearTimeout(timeout); console.error(error); process.exitCode = 1; });
 child.on('exit', (code, signal) => { clearTimeout(timeout); if (signal) console.error(`Electron stopped with signal ${signal}`); process.exitCode = code === 0 ? 0 : 1; });

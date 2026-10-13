@@ -2,6 +2,22 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const ciGraphics = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.TERMFORGE_CI_NO_SANDBOX === '1';
+
+async function screenshot(window, directory, name) {
+  try {
+    const image = await window.webContents.capturePage();
+    if (image.isEmpty()) throw new Error('Desktop screenshot is empty');
+    await fs.writeFile(path.join(directory, name), image.toPNG());
+    console.log(`PASS smoke screenshot: ${name}`);
+    return { screenshotCaptured: true, file: name };
+  } catch (error) {
+    if (!ciGraphics) throw error;
+    const captureError = error.message || String(error);
+    console.warn(`WARN CI screenshot unavailable (${name}): ${captureError}. Behavioral checks remain strict.`);
+    return { screenshotCaptured: false, captureError };
+  }
+}
 
 // Runs only when the explicit desktop smoke command is launched. CI exercises
 // the real custom protocol, preload bridge and operating-system clipboard.
@@ -39,6 +55,7 @@ async function projectSmoke(window, terminals, directory) {
     throw new Error('Native Copy did not return the complete project document');
   };
   try {
+    console.log('START native project IPC and editor worker checks');
     terminals.write = (...args) => { editorWrites.push(args[0]); return originalWrite.apply(terminals, args); };
     await evaluate(`
       if (location.href !== 'termforge://app/index.html') throw new Error('Editor smoke must use the real termforge protocol');
@@ -69,6 +86,7 @@ async function projectSmoke(window, terminals, directory) {
       `);
     } finally { dialog.showOpenDialog = originalDialog; }
     assert.equal(dialogCalls, 1, 'The real projectOpen IPC must invoke the native dialog once');
+    console.log('PASS native projectOpen IPC and real filesystem tree (folder-picker return stubbed)');
     await evaluate(`
       document.querySelector('#project-files [data-path="playbook.yml"]').click();
       await wait(() => document.querySelector('#project-editor .monaco-editor') && document.activeElement?.closest('#project-editor'), 'focused Monaco editor');
@@ -84,6 +102,7 @@ async function projectSmoke(window, terminals, directory) {
       await wait(() => document.getElementById('project-language').textContent === 'YAML · Saved', 'real project save completed');
     `);
     assert.equal(await fs.readFile(path.join(project, 'playbook.yml'), 'utf8'), editedPlaybook, 'Editor save must reach the actual fixture file');
+    console.log('PASS native Select All/Copy/Paste IPC and YAML save to disk');
     await evaluate(`
       document.querySelector('#project-files [data-path="fixture.json"]').click();
       await wait(() => document.getElementById('project-document-path').textContent === 'fixture.json' && document.activeElement?.closest('#project-editor'), 'focused JSON model');
@@ -103,13 +122,15 @@ async function projectSmoke(window, terminals, directory) {
     assert.deepEqual(state.violations, [], 'Editor must not violate the packaged CSP');
     assert.ok(state.workers.some(worker => worker.label === 'json' && worker.messages > 0), 'A real JSON worker must respond');
     assert.ok(state.workers.every(worker => worker.errors.length === 0), JSON.stringify(state.workers));
-    await fs.writeFile(path.join(directory, 'project-editor.png'), (await window.webContents.capturePage()).toPNG());
     await fs.writeFile(path.join(directory, 'project-workers.json'), JSON.stringify(state, null, 2));
+    console.log('PASS custom-protocol JSON worker, corrected diagnostics, JSON save, CSP, and zero editor-to-terminal writes');
     return { projectNativeDialog:true, projectNativeClipboard:true, projectSaveToDisk:true, projectNoTerminalWrites:true, jsonCustomProtocolWorker:true, jsonDiagnostics:true, editorCsp:true };
   } catch (error) {
-    await window.webContents.capturePage().then(image => fs.writeFile(path.join(directory, 'project-failure.png'), image.toPNG())).catch(() => {});
     const state = await evaluate(`return {workers:window.__termforgeEditorSmoke?.workers, violations:window.__termforgeEditorSmoke?.violations, diagnostics:document.getElementById('project-diagnostics')?.textContent, error:document.getElementById('project-error-text')?.textContent};`).catch(() => null);
-    await fs.writeFile(path.join(directory, 'project-failure.json'), JSON.stringify({error:error.stack || String(error), state}, null, 2)).catch(() => {});
+    const failure = {error:error.stack || String(error), state};
+    await fs.writeFile(path.join(directory, 'project-failure.json'), JSON.stringify(failure, null, 2)).catch(() => {});
+    failure.screenshot = await screenshot(window, directory, 'project-failure.png').catch(capture => ({screenshotCaptured:false, captureError:capture.message || String(capture)}));
+    await fs.writeFile(path.join(directory, 'project-failure.json'), JSON.stringify(failure, null, 2)).catch(() => {});
     throw error;
   } finally {
     dialog.showOpenDialog = originalDialog; terminals.write = originalWrite; clipboard.writeText(oldClipboard);
@@ -127,6 +148,7 @@ async function projectSmoke(window, terminals, directory) {
 module.exports = async ({ window, terminals, store }) => {
   const errors = [];
   window.webContents.on('console-message', (details) => { if (details.level === 'error' || /Could not create web worker|Falling back to loading web worker/i.test(details.message)) errors.push(details.message); });
+  console.log('START native isolation, PTY, terminal UI, broadcast, and preferences checks');
   const result = await window.webContents.executeJavaScript(`(async () => {
     const wait = async (predicate, description) => {
       const end = Date.now() + 12000;
@@ -187,12 +209,25 @@ module.exports = async ({ window, terminals, store }) => {
   })()`);
   assert.equal(result.realPTY, true);
   assert.equal(errors.length, 0, errors.join('\n'));
+  console.log('PASS native isolation, PTY, terminal UI, broadcast, and preferences checks');
   await new Promise((resolve) => setTimeout(resolve, 350));
   const directory = process.env.TERMFORGE_SMOKE_DIR;
+  console.log('START isolated loopback SSH checks');
   const ssh = await require('./ssh-smoke.cjs')(directory);
-  await fs.writeFile(path.join(directory, 'desktop.png'), (await window.webContents.capturePage()).toPNG());
+  console.log('PASS isolated loopback SSH authentication, commands, and changed-host-key refusal');
+  const report = { ...result, ...ssh, behavioralChecksPassed:false, screenshots:{}, activeTerminals:terminals.count, savedProfiles:store.load().sessions.length };
+  const persist = () => fs.writeFile(path.join(directory, 'result.json'), JSON.stringify(report, null, 2));
+  await persist();
+  console.log('START terminal screenshot capture');
+  report.screenshots.desktop = await screenshot(window, directory, 'desktop.png');
+  await persist();
   const project = await projectSmoke(window, terminals, directory);
   assert.equal(errors.length, 0, errors.join('\n'));
-  await fs.writeFile(path.join(directory, 'result.json'), JSON.stringify({ ...result, ...ssh, ...project, activeTerminals: terminals.count, savedProfiles: store.load().sessions.length }, null, 2));
-  console.log('TermForge desktop smoke test passed: ' + JSON.stringify({ ...result, ...ssh, ...project }));
+  Object.assign(report, project, {behavioralChecksPassed:true});
+  await persist();
+  console.log('START project editor screenshot capture');
+  report.screenshots.projectEditor = await screenshot(window, directory, 'project-editor.png');
+  report.screenshotCaptured = Object.values(report.screenshots).every(capture => capture.screenshotCaptured);
+  await persist();
+  console.log('TermForge desktop smoke behavioral checks passed: ' + JSON.stringify(report));
 };
