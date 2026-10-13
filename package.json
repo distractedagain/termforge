@@ -1,7 +1,7 @@
 {
   "name": "termforge",
   "productName": "TermForge",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "An independent open-source terminal, SSH session manager, and automation client",
   "main": "app/main.cjs",
   "license": "MIT",

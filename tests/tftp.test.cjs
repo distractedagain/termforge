@@ -33,6 +33,7 @@ async function client(t) {
   t.after(() => new Promise(resolve => { try { socket.close(resolve); } catch { resolve(); } }));
   return {
     socket,
+    queuedCount: () => queued.length,
     send(bytes, port, address = '127.0.0.1') { return new Promise((resolve, reject) => socket.send(bytes, port, address, error => error ? reject(error) : resolve())); },
     receive(timeout = 1000) {
       if (queued.length) return Promise.resolve(queued.shift());
@@ -43,6 +44,30 @@ async function client(t) {
       });
     },
   };
+}
+async function receiveExpected(peer, expected, { remote, previous = [], onDuplicate, timeout = 1000 } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const response = await peer.receive(Math.max(1, deadline - Date.now()));
+    if (Date.now() >= deadline) break;
+    assert.equal(response.remote.address, remote.address, 'Unexpected TFTP response address.');
+    assert.equal(response.remote.port, remote.port, 'Unexpected TFTP transfer ID.');
+    const matches = Buffer.isBuffer(expected)
+      ? response.bytes.equals(expected)
+      : response.bytes.length >= 4 && response.bytes.readUInt16BE(0) === expected.opcode && [expected.block].flat().includes(response.bytes.readUInt16BE(2));
+    // A current reply may equal a known reply when the client intentionally
+    // retransmits DATA. Accept it before considering stale server retries.
+    if (matches) return response;
+    if (previous.some(prior => prior.remote.address === response.remote.address && prior.remote.port === response.remote.port && prior.bytes.equals(response.bytes))) {
+      if (onDuplicate) await onDuplicate(response);
+      continue;
+    }
+    if (Buffer.isBuffer(expected)) assert.deepEqual(response.bytes, expected, 'Unexpected TFTP response packet.');
+    assert.ok(response.bytes.length >= 4, 'Truncated TFTP response.');
+    assert.equal(response.bytes.readUInt16BE(0), expected.opcode, 'Unexpected TFTP response opcode.');
+    assert.ok([expected.block].flat().includes(response.bytes.readUInt16BE(2)), 'Unexpected TFTP response block or error code.');
+  }
+  throw new Error('Timed out waiting for the expected TFTP response.');
 }
 async function fixture(t, options = {}) {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'termforge-tftp-'));
@@ -55,9 +80,12 @@ async function fixture(t, options = {}) {
 }
 async function download(peer, port, name, options = []) {
   await peer.send(request(1, name, 'octet', options), port);
-  const chunks = [], packets = []; let transferPort;
+  const chunks = [], packets = []; let transferPort, previous;
   while (true) {
-    const response = await peer.receive();
+    const response = previous ? await receiveExpected(peer, { opcode: 3, block: (packets.length + 1) & 0xffff }, {
+      remote: previous.remote, previous: [previous],
+      onDuplicate: response => peer.send(block(4, response.bytes.readUInt16BE(2)), response.remote.port),
+    }) : await peer.receive();
     const opcode = response.bytes.readUInt16BE(0);
     if (opcode === 5) throw Object.assign(new Error(response.bytes.subarray(4, -1).toString()), { code: response.bytes.readUInt16BE(2) });
     assert.equal(opcode, 3);
@@ -66,14 +94,64 @@ async function download(peer, port, name, options = []) {
     packets.push(response.bytes); chunks.push(response.bytes.subarray(4));
     await peer.send(block(4, response.bytes.readUInt16BE(2)), transferPort);
     if (response.bytes.length < 516) return { bytes: Buffer.concat(chunks), packets, transferPort };
+    previous = response;
   }
 }
-async function expectError(peer, bytes, port, expected) {
+async function expectError(peer, bytes, port, expected, previous) {
   await peer.send(bytes, port);
-  const response = await peer.receive(); assert.equal(response.bytes.readUInt16BE(0), 5);
+  const response = previous ? await receiveExpected(peer, { opcode: 5, block: expected }, { remote: previous.remote, previous: [previous] }) : await peer.receive();
+  assert.equal(response.bytes.readUInt16BE(0), 5);
   assert.ok([expected].flat().includes(response.bytes.readUInt16BE(2)));
   return response;
 }
+
+test('TFTP expected-response fixture ignores only known duplicates and accepts a current duplicate DATA reply', async () => {
+  const remote = { address: '127.0.0.1', port: 23456 };
+  const previous = { bytes: block(4, 0), remote }, current = { bytes: block(4, 1), remote };
+  const replies = [previous, current], duplicates = [];
+  const peer = { receive: async () => { assert.ok(replies.length, 'The expected reply was not accepted.'); return replies.shift(); } };
+  const response = await receiveExpected(peer, current.bytes, { remote, previous: [previous, current], onDuplicate: value => duplicates.push(value) });
+  assert.equal(response, current); assert.deepEqual(duplicates, [previous]); assert.equal(replies.length, 0);
+});
+
+test('TFTP expected-response fixture rejects wrong packets, blocks, addresses and transfer IDs', async () => {
+  const remote = { address: '127.0.0.1', port: 23456 }, previous = { bytes: block(4, 0), remote };
+  for (const [expected, response, pattern] of [
+    [block(4, 1), { bytes: block(4, 7), remote }, /Unexpected TFTP response packet/],
+    [block(4, 1), { bytes: block(4, 1, Buffer.from('extra')), remote }, /Unexpected TFTP response packet/],
+    [block(4, 1), { bytes: previous.bytes, remote: { ...remote, port: 23457 } }, /Unexpected TFTP transfer ID/],
+    [block(4, 1), { bytes: previous.bytes, remote: { ...remote, address: '127.0.0.2' } }, /Unexpected TFTP response address/],
+    [{ opcode: 5, block: 6 }, { bytes: block(4, 7), remote }, /Unexpected TFTP response opcode/],
+    [{ opcode: 3, block: 2 }, { bytes: block(3, 7, Buffer.from('data')), remote }, /Unexpected TFTP response block/],
+  ]) {
+    let calls = 0;
+    await assert.rejects(receiveExpected({ receive: async () => { calls++; return response; } }, expected, { remote, previous: [previous] }), pattern);
+    assert.equal(calls, 1, 'Unexpected packets must fail immediately, not be ignored until timeout.');
+  }
+});
+
+test('TFTP expected-response fixture keeps one deadline while duplicates continue arriving', { timeout: 1000 }, async () => {
+  const remote = { address: '127.0.0.1', port: 23456 }, previous = { bytes: block(4, 0), remote }, waits = [];
+  const peer = { receive: async timeout => { waits.push(timeout); assert.ok(waits.length <= 20, 'A duplicate stream must not restart the receive deadline.'); await sleep(5); return previous; } };
+  await assert.rejects(receiveExpected(peer, block(4, 1), { remote, previous: [previous], timeout: 25 }), /Timed out waiting for the expected TFTP response/);
+  assert.ok(waits.length > 0); assert.ok(waits.every(timeout => timeout > 0 && timeout <= 25));
+  assert.ok(waits.at(-1) <= waits[0]);
+});
+
+test('TFTP upload fixture consumes a queued duplicate WRQ acknowledgment before the current DATA acknowledgment', async t => {
+  const state = await fixture(t, { allowWrite: true, timeoutMs: 1000 }), peer = await client(t);
+  const write = request(2, 'duplicate-request.txt');
+  await peer.send(write, state.port);
+  const initial = await peer.receive(); assert.deepEqual(initial.bytes, block(4, 0));
+  await peer.send(write, state.port);
+  await until(() => peer.queuedCount() > 0);
+  const payload = Buffer.from('preserved exact bytes'), duplicates = [];
+  await peer.send(block(3, 1, payload), initial.remote.port);
+  await receiveExpected(peer, block(4, 1), { remote: initial.remote, previous: [initial], onDuplicate: response => duplicates.push(response) });
+  assert.ok(duplicates.length > 0); assert.ok(duplicates.every(response => response.bytes.equals(initial.bytes)));
+  assert.deepEqual(await fs.promises.readFile(path.join(state.root, 'duplicate-request.txt')), payload);
+  assert.equal(state.server.status().completedTransfers, 1);
+});
 
 test('TFTP downloads octet bytes from nested paths and terminates exact multiples with a zero block', async t => {
   const state = await fixture(t), peer = await client(t);
@@ -100,10 +178,11 @@ test('TFTP uploads publish a new private file atomically and duplicate DATA/fina
   assert.equal(files.length, 1); assert.match(files[0], /^\.termforge-tftp-.*\.part$/u);
   assert.equal(fs.existsSync(path.join(state.root, 'config.txt')), false);
   const first = Buffer.alloc(512, 65), final = Buffer.from('tail\0\xff', 'binary');
-  await peer.send(block(3, 1, first), tid); assert.deepEqual((await peer.receive()).bytes, block(4, 1));
-  await peer.send(block(3, 1, first), tid); assert.deepEqual((await peer.receive()).bytes, block(4, 1));
-  await peer.send(block(3, 2, final), tid); assert.deepEqual((await peer.receive()).bytes, block(4, 2));
-  await peer.send(block(3, 2, final), tid); assert.deepEqual((await peer.receive()).bytes, block(4, 2));
+  let previous = initial;
+  for (const [number, data] of [[1, first], [1, first], [2, final], [2, final]]) {
+    await peer.send(block(3, number, data), tid);
+    previous = await receiveExpected(peer, block(4, number), { remote: initial.remote, previous: [previous] });
+  }
   assert.deepEqual(await fs.promises.readFile(path.join(state.root, 'config.txt')), Buffer.concat([first, final]));
   assert.deepEqual(await fs.promises.readdir(state.root), ['config.txt']);
   if (process.platform !== 'win32') assert.equal((await fs.promises.stat(path.join(state.root, 'config.txt'))).mode & 0o777, 0o600);
@@ -117,13 +196,13 @@ test('TFTP uploads accept empty files and a zero-length final block after an exa
     const peer = await client(t);
     await peer.send(request(2, name), state.port);
     const initial = await peer.receive(); assert.deepEqual(initial.bytes, block(4, 0));
-    let number = 1;
+    let number = 1, previous = initial;
     if (payload.length) {
       await peer.send(block(3, number, payload), initial.remote.port);
-      assert.deepEqual((await peer.receive()).bytes, block(4, number)); number++;
+      previous = await receiveExpected(peer, block(4, number), { remote: initial.remote, previous: [previous] }); number++;
     }
     await peer.send(block(3, number), initial.remote.port);
-    assert.deepEqual((await peer.receive()).bytes, block(4, number));
+    await receiveExpected(peer, block(4, number), { remote: initial.remote, previous: [previous] });
     assert.deepEqual(await fs.promises.readFile(path.join(state.root, name)), payload);
   }
   assert.equal(state.server.status().completedTransfers, 2);
@@ -164,7 +243,7 @@ test('TFTP preserves existing files, rejects a final-publish collision and bound
   await peer.send(request(2, 'collision.txt'), state.port);
   const initial = await peer.receive(); assert.deepEqual(initial.bytes, block(4, 0));
   const collision = path.join(state.root, 'collision.txt'); await fs.promises.writeFile(collision, 'created concurrently');
-  await expectError(peer, block(3, 1, Buffer.from('replacement')), initial.remote.port, 6);
+  await expectError(peer, block(3, 1, Buffer.from('replacement')), initial.remote.port, 6, initial);
   await until(async () => !(await fs.promises.readdir(state.root)).some(name => name.endsWith('.part')));
   assert.equal(await fs.promises.readFile(collision, 'utf8'), 'created concurrently');
   assert.equal(await fs.promises.readFile(destination, 'utf8'), 'original');
@@ -217,7 +296,7 @@ test('TFTP times out partial uploads and removes temporary files without publish
   await peer.send(request(2, 'partial.bin'), state.port);
   const initial = await peer.receive();
   await peer.send(block(3, 1, Buffer.alloc(512, 12)), initial.remote.port);
-  assert.deepEqual((await peer.receive()).bytes, block(4, 1));
+  await receiveExpected(peer, block(4, 1), { remote: initial.remote, previous: [initial] });
   await until(() => state.events.some(value => value.state === 'failed' && value.message.includes('timed out')));
   await until(() => state.server.status().activeTransfers === 0);
   assert.equal(fs.existsSync(path.join(state.root, 'partial.bin')), false);
@@ -228,14 +307,15 @@ test('TFTP client ERROR and malformed DATA abort an upload and remove its partia
   const state = await fixture(t, { allowWrite: true }), peer = await client(t);
   await peer.send(request(2, 'canceled.bin'), state.port);
   const initial = await peer.receive();
-  await peer.send(block(3, 1, Buffer.alloc(512)), initial.remote.port); await peer.receive();
+  await peer.send(block(3, 1, Buffer.alloc(512)), initial.remote.port); await receiveExpected(peer, block(4, 1), { remote: initial.remote, previous: [initial] });
   await peer.send(block(5, 0, Buffer.from('Canceled by synthetic client\0')), initial.remote.port);
   await until(() => state.server.status().activeTransfers === 0);
   assert.equal(state.events.find(value => value.state === 'failed').message, 'Client ended the transfer.');
   assert.deepEqual(await fs.promises.readdir(state.root), []);
-  await peer.send(request(2, 'malformed.bin'), state.port);
-  const next = await peer.receive();
-  await expectError(peer, Buffer.from([0, 3, 0]), next.remote.port, 4);
+  const malformedPeer = await client(t);
+  await malformedPeer.send(request(2, 'malformed.bin'), state.port);
+  const next = await malformedPeer.receive(); assert.deepEqual(next.bytes, block(4, 0));
+  await expectError(malformedPeer, Buffer.from([0, 3, 0]), next.remote.port, 4, next);
   await until(() => state.server.status().activeTransfers === 0);
   assert.deepEqual(await fs.promises.readdir(state.root), []);
 });
@@ -245,7 +325,7 @@ test('TFTP stop awaits all transfer sockets and cleans partial uploads; the serv
   await peer.send(request(2, 'partial.bin'), state.port);
   const initial = await peer.receive(), tid = initial.remote.port;
   await peer.send(block(3, 1, Buffer.alloc(512)), tid);
-  await peer.receive();
+  await receiveExpected(peer, block(4, 1), { remote: initial.remote, previous: [initial] });
   await state.server.stop();
   assert.equal(state.server.status().running, false); assert.equal(state.server.status().activeTransfers, 0);
   assert.deepEqual(await fs.promises.readdir(state.root), []);

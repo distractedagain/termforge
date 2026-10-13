@@ -32,7 +32,7 @@ Open **View → AI Assistant** to investigate output, explain errors or draft co
 
 Terminal text is attached explicitly with an editable preview. Online sending requires a masked, temporary API key and a sharing opt-in. Completed command suggestions enter the Command Window for review and confirmation against their original terminal. No commands run automatically. See [AI Assistant setup, privacy and limits](docs/AI-ASSISTANT.md).
 
-The 0.6 development checks passed **152 backend tests and 91 headless interface checks**, with no failures or browser console errors. Model responses were simulated; live provider inference and packaged interactive behavior remain unverified.
+The 0.6 development checks passed **156 backend tests and 91 headless interface checks**, with no failures or browser console errors. Model responses were simulated; live provider inference and packaged interactive behavior remain unverified.
 
 ![AI Assistant with a synthetic free online response](docs/images/ai-assistant-online.png)
 
