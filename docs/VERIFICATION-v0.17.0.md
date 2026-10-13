@@ -1,6 +1,6 @@
 # ForgeCRT 0.17.0 verification
 
-Status: all source, native Linux and four-platform packaging gates passed. Publication and public-asset verification are pending.
+Status: [ForgeCRT v0.17.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.17.0). Local tests, all source/build jobs, native Linux checks, publication and anonymous public-asset verification passed.
 
 ## Scope
 
@@ -34,7 +34,11 @@ Native Linux Electron verified persistent synchronization across reconnects, inf
 
 ## Publication
 
-The eight installers/archives and four build records passed packaging at the source above. The verified publisher and anonymous public release checks remain pending; no public v0.17 release is claimed here yet. The source tag will remain bound to the tested build commit; later documentation-only corrections and verification results may appear on main.
+The [verified publisher](https://github.com/distractedagain/termforge/actions/runs/38484157733) passed after checking eight installers/archives and four platform build records. Release ID `412192670` is a published preview. Anonymous verification completed at `2026-10-13T23:26:49.895Z`: source tag `v0.17.0` points to `ccb8aa3340b024225c45111a3a1919a34dea6eaf`; all thirteen assets and twelve checksum entries matched.
+
+The checksum manifest and four build records were downloaded anonymously and independently hashed. The eight installer hashes were compared with GitHub's recorded SHA-256 asset digests; installer bytes were not downloaded or rehashed in this separate public check. This verifies publication/provenance, not installation behavior.
+
+The release tag stays at the tested build commit. Main also contains documentation-only verification results and a clarification of final storage-commit uncertainty: an atomic baseline save can precede a later flush or lease-release error. Such an error requires inspecting the saved revision; it does not imply an unverified baseline was accepted.
 
 ## Evidence boundaries
 

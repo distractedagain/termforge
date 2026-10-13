@@ -29,7 +29,7 @@ This order is an engineering recommendation based on ForgeCRT's current architec
 
 ## Evidence boundaries
 
-Version 0.17 verification is in progress; see [its evidence record](VERIFICATION-v0.17.0.md). Saved pairs remain explicit and SFTP-only; two-way/mirror resume and background scheduling are still missing.
+Version 0.17 is published after all four source/build jobs, 314 headless UI checks, native Linux recovery/sync/single-instance checks, and anonymous public-asset verification passed; see [its evidence record](VERIFICATION-v0.17.0.md). Saved pairs remain explicit and SFTP-only; two-way/mirror resume and background scheduling are still missing.
 
 Version 0.16 passed all four source CI jobs and installer builds, 300 headless interface checks, and native Linux checks for folder recovery, two-way conflict choices, reviewed mirroring and FTP/FTPS. The public release source tag, thirteen assets and twelve checksum entries were verified. The [0.16 verification record](VERIFICATION-v0.16.0.md) distinguishes local tests, headless UI, native Linux IPC, platform builds and remaining installed-app/credential-storage gaps. See [file-transfer limits](SECURE-CONNECTIONS.md) and the broader [feature inventory](FEATURES.md).
 

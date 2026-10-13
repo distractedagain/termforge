@@ -2,7 +2,7 @@
 
 ForgeCRT is an independently written, MIT-licensed terminal client. It uses public feature descriptions and original code, not VanDyke source code, disassembly or artwork. Its original workspace includes a separate native Quick Connect window and docked manager layout informed by the SecureCRT macOS workflow. The overall feature goal covers applicable capabilities on macOS, Windows and Linux. The [sourced parity ledger](SECURECRT-PARITY.md) tracks requirements and gaps without claiming complete equivalence.
 
-## Current implementation scope — ForgeCRT 0.17.0
+## Current release scope — ForgeCRT 0.17.0
 
 | Workflow | ForgeCRT implementation | Limits |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ JSON import adds sessions and assigns fresh IDs on collisions, remapping snapsho
 
 ## Verification and distribution
 
-Version 0.17.0 adds FTP/FTPS folder copy/merge and durable file/folder recovery, plus persistent SFTP two-way synchronization baselines and reviewed deletion propagation. Verification is in progress; see [0.17 evidence](VERIFICATION-v0.17.0.md). The latest verified public release remains 0.16.0 until those gates complete.
+Version 0.17.0 adds FTP/FTPS folder copy/merge and durable file/folder recovery, plus persistent SFTP two-way synchronization baselines and reviewed deletion propagation. All four source CI jobs and installer builds passed at `ccb8aa3340b024225c45111a3a1919a34dea6eaf`: 611 backend tests on each Mac and Linux, 592 with 19 expected skips on Windows, and 314 interface checks plus native Linux recovery/sync/single-instance checks. [Version 0.17 is published](https://github.com/distractedagain/termforge/releases/tag/v0.17.0), with anonymous source-tag, thirteen-asset and twelve-checksum verification. See [0.17 evidence](VERIFICATION-v0.17.0.md).
 
 Version 0.16.0 adopts the ForgeCRT name and adds durable SFTP folder recovery, hybrid SCP/SFTP recovery, explicit two-way synchronization, reviewed mirroring and FTP/FTPS individual-file transfers. All four source CI jobs and installer builds passed at `cab6f7edc9d6cddf20381f822b2dc3da95f17026`. Both Macs and Linux passed 550 backend tests each; Windows passed 532 with 18 expected skips. Linux passed 300 interface checks and native Electron transfer, branding and storage-identity checks. [ForgeCRT v0.16.0 is published](https://github.com/distractedagain/termforge/releases/tag/v0.16.0); anonymous verification confirmed its source tag, thirteen assets and twelve checksum entries. See [0.16 verification](VERIFICATION-v0.16.0.md) for completed checks and explicit installed-app/credential-storage limits.
 
